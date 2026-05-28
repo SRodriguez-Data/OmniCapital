@@ -2,9 +2,8 @@ name: Quantum Bot Sentinel
 
 on:
   schedule:
-    # Se ejecuta a las 13:00 UTC (09:00 AM hora local) y 20:00 UTC (16:00 PM hora local) de Lunes a Viernes
     - cron: '0 13,20 * * 1-5'
-  workflow_dispatch: # Este comando te crea un botón mágico para correrlo manualmente cuando quieras
+  workflow_dispatch:
 
 jobs:
   market-scan:
