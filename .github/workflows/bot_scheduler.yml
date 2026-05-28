@@ -1,0 +1,35 @@
+name: Quantum Bot Sentinel
+
+on:
+  schedule:
+    # Se ejecuta a las 13:00 UTC (09:00 AM hora local) y 20:00 UTC (16:00 PM hora local) de Lunes a Viernes
+    - cron: '0 13,20 * * 1-5'
+  workflow_dispatch: # Este comando te crea un botón mágico para correrlo manualmente cuando quieras
+
+jobs:
+  market-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Extraer código del repositorio
+      uses: actions/checkout@v4
+
+    - name: Configurar Entorno Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Instalar Dependencias Cuantitativas
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Ejecutar Motor Principal Serverless
+      env:
+        # Inyección segura de credenciales
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+        ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+      run: |
+        python quantum_trader_serverless.py
