@@ -3,4 +3,4 @@ pandas
 numpy
 alpaca-trade-api
 requests
-alpha_vantage
+alpha-vantage==2.3.1
