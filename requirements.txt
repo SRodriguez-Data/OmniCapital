@@ -1,5 +1,6 @@
-﻿yfinance
+yfinance
 pandas
 numpy
 alpaca-trade-api
 requests
+alpha_vantage
