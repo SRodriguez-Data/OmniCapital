@@ -4,7 +4,8 @@ import requests
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from alpaca_trade_api.rest import REST, TimeFrame
+from alpaca_trade_api.rest import REST
+from alpaca_trade_api.timeframe import TimeFrame
 
 # ==========================================
 # CONFIGURACIÓN Y CREDENCIALES
