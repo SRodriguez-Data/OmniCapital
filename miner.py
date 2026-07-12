@@ -1,7 +1,6 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import sqlite3
 import time
 import logging
 import os
@@ -9,9 +8,19 @@ from datetime import datetime
 import urllib.request 
 import requests
 from io import StringIO
+from dotenv import load_dotenv
+from supabase import create_client, Client
+
+load_dotenv()
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_SECRET_KEY")
+
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+else:
+    supabase = None
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-DB_NAME = "quantum_database.db"
 
 
 def obtener_universo_masivo() -> list[str]:
@@ -144,20 +153,15 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     return out
 
-def crear_indices_sql(conn):
-    cursor = conn.cursor()
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ticker ON precios_historicos(ticker)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_date ON precios_historicos(date)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ticker_date ON precios_historicos(ticker, date)")
-    conn.commit()
-
 def run_miner(modo_incremental=True):
-    # Ya sea incremental o histórico, siempre extraemos 5 años para máxima precisión matemática
+    if not supabase:
+        logging.error("❌ Faltan credenciales de Supabase en .env")
+        return
+        
     periodo = "5y"
-    logging.info(f"⛏️ Minero Cuantitativo V2: {'INCREMENTAL (Calculando 5 años)' if modo_incremental else 'HISTÓRICO (5 años)'}")
+    logging.info(f"⛏️ Minero Cuantitativo V2 (Supabase): {'INCREMENTAL' if modo_incremental else 'HISTÓRICO'}")
     
     TICKERS_A_MINAR = obtener_universo_masivo()
-    conn = sqlite3.connect(DB_NAME)
     
     exitos = 0
     fallos = 0
@@ -180,22 +184,26 @@ def run_miner(modo_incremental=True):
                 columnas_limpias.append(nombre_base.lower().replace(" ", "_"))
             df.columns = columnas_limpias
             
-            # PRE-CÁLCULO MATEMÁTICO (Aquí ocurre la magia)
+            # PRE-CÁLCULO MATEMÁTICO
             df = compute_indicators(df)
             
-            # Lógica Incremental: Solo guardamos fechas que no estén ya en la DB
+            # Limpiar NaNs para JSON serialization
+            df = df.replace({float('nan'): None})
+            df['date'] = df['date'].astype(str)
+            
             if modo_incremental:
                 try:
-                    query_max = "SELECT MAX(date) FROM precios_historicos WHERE ticker = ?"
-                    max_date = conn.execute(query_max, (ticker,)).fetchone()[0]
-                    if max_date:
-                        # Cortamos el dataframe para guardar solo los días nuevos
+                    res = supabase.table("precios_historicos").select("date").eq("ticker", ticker).order("date", desc=True).limit(1).execute()
+                    if res.data and len(res.data) > 0:
+                        max_date = res.data[0]['date']
                         df = df[df['date'] > max_date]
-                except sqlite3.OperationalError:
-                    pass # La tabla aún no existe, seguimos normal
+                except Exception as e:
+                    logging.warning(f"No se pudo obtener max_date para {ticker}: {e}")
 
             if not df.empty:
-                df.to_sql("precios_historicos", conn, if_exists="append", index=False)
+                records = df.to_dict(orient='records')
+                # Enviar a Supabase en bloques si es muy grande, pero 1 ticker max 5 años = 1250 filas (es seguro en un solo insert)
+                supabase.table("precios_historicos").insert(records).execute()
                 exitos += 1
             else:
                 sin_cambios += 1
@@ -203,18 +211,10 @@ def run_miner(modo_incremental=True):
             time.sleep(0.5) 
             
         except Exception as e:
-            import traceback
-            logging.error(f"Error en {ticker}: {e}\n{traceback.format_exc()}")
+            logging.error(f"Error en {ticker}: {e}")
             fallos += 1
 
-    crear_indices_sql(conn)
-    conn.close()
-    logging.info(f"🚀 Minería Data Warehouse finalizada. Actualizados: {exitos}, Al día (sin cambios): {sin_cambios}, Fallos: {fallos}.")
+    logging.info(f"🚀 Minería Data Warehouse (Supabase) finalizada. Actualizados: {exitos}, Al día (sin cambios): {sin_cambios}, Fallos: {fallos}.")
 
 if __name__ == "__main__":
-    modo_inicial = True
-    if not os.path.exists(DB_NAME):
-        modo_inicial = False
-        logging.info("📁 No DB previa. Se descargará el universo histórico de 5 años.")
-    
-    run_miner(modo_incremental=modo_inicial)
+    run_miner(modo_incremental=True)

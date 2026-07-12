@@ -1,10 +1,15 @@
 import os
 import time
+import importlib
 import requests
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from alpaca_trade_api.rest import REST
+REST = None
+try:
+    REST = importlib.import_module("alpaca_trade_api").REST
+except ModuleNotFoundError:
+    REST = None
 
 # ==========================================
 # CONFIGURACIÓN Y CREDENCIALES

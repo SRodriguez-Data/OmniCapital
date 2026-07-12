@@ -1207,7 +1207,7 @@ class LLMClient:
         Construye un prompt estructurado con los datos financieros
         y consulta al LLM para obtener un análisis conversacional.
         """
-        # Datos técnicos actuales (usar '3y' para aprovechar el caché de predict_ticker y no romper la EMA200)
+        # Datos técnicos actuales
         df = DataFetcher.get_prices(ticker, period="3y")
         if not df.empty:
             df_ind = compute_indicators(df)
@@ -1215,64 +1215,48 @@ class LLMClient:
                 last   = df_ind.iloc[-1]
                 price  = float(last.get("Close", last.get("close", 0)))
                 rsi    = float(last.get("rsi", 50))
-                macd   = float(last.get("macd", 0))
-                bb_pct = float(last.get("bb_pct_b", 0.5))
+                distancia_ema200 = float(last.get("pvc_ema200", 0.0))
             else:
-                price = rsi = macd = bb_pct = 0
+                price = rsi = distancia_ema200 = 0
         else:
-            price = rsi = macd = bb_pct = 0
+            price = rsi = distancia_ema200 = 0
 
-        pred_txt = (
-            f"Predicción IA (horizonte {pred.horizon} días): {pred.label} "
-            f"(confianza {pred.confidence*100:.1f}%, accuracy CV {pred.accuracy*100:.1f}%)"
-            if pred else "Predicción: no disponible"
-        )
-
-        if isinstance(portfolio, dict):
-            portfolio = list(portfolio.keys())
-        portfolio_context = ", ".join(portfolio[:8])
-        
-        # Lógica visual para siempre mostrar zonas de soporte y resistencia (límites)
-        if pred:
-            if "ALCISTA" in pred.label:
-                limit_txt = f"${pred.limit_price:.4f} (COMPRA)"
-            elif "BAJISTA" in pred.label:
-                limit_txt = f"${pred.limit_price:.4f} (VENTA)"
-            else:
-                limit_txt = "N/A (MANTENER)"
-        else:
-            limit_txt = "N/D"
-    
+        # PASO 1: EXTRACCIÓN DE DATOS
         yield_pct = info.get('div_yield') or 0.0
+        
+        # PASO 2: EL SÚPER PROMPT MAESTRO
+        prompt = f"""Actúa como un Comité de Inversión Institucional consolidando las metodologías de Citadel (Técnico), Bain (Ventaja Competitiva), Harvard (Dividendos) y JPMorgan (Proyecciones).
+Tu objetivo es analizar {ticker} ({info.get('name', ticker)}) para el portafolio de Hernán. Responde ESTRICTAMENTE EN ESPAÑOL, usando texto plano (PROHIBIDO usar asteriscos o negritas de markdown), utilizando emojis como viñetas.
 
-        prompt = f"""Actúa como un Analista Macro Cuantitativo Institucional (nivel Hedge Fund).
-El usuario tiene este portafolio actual: {portfolio_context}.
-Pregunta sobre {ticker}: "{user_msg}"
-
-Regla de Acumulación Value: Si el activo tiene un Score Fundamental alto (>= 7.0) pero un RSI bajo o tendencia bajista de corto plazo, bajo NINGUNA CIRCUNSTANCIA debes sugerir que es una mala inversión o advertir en contra de su compra. Debes interpretar esta discrepancia como una Oportunidad de Valor. Recomienda explícitamente aplicar compras escalonadas (Dollar Cost Averaging) para aprovechar el descuento en el precio y aumentar el Dividend Yield futuro.
-
-DATOS CUANTITATIVOS ACTUALES ({info.get('name', ticker)}):
-- Precio: ${price:.2f} {info.get('currency','USD')}
-- Orden Limit Sugerida: {limit_txt}
+DATOS DUROS INYECTADOS:
+- Precio Actual: ${price:.2f}
+- P/E: {info.get('pe_forward', 'N/D')}
+- Deuda/Equity: {info.get('debt_to_equity', 'N/D')}
+- Dividend Yield: {yield_pct:.2f}% (FCF Payout: {info.get('fcf_payout_ratio', 'N/D')})
 - RSI(14): {rsi:.1f}
-- P/E forward: {info.get('pe_forward','N/D')} | P/Book: {info.get('pb','N/D')}
-- Yield: {yield_pct:.2f}% | Beta: {info.get('beta','N/D')}
-- Div Growth (5y): {info.get('div_growth_5y', 'N/D')} | FCF Payout Ratio: {info.get('fcf_payout_ratio', 'N/D')}
-- Score Fundamental Interno: {pred.fund_score if pred else 'N/D'}/10.0
-- {pred_txt}
-- BACKTESTING HISTÓRICO: {pred.backtest_msg if pred else 'N/D'}
+- Posición vs EMA200: El precio está a una distancia de {distancia_ema200*100:.1f}% de su media móvil de 200 días.
 
-Al analizar la sustentabilidad del dividendo (Seeking Alpha Standard), prioriza y elogia empresas que tengan un historial comprobado de aumento de dividendos y que cubran sus pagos holgadamente con Flujo de Caja Libre. Las ganancias pueden manipularse; el efectivo no. Excepción de Mercado: Las acciones chilenas (.SN) pagan dividendos variables atados legalmente a utilidades. Si un .SN tiene un crecimiento de dividendos negativo o volátil, NO lo penalices por falta de crecimiento, evalúalo por su Yield histórico y su FCF/Payout.
+EVALÚA Y RESPONDE CON ESTA ESTRUCTURA EXACTA:
 
-Tu tarea es entregar un análisis que vaya más allá de los números, cruzando el análisis técnico con el riesgo cualitativo.
-Responde en español, de forma muy directa y estructurada (máx 130 palabras). NO uses asteriscos (*), ni negritas, ni formato markdown. Usa emojis simples para separar secciones.
+🏛️ 1. VALORACIÓN Y FUNDAMENTALES (Estilo JPMorgan)
+- Comparativa P/E: Menciona el P/E actual y compáralo explícitamente con el P/E promedio histórico de su sector. ¿Está alto, bajo o justo?
+- Crecimiento: Analiza la tendencia de crecimiento de ingresos operacionales de los últimos 5 años (usa tu conocimiento de la empresa).
+- Salud Financiera: Evalúa su Deuda sobre Capital actual. ¿Es un riesgo estructural?
 
-Estructura obligatoria:
-📊 RESUMEN TÉCNICO Y BACKTEST: Combina la predicción de la IA, el backtest histórico y el RSI en una sola frase.
-🌍 CONTEXTO MACRO Y COMPETITIVO: Evalúa el "foso económico" de la empresa. ¿Tiene riesgo de obsolescencia tecnológica (tipo Blockbuster)? ¿Cómo le afecta la inflación, tasas de interés o geopolítica actual?
-⚖️ VEREDICTO DE RIESGO: Relación riesgo/beneficio actual y si encaja bien en el portafolio.
+💰 2. SOSTENIBILIDAD DEL DIVIDENDO (Estilo Harvard Endowment)
+- Puntualidad y Consistencia: ¿Es una empresa que paga dividendos históricamente sin cortes abruptos? 
+- Calificación de Seguridad: Asigna una nota del 1 al 10 a la seguridad de su dividendo basándote en su FCF Payout y su industria.
 
-No des consejos financieros regulados, sé un analista implacable y objetivo."""
+🏰 3. VENTAJA COMPETITIVA Y RIESGO (Estilo Bain & Bridgewater)
+- Calificación de 'Moat' (Foso): Clasifícalo explícitamente como DÉBIL, MODERADO o FUERTE (evaluando marca, costos de cambio o efecto red).
+- Calificación de Riesgo Global: Asigna un número del 1 al 10 (1 = Libre de riesgo, 10 = Quiebra inminente). Justifica con un riesgo clave.
+
+🎯 4. ACCIÓN DEL PRECIO Y OBJETIVOS (Estilo Citadel)
+- Acción del Precio: Interpreta el RSI y la EMA200 actuales. ¿Quién tiene el control, compradores o vendedores?
+- Price Targets 12 Meses: Da una estimación de precio Alcista (Bull) y Bajista (Bear).
+- Ejecución de Trading: Define una Zona de Entrada ideal (Rango de precios) y una sugerencia estricta de Stop-Loss.
+
+Haz que el análisis sea implacable, objetivo y directo. No uses lenguaje de relleno."""
 
         return self.query(prompt)
 
@@ -2237,63 +2221,21 @@ async def job_morning_screener(ctx: ContextTypes.DEFAULT_TYPE):
             elif not ticker.endswith(".SN") and volumen_nominal < 500_000:
                 continue
 
-            # Consultamos fundamentales a Yahoo Finance
-            info = DataFetcher.get_info(ticker) 
-            
-            # Filtro "Anti Value-Trap" (Deuda)
-            # Excluimos si la Deuda/Equity es mayor a 1.5 (150% en Yahoo Finance)
-            debt = info.get("debt_to_equity") or 0.0
-            if debt > 150.0:
-                continue
-            
-            yield_pct = info.get("div_yield") or 0.0
-                
-            pe = info.get("pe_forward") or 999
-            payout = info.get("payout_ratio") or 1.0
-            margin = info.get("profit_margin") or 0.0
-            
-            # MATRIZ HÍBRIDA DE PERFILES
-            is_growth = False
-            is_value_global = False
-            is_value_chile = False
-            
-            margin_safety = info.get("margin_safety")
-            sector = info.get("sector", "").lower()
-            is_tech = ("technology" in sector or "software" in sector)
-
-            # Perfil Growth (Tecnología y Crecimiento): EXIGE TENDENCIA ALCISTA
-            if pe < 60 and margin > 0.15 and distancia_ema200 >= 0:
-                is_growth = True
-                
-            # Perfil Value Global (Internacionales): EXIGE TENDENCIA ALCISTA
-            if not ticker.endswith(".SN") and pe < 25 and yield_pct > 2.0 and payout < 0.85 and distancia_ema200 >= 0:
-                is_value_global = True
-                
-            # Perfil Value Chile (Mercado Local): NO EXIGE TENDENCIA (Permite comprar en descuentos profundos)
-            if ticker.endswith(".SN") and pe < 15 and yield_pct > 6.0 and payout <= 1.0:
-                is_value_chile = True
-
-            # El activo debe cumplir con AL MENOS UNO de los perfiles
-            if not (is_growth or is_value_global or is_value_chile):
+            # Filtro 100% Técnico (Relajado)
+            # 1. Tendencia: Permite caídas de hasta 10% por debajo de la EMA200 (captura correcciones más profundas)
+            if distancia_ema200 < -0.10:
                 continue
                 
-            # Regla de Hierro: Margen de Seguridad > 0% para perfiles Value (excepto Tech/Growth)
-            if not is_growth and not is_tech:
-                if margin_safety is None or margin_safety <= 0:
-                    continue
+            # 2. Oportunidad: Busca consolidaciones o retrocesos normales (RSI < 50), ya no exige pánico extremo
+            if rsi > 50:
+                continue
                 
-            # Calcular score dinámico según perfil
-            if is_value_global or is_value_chile:
-                score = yield_pct + (50 - rsi)
-            else:
-                score = (margin * 100) + (50 - rsi)
+            # Score puramente técnico de momentum
+            score = (50 - rsi) + (distancia_ema200 * 100)
 
             candidatos.append({
                 'ticker': ticker, 'score': score, 'price': price, 
-                'rsi': rsi, 'yield': yield_pct, 'pe': pe,
-                'margin_safety': margin_safety if margin_safety is not None else -999.0,
-                'div_growth_5y': info.get("div_growth_5y"),
-                'fcf_payout_ratio': info.get("fcf_payout_ratio")
+                'rsi': rsi, 'distancia_ema200': distancia_ema200
             })
         except Exception:
             continue
@@ -2306,8 +2248,8 @@ async def job_morning_screener(ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Top 5 de las mejores oportunidades ordenadas con prioridad al Margen de Seguridad
-    candidatos = sorted(candidatos, key=lambda x: (x['margin_safety'], x['yield'], x['score']), reverse=True)[:5]
+    # Top 5 de las mejores oportunidades ordenadas con prioridad al Score Técnico
+    candidatos = sorted(candidatos, key=lambda x: x['score'], reverse=True)[:5]
     
     # Registrar en memoria anti-repetición (Cooldown)
     today_str = dt.datetime.utcnow().strftime("%Y-%m-%d")
@@ -2315,29 +2257,48 @@ async def job_morning_screener(ctx: ContextTypes.DEFAULT_TYPE):
         cooldown_list[c['ticker']] = today_str
     save_cooldown_list(cooldown_list)
 
-    prompt_candidatos = "\n".join([f"- {c['ticker']}: Precio ${c['price']:.2f}, Margin Safety {c['margin_safety']:.1f}%, RSI {c['rsi']:.1f}, Yield {c['yield']:.1f}%, P/E {c['pe']}, Div Growth 5y {c.get('div_growth_5y', 'N/A')}, FCF Payout {c.get('fcf_payout_ratio', 'N/A')}" for c in candidatos])
+    prompt_candidatos = "\n".join([f"- {c['ticker']}: Precio ${c['price']:.2f}, RSI {c['rsi']:.1f}, Distancia EMA200 {c['distancia_ema200']*100:.1f}%, Score {c['score']:.1f}" for c in candidatos])
     
-    prompt_macro = f"""Eres un Analista Cuantitativo de un Hedge Fund agresivo. Tu reporte debe ser directo, basado en datos duros y sin relleno corporativo ni generalidades macroeconómicas (prohibido usar frases como 'entorno desafiante' o 'incertidumbre global').
-Tu algoritmo filtró estas 5 máximas oportunidades globales:
+    prompt_macro = f"""Eres el Estratega Jefe del Fondo de Inversión. Tienes en tu escritorio el reporte del equipo Quant con las 5 máximas anomalías del mercado hoy:
 {prompt_candidatos}
 
-Estructura tu respuesta estrictamente en:
-IMPORTANTE: Responde estrictamente en texto plano. PROHIBIDO usar asteriscos (*), negritas, o subrayados (_). Usa emojis para estructurar visualmente.
-1. DIAGNÓSTICO DIRECTO: Nombra qué sectores están representados en el Top 5 y por qué están sobrevendidos matemáticamente.
-2. LA MEJOR OPORTUNIDAD: Elige UNA acción del Top 5. Justifica usando exclusivamente sus métricas (P/E, RSI, Yield, Precio). Si la empresa es Value, enfatiza cuánto descuento real tiene frente a su valor intrínseco de Graham (Margin Safety), priorizando empresas con largo historial de aumento de dividendos y que cubran sus pagos holgadamente con Flujo de Caja Libre. Si es Growth o Tech, justifica por su Momentum y P/E relativo. Excepción de Mercado: Las acciones chilenas (tickers que terminan en .SN) pagan dividendos variables atados legalmente a las utilidades anuales. Si una acción .SN tiene un Div Growth negativo o volátil, NO la penalices severamente, evalúala por su Yield histórico y su FCF/Payout.
-3. RIESGOS REALES: No menciones riesgos genéricos ('tasas de interés'). Menciona un riesgo específico del modelo de negocio de la empresa elegida (ej. 'riesgo de tipo de cambio en mercados emergentes', 'caída en precio del cobre', etc.)."""
+Tu trabajo es filtrar el ruido y entregar el reporte ejecutivo de pre-apertura aplicando los frameworks de Renaissance (Anomalías), Bain (Foso Competitivo) y Citadel (Setup Técnico).
+Responde ESTRICTAMENTE EN ESPAÑOL, en texto plano (PROHIBIDO usar asteriscos, negritas o subrayados de markdown), estructurando con emojis. SÉ MUY BREVE Y EJECUTIVO (MÁXIMO 150 PALABRAS EN TOTAL).
+
+ESTRUCTURA OBLIGATORIA:
+
+🔭 1. VISIÓN DEL RADAR (Estilo Renaissance)
+- Diagnóstico general: ¿Qué patrón técnico unifica a estos 5 activos hoy? Habla de la discrepancia matemática entre su RSI castigado y su tendencia mayor (distancia EMA200). 
+
+🏆 2. LA SELECCIÓN DEL FONDO (Estilo Bain & Harvard)
+- La Ganadora: Elige UNA sola acción como la mejor oportunidad asimétrica.
+- Justificación del Foso (Moat): Explica por qué el modelo de negocio de esta empresa específica tiene ventajas competitivas más fuertes que el resto para sobrevivir esta caída.
+- Resiliencia: Si paga dividendos, menciona cómo su flujo de caja protege la entrada. (Nota: Si es chilena .SN, valora su historial de Yield).
+
+🎯 3. SETUP CUANTITATIVO (Estilo Citadel)
+- Zona de entrada táctica.
+- Amenaza Macro: Un factor macroeconómico real (tasas, geopolítica, commodities) que debamos vigilar para este sector.
+- Nivel de Invalidación Técnico (Stop-Loss estricto si se rompe la tesis)."""
 
     try:
         analisis_ia = llm.query(prompt_macro)
         
         reporte_final = f"☀️ *INFORME DE MERCADO GLOBAL*\n{'─'*40}\n"
-        reporte_final += "El Data Warehouse analizó ~600 activos en milisegundos. Top 5 anomalías de valor encontradas:\n\n"
+        reporte_final += "El Data Warehouse analizó ~600 activos en milisegundos. Top 5 anomalías técnicas encontradas:\n\n"
         for c in candidatos:
-            reporte_final += f"📍 *{c['ticker']}* | Cotización: ${c['price']:.2f} | RSI: {c['rsi']:.1f} | Dividendo: {c['yield']:.1f}%\n"
+            reporte_final += f"📍 *{c['ticker']}* | Cotización: ${c['price']:.2f} | RSI: {c['rsi']:.1f} | Dist EMA200: {c['distancia_ema200']*100:.1f}%\n"
         
-        reporte_final += f"\n🧠 *PERSPECTIVA FUNDAMENTAL Y MACRO:*\n{analisis_ia}"
+        reporte_final += f"\n🧠 *PERSPECTIVA TÉCNICA (PRICE ACTION):*\n{analisis_ia}"
         
-        await ctx.bot.send_message(chat_id=chat_id_destino, text=reporte_final, parse_mode=ParseMode.MARKDOWN)
+        # Telegram limit is 4096. We chunk at 4000 to be safe.
+        chunk_size = 4000
+        if len(reporte_final) > chunk_size:
+            for i in range(0, len(reporte_final), chunk_size):
+                chunk = reporte_final[i:i+chunk_size]
+                await ctx.bot.send_message(chat_id=chat_id_destino, text=chunk, parse_mode=ParseMode.MARKDOWN)
+        else:
+            await ctx.bot.send_message(chat_id=chat_id_destino, text=reporte_final, parse_mode=ParseMode.MARKDOWN)
+            
         log.info("✅ Reporte proactivo enviado con éxito.")
     except Exception as e:
         log.error(f"Error en la generación del reporte: {e}")
