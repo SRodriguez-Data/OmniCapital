@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import DashboardClient from './DashboardClient';
 
-export const revalidate = 60; // Revalidate every minute
+export const dynamic = 'force-dynamic';
 
 export default async function Home() {
   // Fetch latest market data
