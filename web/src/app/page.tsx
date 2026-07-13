@@ -14,7 +14,7 @@ export default async function Home() {
   if (error) {
     console.error("Supabase Error:", error);
     return (
-      <div className="flex h-screen items-center justify-center bg-background text-bearish">
+      <div className="flex h-screen items-center justify-center bg-[#09090b] text-[#f87171] font-mono">
         <h2>Error al conectar con la base de datos (Supabase).</h2>
         <p>{error.message}</p>
       </div>
@@ -62,17 +62,19 @@ export default async function Home() {
   const efficientFrontier = frontierData && frontierData.length > 0 ? frontierData[0].puntos_json : null;
 
   return (
-    <main className="min-h-screen bg-[#0a0a0a] text-white p-4 md:p-8">
-      <header className="mb-8 flex flex-col md:flex-row items-start md:items-center justify-between border-b border-white/10 pb-6">
+    <main className="min-h-screen bg-[#09090b] text-[#fafafa] p-4 md:p-8 font-sans">
+      <header className="mb-6 flex flex-col md:flex-row items-start md:items-end justify-between border-b border-[#27272a] pb-4">
         <div>
-          <h1 className="text-4xl font-extrabold tracking-tight bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">
-            Quantum Trader
+          <h1 className="text-3xl font-bold tracking-tight text-[#e4e4e7]">
+            QUANTUM TRADER TERMINAL
           </h1>
-          <p className="text-gray-400 mt-2 font-medium">Terminal Cuantitativa Híbrida & Inteligencia Artificial</p>
+          <p className="text-[#a1a1aa] mt-1 font-mono text-sm uppercase tracking-widest">
+            Institutional Quantitative Alpha
+          </p>
         </div>
         {latestAiReport && (
-          <div className="mt-4 md:mt-0 text-sm bg-white/5 backdrop-blur-md px-4 py-2 rounded-full border border-white/10 text-gray-300 shadow-xl">
-            Último Escaneo: {new Date(latestAiReport.fecha).toLocaleString('es-CL', { timeZone: 'America/Santiago' })}
+          <div className="mt-4 md:mt-0 text-xs font-mono bg-[#18181b] px-3 py-1.5 border border-[#27272a] text-[#71717a] uppercase">
+            Data Date: {new Date(latestAiReport.fecha).toLocaleString('en-US', { timeZone: 'America/Santiago' })}
           </div>
         )}
       </header>

@@ -1,28 +1,26 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
-import { Activity, TrendingUp, ShieldAlert, BarChart3, BrainCircuit, Target, Lightbulb, AlertTriangle, Globe, X } from 'lucide-react';
+import React, { useState } from 'react';
+import { Activity, ShieldAlert, BarChart3, Target, Globe, MapPin, Briefcase } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, ScatterChart, Scatter, ZAxis
 } from 'recharts';
-import { motion, AnimatePresence } from 'framer-motion';
 
-interface MarketData {
-  id?: number;
-  date?: string;
+interface Candidate {
   ticker: string;
-  close?: number;
-  price?: number;
+  price: number;
   rsi: number;
-  pvc_ema200?: number;
-  distancia_ema200?: number;
-  vol_20d?: number;
-  score?: number;
+  distancia_ema200: number;
+  score: number;
+  bollinger_upper?: number;
+  bollinger_lower?: number;
+  ema200_abs?: number;
+  signal?: 'BUY' | 'SELL' | 'HOLD';
 }
 
 interface AiReport {
   fecha: string;
-  candidatos_json: MarketData[];
+  candidatos_json: any; // Can be array (old) or {us: Candidate[], cl: Candidate[]} (new)
   vision_radar: string;
   seleccion_fondo: string;
   setup_tecnico: string;
@@ -36,358 +34,256 @@ export default function DashboardClient({
   correlationMatrix,
   efficientFrontier
 }: { 
-  initialData: MarketData[], 
+  initialData: any[], 
   aiReport: AiReport | null,
   correlationMatrix: Record<string, Record<string, number>> | null,
   efficientFrontier: any[] | null
 }) {
-  
+  const [activeTab, setActiveTab] = useState<'US' | 'CL' | 'PORTFOLIO'>('PORTFOLIO');
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
 
-  const opportunities = useMemo(() => {
-    if (aiReport && aiReport.candidatos_json && aiReport.candidatos_json.length > 0) {
-      return aiReport.candidatos_json;
-    }
-    
-    return initialData
-      .filter(d => d.rsi < 50 && (d.pvc_ema200 || 0) > -0.15)
-      .map(d => ({
-        ...d,
-        price: d.close || 0,
-        distancia_ema200: d.pvc_ema200 || 0,
-        score: (50 - d.rsi) + ((d.pvc_ema200 || 0) * 100)
-      }))
-      .sort((a, b) => (b.score || 0) - (a.score || 0))
-      .slice(0, 5);
-  }, [initialData, aiReport]);
+  // Parse candidates from AI report
+  const rawCandidates = aiReport?.candidatos_json;
+  let candidatesUS: Candidate[] = [];
+  let candidatesCL: Candidate[] = [];
+  
+  if (Array.isArray(rawCandidates)) {
+    candidatesUS = rawCandidates.filter(c => !c.ticker.endsWith('.SN'));
+    candidatesCL = rawCandidates.filter(c => c.ticker.endsWith('.SN'));
+  } else if (rawCandidates && typeof rawCandidates === 'object') {
+    candidatesUS = rawCandidates.us || [];
+    candidatesCL = rawCandidates.cl || [];
+  }
 
-  const chartData = useMemo(() => {
-    return opportunities.map(o => ({
-      name: o.ticker,
-      RSI: parseFloat(o.rsi.toFixed(1)),
-      EMA_Dist: parseFloat(((o.distancia_ema200 || 0) * 100).toFixed(1))
-    }));
-  }, [opportunities]);
-
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: { 
-      opacity: 1, 
-      transition: { staggerChildren: 0.1 } 
-    }
-  };
-
-  const itemVariants = {
-    hidden: { y: 20, opacity: 0 },
-    visible: { y: 0, opacity: 1, transition: { type: "spring", stiffness: 100 } }
-  };
-
-  return (
-    <motion.div 
-      className="space-y-8 pb-12"
-      variants={containerVariants}
-      initial="hidden"
-      animate="visible"
-    >
-      
-      {/* AI HERO SECTION */}
-      {aiReport && (
-        <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* Top Pick / Selection */}
-          <div className="col-span-1 lg:col-span-2 relative overflow-hidden rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-950/40 to-slate-900/80 p-8 shadow-2xl backdrop-blur-xl">
-            <div className="absolute top-0 right-0 -mt-4 -mr-4 h-24 w-24 rounded-full bg-emerald-500/20 blur-2xl"></div>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="bg-emerald-500/20 p-3 rounded-xl border border-emerald-500/40">
-                <BrainCircuit className="h-6 w-6 text-emerald-400" />
-              </div>
-              <h2 className="text-2xl font-bold bg-gradient-to-r from-emerald-300 to-teal-300 bg-clip-text text-transparent">
-                La Selección del Fondo
-              </h2>
-            </div>
-            <p className="text-gray-300 text-lg leading-relaxed font-light">
-              {aiReport.seleccion_fondo}
-            </p>
-          </div>
-
-          <div className="col-span-1 space-y-6">
-            {/* Macro Context */}
-            {aiReport.contexto_macro && (
-              <div className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 p-6 shadow-xl backdrop-blur-md">
-                <div className="flex items-center gap-3 mb-3">
-                  <Globe className="h-5 w-5 text-indigo-400" />
-                  <h3 className="text-lg font-semibold text-indigo-100">Contexto Macro</h3>
-                </div>
-                <p className="text-indigo-200/80 text-sm leading-relaxed line-clamp-4 hover:line-clamp-none transition-all cursor-pointer">
-                  {aiReport.contexto_macro}
-                </p>
-              </div>
-            )}
-
-            {/* Radar Vision */}
-            <div className="rounded-2xl border border-blue-500/20 bg-blue-950/20 p-6 shadow-xl backdrop-blur-md">
-              <div className="flex items-center gap-3 mb-3">
-                <Lightbulb className="h-5 w-5 text-blue-400" />
-                <h3 className="text-lg font-semibold text-blue-100">Visión del Radar</h3>
-              </div>
-              <p className="text-gray-400 text-sm leading-relaxed">
-                {aiReport.vision_radar}
-              </p>
-            </div>
-          </div>
-
-        </motion.div>
-      )}
-
-      {/* QUANT METRICS */}
-      <motion.div variants={itemVariants} className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <div className="group rounded-2xl border border-white/5 bg-white/5 p-6 shadow-lg backdrop-blur-sm transition-all hover:bg-white/10">
-          <div className="flex items-center gap-4">
-            <div className="bg-blue-500/10 p-3 rounded-full group-hover:scale-110 transition-transform">
-              <Activity className="h-6 w-6 text-blue-400" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-gray-400">Universo Escaneado</p>
-              <h3 className="text-3xl font-extrabold text-white">{initialData.length}</h3>
-            </div>
-          </div>
-        </div>
-        
-        <div className="group rounded-2xl border border-white/5 bg-white/5 p-6 shadow-lg backdrop-blur-sm transition-all hover:bg-white/10">
-          <div className="flex items-center gap-4">
-            <div className="bg-purple-500/10 p-3 rounded-full group-hover:scale-110 transition-transform">
-              <ShieldAlert className="h-6 w-6 text-purple-400" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-gray-400">Anomalías de Alta Convicción</p>
-              <h3 className="text-3xl font-extrabold text-white">{opportunities.length}</h3>
-            </div>
-          </div>
-        </div>
-
-        {aiReport && (
-          <div className="group rounded-2xl border border-rose-500/20 bg-rose-950/20 p-6 shadow-lg backdrop-blur-sm transition-all hover:bg-rose-950/40">
-            <div className="flex items-center gap-3 mb-2">
-              <AlertTriangle className="h-5 w-5 text-rose-400" />
-              <h3 className="text-sm font-semibold text-rose-200">Setup & Riesgo</h3>
-            </div>
-            <p className="text-rose-100/70 text-xs leading-relaxed line-clamp-3">
-              {aiReport.setup_tecnico}
-            </p>
-          </div>
-        )}
-      </motion.div>
-
-      {/* TABLES AND CHARTS */}
-      <motion.div variants={itemVariants} className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-        
-        {/* Table of Opportunities */}
-        <div className="col-span-1 lg:col-span-2 rounded-2xl border border-white/10 bg-[#111111]/80 p-6 shadow-2xl backdrop-blur-md">
-          <h2 className="mb-2 flex items-center gap-3 text-xl font-bold text-white">
-            <Target className="text-emerald-400 h-6 w-6" /> 
-            Top Anomalías Técnicas
-          </h2>
-          <p className="text-xs text-gray-500 mb-6 font-medium uppercase tracking-widest">
-            Haz clic en un activo para ver el análisis de la IA
-          </p>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-white/10 text-gray-400">
-                <tr>
-                  <th className="pb-4 font-semibold uppercase tracking-wider text-xs">Activo</th>
-                  <th className="pb-4 font-semibold uppercase tracking-wider text-xs">Precio</th>
-                  <th className="pb-4 font-semibold uppercase tracking-wider text-xs">RSI (14)</th>
-                  <th className="pb-4 font-semibold uppercase tracking-wider text-xs">Distancia EMA200</th>
-                  <th className="pb-4 font-semibold uppercase tracking-wider text-xs">Quant Score</th>
+  const renderTable = (data: Candidate[]) => (
+    <div className="overflow-x-auto w-full">
+      <table className="w-full text-left text-sm font-mono border-collapse">
+        <thead className="bg-[#18181b] text-[#a1a1aa] text-xs uppercase border-b border-[#3f3f46]">
+          <tr>
+            <th className="py-2 px-3 font-semibold">Ticker</th>
+            <th className="py-2 px-3 font-semibold text-right">Price</th>
+            <th className="py-2 px-3 font-semibold text-right">RSI</th>
+            <th className="py-2 px-3 font-semibold text-right">EMA200 Dist</th>
+            <th className="py-2 px-3 font-semibold text-right">Min Buy (LBB)</th>
+            <th className="py-2 px-3 font-semibold text-right">Target (UBB)</th>
+            <th className="py-2 px-3 font-semibold text-center">Signal</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[#27272a]">
+          {data.map((row) => {
+            const isSelected = selectedTicker === row.ticker;
+            return (
+              <React.Fragment key={row.ticker}>
+                <tr 
+                  onClick={() => setSelectedTicker(isSelected ? null : row.ticker)}
+                  className={`cursor-pointer transition-colors hover:bg-[#27272a] ${isSelected ? 'bg-[#27272a]' : ''}`}
+                >
+                  <td className="py-2 px-3 font-bold text-[#e4e4e7]">{row.ticker}</td>
+                  <td className="py-2 px-3 text-right text-[#d4d4d8]">${(row.price || 0).toFixed(2)}</td>
+                  <td className="py-2 px-3 text-right">
+                    <span className={row.rsi < 30 ? 'text-[#34d399] font-bold' : row.rsi > 70 ? 'text-[#f87171] font-bold' : 'text-[#a1a1aa]'}>
+                      {row.rsi?.toFixed(1) || 'N/A'}
+                    </span>
+                  </td>
+                  <td className="py-2 px-3 text-right">
+                    <span className={(row.distancia_ema200 || 0) < 0 ? 'text-[#f87171]' : 'text-[#34d399]'}>
+                      {((row.distancia_ema200 || 0) * 100).toFixed(2)}%
+                    </span>
+                  </td>
+                  <td className="py-2 px-3 text-right text-[#93c5fd]">
+                    {row.bollinger_lower ? `$${row.bollinger_lower.toFixed(2)}` : '-'}
+                  </td>
+                  <td className="py-2 px-3 text-right text-[#fde047]">
+                    {row.bollinger_upper ? `$${row.bollinger_upper.toFixed(2)}` : '-'}
+                  </td>
+                  <td className="py-2 px-3 text-center">
+                    {row.signal === 'BUY' && <span className="bg-[#065f46] text-[#34d399] px-2 py-0.5 rounded text-xs font-bold">BUY</span>}
+                    {row.signal === 'SELL' && <span className="bg-[#7f1d1d] text-[#f87171] px-2 py-0.5 rounded text-xs font-bold">SELL</span>}
+                    {row.signal === 'HOLD' && <span className="bg-[#3f3f46] text-[#a1a1aa] px-2 py-0.5 rounded text-xs font-bold">HOLD</span>}
+                    {!row.signal && <span className="text-[#52525b]">-</span>}
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {opportunities.map((row, idx) => (
-                  <React.Fragment key={row.ticker}>
-                    <motion.tr 
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: idx * 0.1 }}
-                      onClick={() => setSelectedTicker(selectedTicker === row.ticker ? null : row.ticker)}
-                      className={`transition-colors cursor-pointer ${selectedTicker === row.ticker ? 'bg-white/10' : 'hover:bg-white/5'}`}
-                    >
-                      <td className="py-4 pl-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-emerald-400 font-bold text-base">{idx + 1}.</span>
-                          <span className="font-bold text-white tracking-wide">{row.ticker}</span>
-                        </div>
-                      </td>
-                      <td className="py-4 text-gray-300">${(row.price || row.close || 0).toFixed(2)}</td>
-                      <td className="py-4">
-                        <span className={`inline-flex items-center rounded-md px-2 py-1 font-bold ${
-                          row.rsi < 30 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-gray-300'
-                        }`}>
-                          {row.rsi.toFixed(1)}
-                        </span>
-                      </td>
-                      <td className="py-4">
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
-                          (row.distancia_ema200 || row.pvc_ema200 || 0) < 0 
-                            ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' 
-                            : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                        }`}>
-                          {((row.distancia_ema200 || row.pvc_ema200 || 0) * 100).toFixed(1)}%
-                        </span>
-                      </td>
-                      <td className="py-4 font-black text-blue-400">
-                        {(row.score || 0).toFixed(1)}
-                      </td>
-                    </motion.tr>
-                    
-                    {/* EXPANDABLE AI INSIGHT */}
-                    <AnimatePresence>
-                      {selectedTicker === row.ticker && (
-                        <motion.tr
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                        >
-                          <td colSpan={5} className="p-0">
-                            <div className="p-4 m-2 rounded-xl bg-blue-900/20 border border-blue-500/30 shadow-inner">
-                              <div className="flex justify-between items-start mb-2">
-                                <h4 className="font-bold text-blue-300 flex items-center gap-2">
-                                  <BrainCircuit className="h-4 w-4" /> Insight del Analista (IA)
-                                </h4>
-                                <button onClick={() => setSelectedTicker(null)} className="text-gray-400 hover:text-white">
-                                  <X className="h-4 w-4" />
-                                </button>
-                              </div>
-                              <p className="text-sm text-blue-100/80 leading-relaxed">
-                                {aiReport?.insights_tickers?.[row.ticker] || "Análisis individual no disponible para este activo en la sesión actual."}
-                              </p>
-                            </div>
-                          </td>
-                        </motion.tr>
-                      )}
-                    </AnimatePresence>
-                  </React.Fragment>
-                ))}
-                {opportunities.length === 0 && (
+                {isSelected && (
                   <tr>
-                    <td colSpan={5} className="py-12 text-center text-gray-500 font-medium">
-                      El motor cuántico no ha detectado anomalías de alta probabilidad hoy.
+                    <td colSpan={7} className="p-0 border-b border-[#3f3f46]">
+                      <div className="bg-[#18181b] p-4 text-[#d4d4d8] text-sm border-l-2 border-[#60a5fa]">
+                        <p className="font-sans mb-1 font-semibold text-[#93c5fd]">Institutional Analyst Note ({row.ticker}):</p>
+                        <p className="font-sans leading-relaxed text-[#a1a1aa]">
+                          {aiReport?.insights_tickers?.[row.ticker] || "No coverage available for this asset."}
+                        </p>
+                      </div>
                     </td>
                   </tr>
                 )}
-              </tbody>
-            </table>
+              </React.Fragment>
+            );
+          })}
+          {data.length === 0 && (
+            <tr>
+              <td colSpan={7} className="py-8 text-center text-[#71717a] font-sans">
+                No tactical anomalies detected in this market segment today.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  return (
+    <div className="space-y-6 font-sans bg-[#09090b] text-[#fafafa]">
+      
+      {/* TABS */}
+      <div className="flex border-b border-[#27272a] mb-6">
+        <button 
+          onClick={() => setActiveTab('PORTFOLIO')}
+          className={`flex items-center gap-2 px-6 py-3 font-medium text-sm transition-colors ${activeTab === 'PORTFOLIO' ? 'border-b-2 border-[#60a5fa] text-[#60a5fa]' : 'text-[#a1a1aa] hover:text-[#e4e4e7]'}`}
+        >
+          <Briefcase className="w-4 h-4" /> My Portfolio
+        </button>
+        <button 
+          onClick={() => setActiveTab('US')}
+          className={`flex items-center gap-2 px-6 py-3 font-medium text-sm transition-colors ${activeTab === 'US' ? 'border-b-2 border-[#60a5fa] text-[#60a5fa]' : 'text-[#a1a1aa] hover:text-[#e4e4e7]'}`}
+        >
+          <Globe className="w-4 h-4" /> US Markets
+        </button>
+        <button 
+          onClick={() => setActiveTab('CL')}
+          className={`flex items-center gap-2 px-6 py-3 font-medium text-sm transition-colors ${activeTab === 'CL' ? 'border-b-2 border-[#60a5fa] text-[#60a5fa]' : 'text-[#a1a1aa] hover:text-[#e4e4e7]'}`}
+        >
+          <MapPin className="w-4 h-4" /> Chile Markets
+        </button>
+      </div>
+
+      {/* TAB CONTENT: US OR CHILE RADAR */}
+      {(activeTab === 'US' || activeTab === 'CL') && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            
+            {/* Table Area */}
+            <div className="col-span-1 lg:col-span-3 border border-[#27272a] bg-[#09090b] shadow-sm rounded-sm overflow-hidden">
+              <div className="bg-[#18181b] p-3 border-b border-[#27272a] flex items-center justify-between">
+                <h2 className="font-semibold text-sm text-[#e4e4e7] flex items-center gap-2">
+                  <Target className="w-4 h-4 text-[#60a5fa]" /> 
+                  Tactical Anomalies ({activeTab === 'US' ? 'Global/US' : 'Bolsa de Santiago'})
+                </h2>
+              </div>
+              {renderTable(activeTab === 'US' ? candidatesUS : candidatesCL)}
+            </div>
+
+            {/* AI Summary Panel */}
+            {aiReport && (
+              <div className="col-span-1 space-y-4">
+                <div className="border border-[#27272a] bg-[#18181b] p-4 rounded-sm">
+                  <h3 className="text-xs font-bold text-[#71717a] uppercase tracking-wider mb-2">Macro Context</h3>
+                  <p className="text-sm text-[#d4d4d8] leading-relaxed">
+                    {aiReport.contexto_macro || "Macro data unavailable."}
+                  </p>
+                </div>
+                <div className="border border-[#27272a] bg-[#18181b] p-4 rounded-sm">
+                  <h3 className="text-xs font-bold text-[#71717a] uppercase tracking-wider mb-2">Market Risk & Setup</h3>
+                  <p className="text-sm text-[#d4d4d8] leading-relaxed">
+                    {aiReport.setup_tecnico || "Risk assessment unavailable."}
+                  </p>
+                </div>
+                <div className="border border-[#27272a] bg-[#18181b] p-4 rounded-sm border-l-4 border-l-[#60a5fa]">
+                  <h3 className="text-xs font-bold text-[#60a5fa] uppercase tracking-wider mb-2">Top Conviction</h3>
+                  <p className="text-sm text-[#d4d4d8] leading-relaxed">
+                    {aiReport.seleccion_fondo || "No conviction generated."}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
-
-        {/* RSI Chart */}
-        <div className="col-span-1 rounded-2xl border border-white/10 bg-[#111111]/80 p-6 shadow-2xl backdrop-blur-md flex flex-col">
-          <h2 className="mb-6 flex items-center gap-2 text-xl font-bold text-white">
-            <BarChart3 className="text-blue-400 h-6 w-6" /> Nivel de Sobreventa
-          </h2>
-          <div className="flex-1 w-full min-h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
-                <XAxis type="number" domain={[0, 100]} stroke="#4b5563" tick={{fill: '#9ca3af'}} />
-                <YAxis dataKey="name" type="category" stroke="#4b5563" tick={{fill: '#d1d5db', fontWeight: 'bold'}} />
-                <RechartsTooltip 
-                  cursor={{fill: 'rgba(255,255,255,0.05)'}}
-                  contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '12px', backdropFilter: 'blur(8px)' }}
-                  itemStyle={{ color: '#34d399', fontWeight: 'bold' }}
-                />
-                <Bar dataKey="RSI" radius={[0, 6, 6, 0]}>
-                  {chartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.RSI < 30 ? '#10b981' : '#3b82f6'} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-      </motion.div>
-
-      {/* ADVANCED QUANT MATH MODULES */}
-      {(correlationMatrix || efficientFrontier) && (
-        <motion.div variants={itemVariants} className="grid grid-cols-1 gap-8 lg:grid-cols-2 mt-8">
-          
-          {/* Efficient Frontier */}
-          {efficientFrontier && (
-            <div className="rounded-2xl border border-white/10 bg-[#111111]/80 p-6 shadow-2xl backdrop-blur-md">
-              <h2 className="mb-2 text-xl font-bold text-white flex items-center gap-2">
-                📈 Frontera Eficiente de Markowitz
-              </h2>
-              <p className="text-xs text-gray-400 mb-6">Optimización de carteras mediante Simulación Monte Carlo</p>
-              
-              <div className="w-full h-[350px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 0 }}>
-                    <XAxis type="number" dataKey="riesgo" name="Riesgo (Volatilidad)" unit="%" stroke="#9ca3af" domain={['auto', 'auto']} />
-                    <YAxis type="number" dataKey="retorno" name="Retorno Esperado" unit="%" stroke="#9ca3af" domain={['auto', 'auto']} />
-                    <ZAxis type="number" range={[40, 40]} />
-                    <RechartsTooltip 
-                      cursor={{strokeDasharray: '3 3'}}
-                      contentStyle={{ backgroundColor: 'rgba(0,0,0,0.9)', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '12px' }}
-                      formatter={(value, name) => [`${value}%`, name]}
-                    />
-                    <Scatter data={efficientFrontier} fill="#8b5cf6">
-                      {efficientFrontier.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.sharpe > 1.5 ? '#10b981' : (entry.sharpe > 1 ? '#3b82f6' : '#8b5cf6')} opacity={0.6} />
-                      ))}
-                    </Scatter>
-                  </ScatterChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          )}
-
-          {/* Correlation Matrix */}
-          {correlationMatrix && (
-            <div className="rounded-2xl border border-white/10 bg-[#111111]/80 p-6 shadow-2xl backdrop-blur-md">
-              <h2 className="mb-2 text-xl font-bold text-white flex items-center gap-2">
-                🔗 Matriz de Correlación
-              </h2>
-              <p className="text-xs text-gray-400 mb-6">Dependencias lineales entre activos (últimos 100 días)</p>
-              
-              <div className="overflow-x-auto w-full">
-                <table className="w-full text-center text-xs border-collapse">
-                  <thead>
-                    <tr>
-                      <th className="p-2 border border-white/10 bg-white/5"></th>
-                      {Object.keys(correlationMatrix).map(col => (
-                        <th key={col} className="p-2 border border-white/10 text-gray-300 bg-white/5 font-bold">{col}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.keys(correlationMatrix).map(row => (
-                      <tr key={row}>
-                        <td className="p-2 border border-white/10 text-gray-300 bg-white/5 font-bold">{row}</td>
-                        {Object.keys(correlationMatrix[row]).map(col => {
-                          const val = correlationMatrix[row][col];
-                          // Color mapping: +1 is Green, 0 is Gray, -1 is Red
-                          let bgColor = 'bg-gray-800/50';
-                          if (val > 0.7 && val < 0.99) bgColor = 'bg-emerald-900/60 text-emerald-300';
-                          else if (val >= 0.99) bgColor = 'bg-emerald-500/20 text-emerald-400';
-                          else if (val < -0.3) bgColor = 'bg-rose-900/60 text-rose-300';
-                          
-                          return (
-                            <td key={`${row}-${col}`} className={`p-2 border border-white/10 ${bgColor} transition-colors hover:bg-white/20`}>
-                              {val.toFixed(2)}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-          
-        </motion.div>
       )}
 
-    </motion.div>
+      {/* TAB CONTENT: PORTFOLIO (MARKOWITZ & MATRIX) */}
+      {activeTab === 'PORTFOLIO' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            
+            {/* Correlation Matrix */}
+            <div className="border border-[#27272a] bg-[#09090b] shadow-sm rounded-sm overflow-hidden">
+              <div className="bg-[#18181b] p-3 border-b border-[#27272a]">
+                <h2 className="font-semibold text-sm text-[#e4e4e7]">Portfolio Correlation Matrix (100D)</h2>
+              </div>
+              <div className="p-4 overflow-x-auto">
+                {correlationMatrix ? (
+                  <table className="w-full text-center text-xs font-mono border-collapse">
+                    <thead>
+                      <tr>
+                        <th className="p-2 border border-[#27272a] bg-[#18181b]"></th>
+                        {Object.keys(correlationMatrix).map(col => (
+                          <th key={col} className="p-2 border border-[#27272a] bg-[#18181b] text-[#a1a1aa] font-semibold">{col}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.keys(correlationMatrix).map(row => (
+                        <tr key={row}>
+                          <td className="p-2 border border-[#27272a] bg-[#18181b] text-[#a1a1aa] font-semibold">{row}</td>
+                          {Object.keys(correlationMatrix[row]).map(col => {
+                            const val = correlationMatrix[row][col];
+                            let bgColor = 'bg-[#09090b] text-[#a1a1aa]';
+                            if (val > 0.7 && val < 0.99) bgColor = 'bg-[#064e3b] text-[#34d399]';
+                            else if (val >= 0.99) bgColor = 'bg-[#18181b] text-[#52525b]'; // Self
+                            else if (val < -0.3) bgColor = 'bg-[#7f1d1d] text-[#f87171]';
+                            
+                            return (
+                              <td key={`${row}-${col}`} className={`p-2 border border-[#27272a] ${bgColor}`}>
+                                {val.toFixed(2)}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p className="text-[#71717a] text-sm text-center py-8">Correlation matrix is generating...</p>
+                )}
+              </div>
+            </div>
+
+            {/* Efficient Frontier */}
+            <div className="border border-[#27272a] bg-[#09090b] shadow-sm rounded-sm overflow-hidden flex flex-col">
+              <div className="bg-[#18181b] p-3 border-b border-[#27272a]">
+                <h2 className="font-semibold text-sm text-[#e4e4e7]">Efficient Frontier (Monte Carlo)</h2>
+              </div>
+              <div className="flex-1 w-full min-h-[400px] p-4">
+                {efficientFrontier ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ScatterChart margin={{ top: 10, right: 10, bottom: 20, left: 0 }}>
+                      <XAxis type="number" dataKey="riesgo" name="Risk (Vol)" unit="%" stroke="#52525b" domain={['auto', 'auto']} tick={{fontSize: 12, fill: '#a1a1aa', fontFamily: 'monospace'}} />
+                      <YAxis type="number" dataKey="retorno" name="Expected Return" unit="%" stroke="#52525b" domain={['auto', 'auto']} tick={{fontSize: 12, fill: '#a1a1aa', fontFamily: 'monospace'}} />
+                      <ZAxis type="number" range={[20, 20]} />
+                      <RechartsTooltip 
+                        cursor={{strokeDasharray: '3 3', stroke: '#52525b'}}
+                        contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#e4e4e7', fontFamily: 'monospace', fontSize: '12px' }}
+                        formatter={(value: any, name: string) => [`${value}%`, name]}
+                      />
+                      <Scatter data={efficientFrontier}>
+                        {efficientFrontier.map((entry, index) => (
+                          <Cell 
+                            key={`cell-${index}`} 
+                            fill={entry.sharpe > 1.5 ? '#34d399' : (entry.sharpe > 1 ? '#60a5fa' : '#52525b')} 
+                            opacity={0.8} 
+                          />
+                        ))}
+                      </Scatter>
+                    </ScatterChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <p className="text-[#71717a] text-sm text-center py-8">Markowitz simulation running...</p>
+                )}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+    </div>
   );
 }
