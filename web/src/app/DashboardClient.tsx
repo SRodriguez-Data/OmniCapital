@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useMemo } from 'react';
-import { Activity, TrendingUp, ShieldAlert, BarChart3, BrainCircuit, Target, Lightbulb, AlertTriangle } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Activity, TrendingUp, ShieldAlert, BarChart3, BrainCircuit, Target, Lightbulb, AlertTriangle, Globe, X } from 'lucide-react';
 import { 
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell 
+  BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, ScatterChart, Scatter, ZAxis
 } from 'recharts';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface MarketData {
   id?: number;
@@ -26,17 +26,24 @@ interface AiReport {
   vision_radar: string;
   seleccion_fondo: string;
   setup_tecnico: string;
+  contexto_macro?: string;
+  insights_tickers?: Record<string, string>;
 }
 
 export default function DashboardClient({ 
   initialData, 
-  aiReport 
+  aiReport,
+  correlationMatrix,
+  efficientFrontier
 }: { 
   initialData: MarketData[], 
-  aiReport: AiReport | null 
+  aiReport: AiReport | null,
+  correlationMatrix: Record<string, Record<string, number>> | null,
+  efficientFrontier: any[] | null
 }) {
   
-  // Use AI Report candidates if available, otherwise calculate from raw DB data
+  const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
+
   const opportunities = useMemo(() => {
     if (aiReport && aiReport.candidatos_json && aiReport.candidatos_json.length > 0) {
       return aiReport.candidatos_json;
@@ -77,7 +84,7 @@ export default function DashboardClient({
 
   return (
     <motion.div 
-      className="space-y-8"
+      className="space-y-8 pb-12"
       variants={containerVariants}
       initial="hidden"
       animate="visible"
@@ -103,15 +110,30 @@ export default function DashboardClient({
             </p>
           </div>
 
-          {/* Radar Vision */}
-          <div className="col-span-1 rounded-2xl border border-blue-500/20 bg-blue-950/20 p-6 shadow-xl backdrop-blur-md">
-            <div className="flex items-center gap-3 mb-4">
-              <Lightbulb className="h-5 w-5 text-blue-400" />
-              <h3 className="text-xl font-semibold text-blue-100">Visión del Radar</h3>
+          <div className="col-span-1 space-y-6">
+            {/* Macro Context */}
+            {aiReport.contexto_macro && (
+              <div className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 p-6 shadow-xl backdrop-blur-md">
+                <div className="flex items-center gap-3 mb-3">
+                  <Globe className="h-5 w-5 text-indigo-400" />
+                  <h3 className="text-lg font-semibold text-indigo-100">Contexto Macro</h3>
+                </div>
+                <p className="text-indigo-200/80 text-sm leading-relaxed line-clamp-4 hover:line-clamp-none transition-all cursor-pointer">
+                  {aiReport.contexto_macro}
+                </p>
+              </div>
+            )}
+
+            {/* Radar Vision */}
+            <div className="rounded-2xl border border-blue-500/20 bg-blue-950/20 p-6 shadow-xl backdrop-blur-md">
+              <div className="flex items-center gap-3 mb-3">
+                <Lightbulb className="h-5 w-5 text-blue-400" />
+                <h3 className="text-lg font-semibold text-blue-100">Visión del Radar</h3>
+              </div>
+              <p className="text-gray-400 text-sm leading-relaxed">
+                {aiReport.vision_radar}
+              </p>
             </div>
-            <p className="text-gray-400 text-sm leading-relaxed">
-              {aiReport.vision_radar}
-            </p>
           </div>
 
         </motion.div>
@@ -161,10 +183,13 @@ export default function DashboardClient({
         
         {/* Table of Opportunities */}
         <div className="col-span-1 lg:col-span-2 rounded-2xl border border-white/10 bg-[#111111]/80 p-6 shadow-2xl backdrop-blur-md">
-          <h2 className="mb-6 flex items-center gap-3 text-xl font-bold text-white">
+          <h2 className="mb-2 flex items-center gap-3 text-xl font-bold text-white">
             <Target className="text-emerald-400 h-6 w-6" /> 
             Top Anomalías Técnicas
           </h2>
+          <p className="text-xs text-gray-500 mb-6 font-medium uppercase tracking-widest">
+            Haz clic en un activo para ver el análisis de la IA
+          </p>
           
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
@@ -179,40 +204,69 @@ export default function DashboardClient({
               </thead>
               <tbody className="divide-y divide-white/5">
                 {opportunities.map((row, idx) => (
-                  <motion.tr 
-                    key={row.ticker} 
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: idx * 0.1 }}
-                    className="transition-colors hover:bg-white/5"
-                  >
-                    <td className="py-4">
-                      <div className="flex items-center gap-2">
-                        <span className="text-emerald-400 font-bold text-base">{idx + 1}.</span>
-                        <span className="font-bold text-white tracking-wide">{row.ticker}</span>
-                      </div>
-                    </td>
-                    <td className="py-4 text-gray-300">${(row.price || row.close || 0).toFixed(2)}</td>
-                    <td className="py-4">
-                      <span className={`inline-flex items-center rounded-md px-2 py-1 font-bold ${
-                        row.rsi < 30 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-gray-300'
-                      }`}>
-                        {row.rsi.toFixed(1)}
-                      </span>
-                    </td>
-                    <td className="py-4">
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
-                        (row.distancia_ema200 || row.pvc_ema200 || 0) < 0 
-                          ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' 
-                          : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                      }`}>
-                        {((row.distancia_ema200 || row.pvc_ema200 || 0) * 100).toFixed(1)}%
-                      </span>
-                    </td>
-                    <td className="py-4 font-black text-blue-400">
-                      {(row.score || 0).toFixed(1)}
-                    </td>
-                  </motion.tr>
+                  <React.Fragment key={row.ticker}>
+                    <motion.tr 
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: idx * 0.1 }}
+                      onClick={() => setSelectedTicker(selectedTicker === row.ticker ? null : row.ticker)}
+                      className={`transition-colors cursor-pointer ${selectedTicker === row.ticker ? 'bg-white/10' : 'hover:bg-white/5'}`}
+                    >
+                      <td className="py-4 pl-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-emerald-400 font-bold text-base">{idx + 1}.</span>
+                          <span className="font-bold text-white tracking-wide">{row.ticker}</span>
+                        </div>
+                      </td>
+                      <td className="py-4 text-gray-300">${(row.price || row.close || 0).toFixed(2)}</td>
+                      <td className="py-4">
+                        <span className={`inline-flex items-center rounded-md px-2 py-1 font-bold ${
+                          row.rsi < 30 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-gray-300'
+                        }`}>
+                          {row.rsi.toFixed(1)}
+                        </span>
+                      </td>
+                      <td className="py-4">
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
+                          (row.distancia_ema200 || row.pvc_ema200 || 0) < 0 
+                            ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' 
+                            : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                        }`}>
+                          {((row.distancia_ema200 || row.pvc_ema200 || 0) * 100).toFixed(1)}%
+                        </span>
+                      </td>
+                      <td className="py-4 font-black text-blue-400">
+                        {(row.score || 0).toFixed(1)}
+                      </td>
+                    </motion.tr>
+                    
+                    {/* EXPANDABLE AI INSIGHT */}
+                    <AnimatePresence>
+                      {selectedTicker === row.ticker && (
+                        <motion.tr
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                        >
+                          <td colSpan={5} className="p-0">
+                            <div className="p-4 m-2 rounded-xl bg-blue-900/20 border border-blue-500/30 shadow-inner">
+                              <div className="flex justify-between items-start mb-2">
+                                <h4 className="font-bold text-blue-300 flex items-center gap-2">
+                                  <BrainCircuit className="h-4 w-4" /> Insight del Analista (IA)
+                                </h4>
+                                <button onClick={() => setSelectedTicker(null)} className="text-gray-400 hover:text-white">
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </div>
+                              <p className="text-sm text-blue-100/80 leading-relaxed">
+                                {aiReport?.insights_tickers?.[row.ticker] || "Análisis individual no disponible para este activo en la sesión actual."}
+                              </p>
+                            </div>
+                          </td>
+                        </motion.tr>
+                      )}
+                    </AnimatePresence>
+                  </React.Fragment>
                 ))}
                 {opportunities.length === 0 && (
                   <tr>
@@ -236,7 +290,7 @@ export default function DashboardClient({
               <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
                 <XAxis type="number" domain={[0, 100]} stroke="#4b5563" tick={{fill: '#9ca3af'}} />
                 <YAxis dataKey="name" type="category" stroke="#4b5563" tick={{fill: '#d1d5db', fontWeight: 'bold'}} />
-                <Tooltip 
+                <RechartsTooltip 
                   cursor={{fill: 'rgba(255,255,255,0.05)'}}
                   contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '12px', backdropFilter: 'blur(8px)' }}
                   itemStyle={{ color: '#34d399', fontWeight: 'bold' }}
@@ -252,7 +306,88 @@ export default function DashboardClient({
         </div>
 
       </motion.div>
-      
+
+      {/* ADVANCED QUANT MATH MODULES */}
+      {(correlationMatrix || efficientFrontier) && (
+        <motion.div variants={itemVariants} className="grid grid-cols-1 gap-8 lg:grid-cols-2 mt-8">
+          
+          {/* Efficient Frontier */}
+          {efficientFrontier && (
+            <div className="rounded-2xl border border-white/10 bg-[#111111]/80 p-6 shadow-2xl backdrop-blur-md">
+              <h2 className="mb-2 text-xl font-bold text-white flex items-center gap-2">
+                📈 Frontera Eficiente de Markowitz
+              </h2>
+              <p className="text-xs text-gray-400 mb-6">Optimización de carteras mediante Simulación Monte Carlo</p>
+              
+              <div className="w-full h-[350px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 0 }}>
+                    <XAxis type="number" dataKey="riesgo" name="Riesgo (Volatilidad)" unit="%" stroke="#9ca3af" domain={['auto', 'auto']} />
+                    <YAxis type="number" dataKey="retorno" name="Retorno Esperado" unit="%" stroke="#9ca3af" domain={['auto', 'auto']} />
+                    <ZAxis type="number" range={[40, 40]} />
+                    <RechartsTooltip 
+                      cursor={{strokeDasharray: '3 3'}}
+                      contentStyle={{ backgroundColor: 'rgba(0,0,0,0.9)', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '12px' }}
+                      formatter={(value, name) => [`${value}%`, name]}
+                    />
+                    <Scatter data={efficientFrontier} fill="#8b5cf6">
+                      {efficientFrontier.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.sharpe > 1.5 ? '#10b981' : (entry.sharpe > 1 ? '#3b82f6' : '#8b5cf6')} opacity={0.6} />
+                      ))}
+                    </Scatter>
+                  </ScatterChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {/* Correlation Matrix */}
+          {correlationMatrix && (
+            <div className="rounded-2xl border border-white/10 bg-[#111111]/80 p-6 shadow-2xl backdrop-blur-md">
+              <h2 className="mb-2 text-xl font-bold text-white flex items-center gap-2">
+                🔗 Matriz de Correlación
+              </h2>
+              <p className="text-xs text-gray-400 mb-6">Dependencias lineales entre activos (últimos 100 días)</p>
+              
+              <div className="overflow-x-auto w-full">
+                <table className="w-full text-center text-xs border-collapse">
+                  <thead>
+                    <tr>
+                      <th className="p-2 border border-white/10 bg-white/5"></th>
+                      {Object.keys(correlationMatrix).map(col => (
+                        <th key={col} className="p-2 border border-white/10 text-gray-300 bg-white/5 font-bold">{col}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.keys(correlationMatrix).map(row => (
+                      <tr key={row}>
+                        <td className="p-2 border border-white/10 text-gray-300 bg-white/5 font-bold">{row}</td>
+                        {Object.keys(correlationMatrix[row]).map(col => {
+                          const val = correlationMatrix[row][col];
+                          // Color mapping: +1 is Green, 0 is Gray, -1 is Red
+                          let bgColor = 'bg-gray-800/50';
+                          if (val > 0.7 && val < 0.99) bgColor = 'bg-emerald-900/60 text-emerald-300';
+                          else if (val >= 0.99) bgColor = 'bg-emerald-500/20 text-emerald-400';
+                          else if (val < -0.3) bgColor = 'bg-rose-900/60 text-rose-300';
+                          
+                          return (
+                            <td key={`${row}-${col}`} className={`p-2 border border-white/10 ${bgColor} transition-colors hover:bg-white/20`}>
+                              {val.toFixed(2)}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          
+        </motion.div>
+      )}
+
     </motion.div>
   );
 }

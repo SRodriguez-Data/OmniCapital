@@ -5,8 +5,6 @@ export const dynamic = 'force-dynamic';
 
 export default async function Home() {
   // Fetch latest market data
-  // Due to Supabase API limitations on distinct, we'll fetch the latest 500 rows ordered by date.
-  // This assumes the miner runs and inserts 1 row per ticker per day.
   const { data: marketData, error } = await supabase
     .from('precios_historicos')
     .select('*')
@@ -23,7 +21,7 @@ export default async function Home() {
     );
   }
 
-  // Filter to keep only the absolute latest row per ticker (in case limit(600) brings multiple days for one ticker)
+  // Filter to keep only the absolute latest row per ticker
   const latestByTicker = new Map();
   if (marketData) {
     for (const row of marketData) {
@@ -42,11 +40,26 @@ export default async function Home() {
     .order('fecha', { ascending: false })
     .limit(1);
 
-  if (aiError) {
-    console.error("Supabase AI Fetch Error:", aiError);
-  }
-
+  if (aiError) console.error("Supabase AI Fetch Error:", aiError);
   const latestAiReport = aiData && aiData.length > 0 ? aiData[0] : null;
+
+  // Fetch Correlation Matrix
+  const { data: corrData } = await supabase
+    .from('correlaciones')
+    .select('*')
+    .order('fecha', { ascending: false })
+    .limit(1);
+    
+  const correlationMatrix = corrData && corrData.length > 0 ? corrData[0].matriz_json : null;
+
+  // Fetch Efficient Frontier
+  const { data: frontierData } = await supabase
+    .from('frontera_eficiente')
+    .select('*')
+    .order('fecha', { ascending: false })
+    .limit(1);
+    
+  const efficientFrontier = frontierData && frontierData.length > 0 ? frontierData[0].puntos_json : null;
 
   return (
     <main className="min-h-screen bg-[#0a0a0a] text-white p-4 md:p-8">
@@ -64,7 +77,12 @@ export default async function Home() {
         )}
       </header>
       
-      <DashboardClient initialData={uniqueData} aiReport={latestAiReport} />
+      <DashboardClient 
+        initialData={uniqueData} 
+        aiReport={latestAiReport}
+        correlationMatrix={correlationMatrix}
+        efficientFrontier={efficientFrontier}
+      />
     </main>
   );
 }
