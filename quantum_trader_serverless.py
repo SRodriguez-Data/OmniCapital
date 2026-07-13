@@ -262,7 +262,7 @@ Incluye todos los tickers en sus respectivos diccionarios."""
     try:
         response = llm.generate_content(prompt_macro)
         texto_ia = response.text.replace("```json", "").replace("```", "").strip()
-        ia_data = json.loads(texto_ia)
+        ia_data = json.loads(texto_ia, strict=False)
     except Exception as e:
         logging.error(f"Error generando IA: {e}")
         ia_data = {
