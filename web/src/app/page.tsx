@@ -1,90 +1,62 @@
-import { supabase } from '@/lib/supabase';
-import DashboardClient from './DashboardClient';
+'use client';
 
-export const dynamic = 'force-dynamic';
+import React, { useState } from 'react';
+import { Briefcase, Activity, Search, Calculator } from 'lucide-react';
+import PortfolioTab from './components/PortfolioTab';
+import RecommendationsTab from './components/RecommendationsTab';
+import ScreenerTab from './components/ScreenerTab';
+import SizingTab from './components/SizingTab';
 
-export default async function Home() {
-  // Fetch latest market data
-  const { data: marketData, error } = await supabase
-    .from('precios_historicos')
-    .select('*')
-    .order('date', { ascending: false })
-    .limit(600);
-
-  if (error) {
-    console.error("Supabase Error:", error);
-    return (
-      <div className="flex h-screen items-center justify-center bg-[#09090b] text-[#f87171] font-mono">
-        <h2>Error al conectar con la base de datos (Supabase).</h2>
-        <p>{error.message}</p>
-      </div>
-    );
-  }
-
-  // Filter to keep only the absolute latest row per ticker
-  const latestByTicker = new Map();
-  if (marketData) {
-    for (const row of marketData) {
-      if (!latestByTicker.has(row.ticker)) {
-        latestByTicker.set(row.ticker, row);
-      }
-    }
-  }
-
-  const uniqueData = Array.from(latestByTicker.values());
-
-  // Fetch latest AI analysis
-  const { data: aiData, error: aiError } = await supabase
-    .from('analisis_ia')
-    .select('*')
-    .order('fecha', { ascending: false })
-    .limit(1);
-
-  if (aiError) console.error("Supabase AI Fetch Error:", aiError);
-  const latestAiReport = aiData && aiData.length > 0 ? aiData[0] : null;
-
-  // Fetch Correlation Matrix
-  const { data: corrData } = await supabase
-    .from('correlaciones')
-    .select('*')
-    .order('fecha', { ascending: false })
-    .limit(1);
-    
-  const correlationMatrix = corrData && corrData.length > 0 ? corrData[0].matriz_json : null;
-
-  // Fetch Efficient Frontier
-  const { data: frontierData } = await supabase
-    .from('frontera_eficiente')
-    .select('*')
-    .order('fecha', { ascending: false })
-    .limit(1);
-    
-  const efficientFrontier = frontierData && frontierData.length > 0 ? frontierData[0].puntos_json : null;
+export default function Home() {
+  const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA'>('PORTFOLIO');
 
   return (
-    <main className="min-h-screen bg-[#09090b] text-[#fafafa] p-4 md:p-8 font-sans">
-      <header className="mb-6 flex flex-col md:flex-row items-start md:items-end justify-between border-b border-[#27272a] pb-4">
+    <main className="min-h-screen bg-[#09090b] text-[#fafafa] font-sans">
+      <header className="border-b border-[#27272a] bg-[#18181b] px-6 py-4 flex flex-col md:flex-row items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-[#e4e4e7]">
-            QUANTUM TRADER TERMINAL
+          <h1 className="text-xl font-bold tracking-tight text-[#e4e4e7] font-mono">
+            QUANTUM TRADER V2
           </h1>
-          <p className="text-[#a1a1aa] mt-1 font-mono text-sm uppercase tracking-widest">
-            Institutional Quantitative Alpha
+          <p className="text-[#a1a1aa] text-xs font-mono uppercase tracking-widest mt-1">
+            Interactive Institutional Dashboard
           </p>
         </div>
-        {latestAiReport && (
-          <div className="mt-4 md:mt-0 text-xs font-mono bg-[#18181b] px-3 py-1.5 border border-[#27272a] text-[#71717a] uppercase">
-            Data Date: {new Date(latestAiReport.fecha).toLocaleString('en-US', { timeZone: 'America/Santiago' })}
-          </div>
-        )}
       </header>
       
-      <DashboardClient 
-        initialData={uniqueData} 
-        aiReport={latestAiReport}
-        correlationMatrix={correlationMatrix}
-        efficientFrontier={efficientFrontier}
-      />
+      {/* TABS MENU */}
+      <div className="flex flex-wrap border-b-2 border-[#27272a] bg-[#09090b]">
+        <button 
+          onClick={() => setActiveTab('PORTFOLIO')}
+          className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 font-mono font-bold text-xs uppercase tracking-wider transition-colors ${activeTab === 'PORTFOLIO' ? 'bg-[#18181b] border-t-2 border-[#60a5fa] text-[#e4e4e7]' : 'text-[#71717a] hover:bg-[#18181b] hover:text-[#a1a1aa]'}`}
+        >
+          <Briefcase className="w-4 h-4" /> [01] Mi Portafolio
+        </button>
+        <button 
+          onClick={() => setActiveTab('RECOMENDACIONES')}
+          className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 font-mono font-bold text-xs uppercase tracking-wider transition-colors border-l border-[#27272a] ${activeTab === 'RECOMENDACIONES' ? 'bg-[#18181b] border-t-2 border-[#60a5fa] text-[#e4e4e7]' : 'text-[#71717a] hover:bg-[#18181b] hover:text-[#a1a1aa]'}`}
+        >
+          <Activity className="w-4 h-4" /> [02] Recomendaciones
+        </button>
+        <button 
+          onClick={() => setActiveTab('BUSCADOR')}
+          className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 font-mono font-bold text-xs uppercase tracking-wider transition-colors border-l border-[#27272a] ${activeTab === 'BUSCADOR' ? 'bg-[#18181b] border-t-2 border-[#60a5fa] text-[#e4e4e7]' : 'text-[#71717a] hover:bg-[#18181b] hover:text-[#a1a1aa]'}`}
+        >
+          <Search className="w-4 h-4" /> [03] Buscador Límite
+        </button>
+        <button 
+          onClick={() => setActiveTab('CALCULADORA')}
+          className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 font-mono font-bold text-xs uppercase tracking-wider transition-colors border-l border-[#27272a] ${activeTab === 'CALCULADORA' ? 'bg-[#18181b] border-t-2 border-[#60a5fa] text-[#e4e4e7]' : 'text-[#71717a] hover:bg-[#18181b] hover:text-[#a1a1aa]'}`}
+        >
+          <Calculator className="w-4 h-4" /> [04] Sizing
+        </button>
+      </div>
+
+      <div className="p-4 md:p-6">
+        {activeTab === 'PORTFOLIO' && <PortfolioTab />}
+        {activeTab === 'RECOMENDACIONES' && <RecommendationsTab />}
+        {activeTab === 'BUSCADOR' && <ScreenerTab />}
+        {activeTab === 'CALCULADORA' && <SizingTab />}
+      </div>
     </main>
   );
 }
