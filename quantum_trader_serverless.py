@@ -38,7 +38,7 @@ else:
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    llm = genai.GenerativeModel('gemini-1.5-pro-latest')
+    llm = genai.GenerativeModel('gemini-2.5-flash')
 else:
     llm = None
 
