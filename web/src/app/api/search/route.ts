@@ -26,8 +26,8 @@ export async function GET(request: Request) {
 
     // Filter only equities, etfs, mutual funds
     const results = quotes
-      .filter((q: any) => q.quoteType === 'EQUITY' || q.quoteType === 'ETF' || q.quoteType === 'MUTUALFUND')
-      .map((q: any) => ({
+      .filter((q: Record<string, string>) => q.quoteType === 'EQUITY' || q.quoteType === 'ETF' || q.quoteType === 'MUTUALFUND')
+      .map((q: Record<string, string>) => ({
         symbol: q.symbol,
         name: q.shortname || q.longname,
         exchange: q.exchDisp

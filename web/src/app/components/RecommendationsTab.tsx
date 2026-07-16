@@ -19,11 +19,7 @@ export default function RecommendationsTab() {
   const [data, setData] = useState<AiData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchAI();
-  }, []);
-
-  const fetchAI = async () => {
+  async function fetchAI() {
     try {
       const { data: aiRes, error } = await supabase
         .from('analisis_ia')
@@ -44,7 +40,11 @@ export default function RecommendationsTab() {
     } finally {
       setLoading(false);
     }
-  };
+  }
+
+  useEffect(() => {
+    fetchAI();
+  }, []);
 
   if (loading) return <div className="text-center p-12 font-mono text-[#a1a1aa]">Cargando análisis de IA...</div>;
 

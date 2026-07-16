@@ -37,6 +37,20 @@ export default function PortfolioTab() {
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  async function fetchPortfolio() {
+    try {
+      const res = await fetch('/api/portfolio');
+      if (res.ok) {
+        const data = await res.json();
+        setItems(data);
+      }
+    } catch (error) {
+      console.error("Error fetching portfolio", error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
     fetchPortfolio();
   }, []);
@@ -82,19 +96,6 @@ export default function PortfolioTab() {
     setShowDropdown(false);
   };
 
-  const fetchPortfolio = async () => {
-    try {
-      const res = await fetch('/api/portfolio');
-      if (res.ok) {
-        const data = await res.json();
-        setItems(data);
-      }
-    } catch (error) {
-      console.error("Error fetching portfolio", error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
