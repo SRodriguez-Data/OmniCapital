@@ -7,6 +7,9 @@ import numpy as np
 from datetime import datetime
 from supabase import create_client, Client
 import google.generativeai as genai
+from dotenv import load_dotenv
+
+load_dotenv()
 
 REST = None
 try:
