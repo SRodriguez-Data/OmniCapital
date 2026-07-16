@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import yahooFinance from 'yahoo-finance2';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -10,24 +9,37 @@ export async function GET(request: Request) {
   }
 
   try {
-    const today = new Date();
-    // Fetch last 300 days of data to guarantee 200 trading days for EMA200
-    const period1 = new Date(today.getTime() - 300 * 24 * 60 * 60 * 1000); 
+    // We use the Yahoo Finance v8 chart API directly to avoid npm package build issues in Vercel
+    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=2y`;
     
-    const queryOptions = {
-      period1,
-      period2: today,
-      interval: '1d' as const
-    };
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      },
+      next: { revalidate: 60 } // Cache for 60 seconds
+    });
 
-    const historical = await yahooFinance.historical(ticker, queryOptions);
-    const quote = await yahooFinance.quote(ticker);
-
-    if (!historical || historical.length < 20) {
-      return NextResponse.json({ error: 'Not enough historical data' }, { status: 404 });
+    if (!res.ok) {
+      return NextResponse.json({ error: 'Failed to fetch market data from Yahoo Finance' }, { status: 502 });
     }
 
-    const closes = historical.map(h => h.close).filter(c => c !== null);
+    const data = await res.json();
+    const result = data?.chart?.result?.[0];
+
+    if (!result || !result.indicators?.quote?.[0]?.close) {
+      return NextResponse.json({ error: 'Ticker not found or no historical data' }, { status: 404 });
+    }
+
+    // Filter out nulls from the close array (Yahoo sometimes returns null for holidays)
+    const rawCloses = result.indicators.quote[0].close as (number | null)[];
+    const closes = rawCloses.filter((c): c is number => c !== null);
+
+    if (closes.length < 20) {
+      return NextResponse.json({ error: 'Not enough historical data (minimum 20 days required)' }, { status: 400 });
+    }
+
+    const meta = result.meta;
+    const currentPrice = meta.regularMarketPrice || closes[closes.length - 1];
     
     // Calculate Bollinger Bands (20 days)
     const last20 = closes.slice(-20);
@@ -69,14 +81,12 @@ export async function GET(request: Request) {
     if (annualizedVolatility > 0.4) riskLevel = 'HIGH';
     if (annualizedVolatility < 0.15) riskLevel = 'LOW';
 
-    const currentPrice = quote.regularMarketPrice || closes[closes.length - 1];
-
     let signal = 'HOLD';
     if (currentPrice <= bollingerLower) signal = 'BUY';
     else if (currentPrice >= bollingerUpper) signal = 'SELL';
 
     return NextResponse.json({
-      ticker: ticker.toUpperCase(),
+      ticker: meta.symbol || ticker.toUpperCase(),
       currentPrice,
       bollingerLower,
       bollingerUpper,
@@ -84,12 +94,12 @@ export async function GET(request: Request) {
       volatility: annualizedVolatility,
       riskLevel,
       signal,
-      name: quote.longName || quote.shortName || ticker,
-      currency: quote.currency || 'USD'
+      name: meta.longName || meta.shortName || meta.symbol || ticker,
+      currency: meta.currency || 'USD'
     });
 
   } catch (error) {
     console.error('API Market Error:', error);
-    return NextResponse.json({ error: 'Failed to fetch market data' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to process market data' }, { status: 500 });
   }
 }
