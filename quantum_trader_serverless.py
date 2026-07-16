@@ -104,30 +104,31 @@ def run_serverless_screener():
 
     context_str = "\\n".join(ai_context)
     
-    prompt_macro = f"""Eres mi analista cuantitativo personal. Analiza estrictamente LOS ACTIVOS QUE YA POSEO en mi portafolio.
-Ignora el resto del mercado. Dime cuáles de MIS posiciones están sobrecompradas (vender), sobrevendidas (mantener/comprar más) o estancadas.
+    prompt_macro = f"""Eres un Analista Cuantitativo Institucional experto. Analiza estrictamente LOS ACTIVOS QUE POSEO en mi portafolio.
+Ignora el resto del mercado. Haz un análisis profundo para indicarme cuáles de MIS posiciones están sobrecompradas (VENDER), sobrevendidas (COMPRAR MÁS) o en valor justo (MANTENER).
 
-Mis Activos actuales y estado técnico:
+Mis Activos actuales y su estado técnico cuantitativo:
 {context_str}
 
-Responde estrictamente en formato JSON válido (SIN MARKDOWN). Estructura exacta:
+Responde estrictamente en formato JSON válido (SIN MARKDOWN, NI BLOQUES DE CÓDIGO). Estructura exacta que debes devolver:
 {{
-  "diagnostico_global": "Un resumen de 2 párrafos sobre cómo está mi portafolio actual (diversificación, riesgo general).",
+  "diagnostico_global": "Un resumen ejecutivo profundo de 2 a 3 párrafos evaluando la diversificación actual, el riesgo general, el contexto macroeconómico y qué movimientos tácticos sugieres.",
   "recomendaciones": [
     {{
       "ticker": "TICKER",
       "accion": "SELL",
-      "razon": "Justificación técnica muy breve (ej: tocó resistencia de Bollinger)."
+      "razon": "Justificación técnica muy detallada indicando soportes, resistencias y contexto."
     }},
     {{
       "ticker": "TICKER",
       "accion": "HOLD",
-      "razon": "Justificación técnica muy breve."
+      "razon": "Justificación detallada del porqué mantener."
     }}
   ]
 }}
-(Incluye todos los tickers del contexto en el arreglo 'recomendaciones', con accion BUY, HOLD o SELL).
+(Incluye absolutamente todos los tickers del contexto en el arreglo 'recomendaciones', con accion BUY, HOLD o SELL).
 """
+
     
     ia_data = {
         "diagnostico_global": "Generación de IA fallida o en mantenimiento.",

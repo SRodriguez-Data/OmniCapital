@@ -42,15 +42,15 @@ export default function SizingTab() {
         <div className="flex items-center gap-3 mb-6 border-b border-[#27272a] pb-4">
           <Calculator className="w-6 h-6 text-[#60a5fa]" />
           <div>
-            <h2 className="text-lg font-mono text-[#e4e4e7] uppercase tracking-wider">Position Sizing Calculator</h2>
-            <p className="text-[#a1a1aa] text-xs font-sans">Manage your risk strictly using the Fixed Fractional method.</p>
+            <h2 className="text-lg font-mono text-[#e4e4e7] uppercase tracking-wider">Calculadora de Tamaño de Posición</h2>
+            <p className="text-[#a1a1aa] text-xs font-sans">Gestiona tu riesgo estrictamente usando el método Fraccional Fijo.</p>
           </div>
         </div>
 
         <form onSubmit={calculateSizing} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-mono text-[#71717a] mb-1">Total Account Capital</label>
+              <label className="block text-xs font-mono text-[#71717a] mb-1">Capital Total de la Cuenta</label>
               <input 
                 type="number" 
                 required
@@ -61,7 +61,7 @@ export default function SizingTab() {
               />
             </div>
             <div>
-              <label className="block text-xs font-mono text-[#71717a] mb-1">Max Risk per Trade (%)</label>
+              <label className="block text-xs font-mono text-[#71717a] mb-1">Riesgo Máx. por Operación (%)</label>
               <input 
                 type="number" 
                 required
@@ -83,7 +83,7 @@ export default function SizingTab() {
               />
             </div>
             <div>
-              <label className="block text-xs font-mono text-[#71717a] mb-1">Entry Price</label>
+              <label className="block text-xs font-mono text-[#71717a] mb-1">Precio de Entrada</label>
               <input 
                 type="number" 
                 required
@@ -95,7 +95,7 @@ export default function SizingTab() {
               />
             </div>
             <div>
-              <label className="block text-xs font-mono text-[#71717a] mb-1">Stop Loss Price</label>
+              <label className="block text-xs font-mono text-[#71717a] mb-1">Precio Stop Loss</label>
               <input 
                 type="number" 
                 required
@@ -112,36 +112,36 @@ export default function SizingTab() {
             type="submit"
             className="w-full mt-6 bg-[#60a5fa] hover:bg-[#3b82f6] text-[#09090b] px-6 py-3 font-bold font-mono transition-colors"
           >
-            CALCULATE SIZING
+            CALCULAR POSICIÓN
           </button>
         </form>
       </div>
 
       {result && (
         <div className="bg-[#09090b] border border-[#27272a] rounded p-6 shadow-lg">
-          <h3 className="text-center text-xs font-mono text-[#71717a] uppercase tracking-widest mb-6">Recommendation for {ticker || 'Asset'}</h3>
+          <h3 className="text-center text-xs font-mono text-[#71717a] uppercase tracking-widest mb-6">Recomendación para {ticker || 'Activo'}</h3>
           
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 divide-y md:divide-y-0 md:divide-x divide-[#27272a] text-center">
             
             <div className="flex flex-col items-center">
-              <span className="text-[#a1a1aa] text-xs font-mono mb-2">Max Risk Amount</span>
+              <span className="text-[#a1a1aa] text-xs font-mono mb-2">Pérdida Máxima</span>
               <span className="text-2xl font-bold font-mono text-[#f87171]">${result.riskAmount.toFixed(2)}</span>
             </div>
 
             <div className="flex flex-col items-center pt-4 md:pt-0">
-              <span className="text-[#a1a1aa] text-xs font-mono mb-2">Recommended Shares</span>
+              <span className="text-[#a1a1aa] text-xs font-mono mb-2">Acciones a Comprar</span>
               <span className="text-4xl font-bold font-mono text-[#34d399]">{result.shares}</span>
             </div>
 
             <div className="flex flex-col items-center pt-4 md:pt-0">
-              <span className="text-[#a1a1aa] text-xs font-mono mb-2">Total Position Size</span>
+              <span className="text-[#a1a1aa] text-xs font-mono mb-2">Capital Invertido</span>
               <span className="text-2xl font-bold font-mono text-[#60a5fa]">${result.positionSize.toFixed(2)}</span>
             </div>
             
           </div>
           
           <p className="mt-6 text-xs text-[#71717a] font-sans text-center">
-            By buying {result.shares} shares, if the price drops to your stop loss (${stopLoss}), you will only lose exactly ${result.riskAmount.toFixed(2)} ({riskPercent}% of your capital).
+            Al comprar {result.shares} acciones, si el precio cae hasta tu Stop Loss (${stopLoss}), solo perderás exactamente ${result.riskAmount.toFixed(2)} ({riskPercent}% de tu capital total).
           </p>
         </div>
       )}

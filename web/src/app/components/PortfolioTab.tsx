@@ -82,7 +82,7 @@ export default function PortfolioTab() {
   const dataUSD = items.filter(i => i.moneda === 'USD').map(i => ({ name: i.ticker, value: i.cantidad * i.precio_compra }));
   const dataCLP = items.filter(i => i.moneda === 'CLP').map(i => ({ name: i.ticker, value: i.cantidad * i.precio_compra }));
 
-  if (loading) return <div className="text-center p-12 font-mono text-[#a1a1aa]">Loading portfolio...</div>;
+  if (loading) return <div className="text-center p-12 font-mono text-[#a1a1aa]">Cargando portafolio...</div>;
 
   return (
     <div className="space-y-6">

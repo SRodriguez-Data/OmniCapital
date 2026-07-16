@@ -1,15 +1,18 @@
 import { NextResponse } from 'next/server';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+// Initialize Gemini only if key exists (don't break the build if missing, we just return no AI)
+const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const ticker = searchParams.get('ticker');
 
   if (!ticker) {
-    return NextResponse.json({ error: 'Ticker is required' }, { status: 400 });
+    return NextResponse.json({ error: 'El ticker es obligatorio' }, { status: 400 });
   }
 
   try {
-    // We use the Yahoo Finance v8 chart API directly to avoid npm package build issues in Vercel
     const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=2y`;
     
     const res = await fetch(url, {
@@ -20,22 +23,21 @@ export async function GET(request: Request) {
     });
 
     if (!res.ok) {
-      return NextResponse.json({ error: 'Failed to fetch market data from Yahoo Finance' }, { status: 502 });
+      return NextResponse.json({ error: 'Fallo al obtener datos de Yahoo Finance' }, { status: 502 });
     }
 
     const data = await res.json();
     const result = data?.chart?.result?.[0];
 
     if (!result || !result.indicators?.quote?.[0]?.close) {
-      return NextResponse.json({ error: 'Ticker not found or no historical data' }, { status: 404 });
+      return NextResponse.json({ error: 'Ticker no encontrado o sin datos históricos' }, { status: 404 });
     }
 
-    // Filter out nulls from the close array (Yahoo sometimes returns null for holidays)
     const rawCloses = result.indicators.quote[0].close as (number | null)[];
     const closes = rawCloses.filter((c): c is number => c !== null);
 
     if (closes.length < 20) {
-      return NextResponse.json({ error: 'Not enough historical data (minimum 20 days required)' }, { status: 400 });
+      return NextResponse.json({ error: 'No hay suficientes datos históricos (mínimo 20 días)' }, { status: 400 });
     }
 
     const meta = result.meta;
@@ -51,7 +53,6 @@ export async function GET(request: Request) {
     const bollingerUpper = sma20 + (2 * std20);
 
     // Calculate EMA200
-    // Simple EMA starting with SMA of first 200 days if available
     let ema200 = null;
     if (closes.length >= 200) {
       const smoothing = 2 / (200 + 1);
@@ -63,11 +64,10 @@ export async function GET(request: Request) {
       }
       ema200 = prevEma;
     } else {
-      // Fallback to SMA if less than 200 days available
       ema200 = closes.reduce((a, b) => a + b, 0) / closes.length;
     }
 
-    // Calculate Volatility (Risk) - Annualized
+    // Calculate Volatility (Risk)
     const returns = [];
     for(let i = 1; i < closes.length; i++) {
       returns.push((closes[i] - closes[i-1]) / closes[i-1]);
@@ -77,13 +77,38 @@ export async function GET(request: Request) {
     const dailyVolatility = Math.sqrt(returnVariance);
     const annualizedVolatility = dailyVolatility * Math.sqrt(252);
 
-    let riskLevel = 'MODERATE';
-    if (annualizedVolatility > 0.4) riskLevel = 'HIGH';
-    if (annualizedVolatility < 0.15) riskLevel = 'LOW';
+    let riskLevel = 'MODERADO';
+    if (annualizedVolatility > 0.4) riskLevel = 'ALTO';
+    if (annualizedVolatility < 0.15) riskLevel = 'BAJO';
 
-    let signal = 'HOLD';
-    if (currentPrice <= bollingerLower) signal = 'BUY';
-    else if (currentPrice >= bollingerUpper) signal = 'SELL';
+    let signal = 'MANTENER';
+    if (currentPrice <= bollingerLower) signal = 'COMPRAR';
+    else if (currentPrice >= bollingerUpper) signal = 'VENDER';
+
+    // Gemini AI Analysis (if API key is present)
+    let aiAnalysis = "No se ha configurado la API Key de Gemini en Vercel, por lo que el análisis de IA está deshabilitado.";
+    
+    if (genAI) {
+      try {
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const prompt = `
+Eres un analista cuantitativo senior. Haz un resumen ejecutivo (máximo 4 líneas) en ESPAÑOL sobre el activo ${meta.symbol} (${meta.longName || ''}).
+Datos actuales:
+- Precio: ${currentPrice.toFixed(2)} ${meta.currency}
+- Banda Bollinger Inferior (Soporte ideal): ${bollingerLower.toFixed(2)}
+- Banda Bollinger Superior (Toma de ganancias): ${bollingerUpper.toFixed(2)}
+- EMA 200 (Regresión a la media): ${ema200 ? ema200.toFixed(2) : 'N/A'}
+- Nivel de Riesgo (Volatilidad): ${riskLevel}
+
+Dime de forma experta si el activo está sobrecomprado, sobrevendido o en zona de valor, y si recomendarías una entrada a estos precios basado estrictamente en el análisis técnico cuantitativo.
+        `;
+        const aiResponse = await model.generateContent(prompt);
+        aiAnalysis = aiResponse.response.text();
+      } catch (aiError) {
+        console.error("Gemini AI Error:", aiError);
+        aiAnalysis = "Hubo un error al generar el análisis de IA en este momento.";
+      }
+    }
 
     return NextResponse.json({
       ticker: meta.symbol || ticker.toUpperCase(),
@@ -95,11 +120,12 @@ export async function GET(request: Request) {
       riskLevel,
       signal,
       name: meta.longName || meta.shortName || meta.symbol || ticker,
-      currency: meta.currency || 'USD'
+      currency: meta.currency || 'USD',
+      aiAnalysis
     });
 
   } catch (error) {
     console.error('API Market Error:', error);
-    return NextResponse.json({ error: 'Failed to process market data' }, { status: 500 });
+    return NextResponse.json({ error: 'Fallo interno al procesar los datos del mercado' }, { status: 500 });
   }
 }

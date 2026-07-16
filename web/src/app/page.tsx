@@ -18,7 +18,7 @@ export default function Home() {
             QUANTUM TRADER V2
           </h1>
           <p className="text-[#a1a1aa] text-xs font-mono uppercase tracking-widest mt-1">
-            Interactive Institutional Dashboard
+            Terminal Institucional Interactiva
           </p>
         </div>
       </header>
@@ -47,7 +47,7 @@ export default function Home() {
           onClick={() => setActiveTab('CALCULADORA')}
           className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 font-mono font-bold text-xs uppercase tracking-wider transition-colors border-l border-[#27272a] ${activeTab === 'CALCULADORA' ? 'bg-[#18181b] border-t-2 border-[#60a5fa] text-[#e4e4e7]' : 'text-[#71717a] hover:bg-[#18181b] hover:text-[#a1a1aa]'}`}
         >
-          <Calculator className="w-4 h-4" /> [04] Sizing
+          <Calculator className="w-4 h-4" /> [04] Calculadora Riesgo
         </button>
       </div>
 

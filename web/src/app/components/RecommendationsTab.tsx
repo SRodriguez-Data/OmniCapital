@@ -46,13 +46,13 @@ export default function RecommendationsTab() {
     }
   };
 
-  if (loading) return <div className="text-center p-12 font-mono text-[#a1a1aa]">Loading AI insights...</div>;
+  if (loading) return <div className="text-center p-12 font-mono text-[#a1a1aa]">Cargando análisis de IA...</div>;
 
   if (!data || data.recomendaciones.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-[#71717a] font-mono border border-[#27272a] bg-[#09090b] rounded">
-        <p>No AI recommendations found for your portfolio.</p>
-        <p className="text-[10px] mt-2">Make sure your portfolio has items and run the Python backend script.</p>
+        <p>No se encontraron recomendaciones de IA para tu portafolio.</p>
+        <p className="text-[10px] mt-2">Asegúrate de tener activos en el portafolio y ejecuta el bot de Python.</p>
       </div>
     );
   }
