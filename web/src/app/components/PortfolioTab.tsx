@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
 
 interface PortfolioItem {
@@ -9,6 +9,12 @@ interface PortfolioItem {
   cantidad: number;
   precio_compra: number;
   moneda: 'USD' | 'CLP';
+}
+
+interface SearchResult {
+  symbol: string;
+  name: string;
+  exchange: string;
 }
 
 const COLORS_USD = ['#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8', '#1e40af', '#1e3a8a'];
@@ -25,9 +31,56 @@ export default function PortfolioTab() {
   const [moneda, setMoneda] = useState<'USD'|'CLP'>('USD');
   const [submitting, setSubmitting] = useState(false);
 
+  // Autocomplete state
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     fetchPortfolio();
   }, []);
+
+  // Debounced search
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(() => {
+      if (ticker.length >= 2 && showDropdown) {
+        setIsSearching(true);
+        fetch(`/api/search?q=${encodeURIComponent(ticker)}`)
+          .then(res => res.json())
+          .then(data => {
+            if (Array.isArray(data)) setSearchResults(data);
+          })
+          .catch(() => setSearchResults([]))
+          .finally(() => setIsSearching(false));
+      } else {
+        setSearchResults([]);
+      }
+    }, 300);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [ticker, showDropdown]);
+
+  // Click outside listener
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleSelectTicker = (selectedTicker: string) => {
+    setTicker(selectedTicker);
+    if (selectedTicker.endsWith('.SN')) {
+      setMoneda('CLP');
+    } else {
+      setMoneda('USD');
+    }
+    setShowDropdown(false);
+  };
 
   const fetchPortfolio = async () => {
     try {
@@ -89,16 +142,48 @@ export default function PortfolioTab() {
       
       {/* ADD NEW ITEM FORM */}
       <div className="bg-[#18181b] border border-[#27272a] p-4 rounded flex flex-col md:flex-row gap-4 items-end">
-        <div className="flex-1 w-full">
+        <div className="flex-1 w-full relative" ref={dropdownRef}>
           <label className="block text-xs font-mono text-[#71717a] mb-1">Ticker / Activo</label>
           <input 
             type="text" 
             placeholder="Ej: VOO, SQM-B.SN" 
             value={ticker}
-            onChange={e => setTicker(e.target.value)}
-            className="w-full bg-[#09090b] border border-[#3f3f46] text-[#e4e4e7] p-2 text-sm font-mono focus:outline-none focus:border-[#60a5fa]"
+            onChange={e => {
+              setTicker(e.target.value);
+              setShowDropdown(true);
+            }}
+            onFocus={() => { if(ticker.length >= 2) setShowDropdown(true); }}
+            className="w-full bg-[#09090b] border border-[#3f3f46] text-[#e4e4e7] p-2 text-sm font-mono focus:outline-none focus:border-[#60a5fa] uppercase"
           />
+          
+          {/* AUTOCOMPLETE DROPDOWN */}
+          {showDropdown && (ticker.length >= 2) && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-[#18181b] border border-[#3f3f46] rounded-sm shadow-xl z-50 max-h-60 overflow-y-auto">
+              {isSearching ? (
+                <div className="p-3 text-xs text-[#a1a1aa] font-mono text-center">Buscando...</div>
+              ) : searchResults.length > 0 ? (
+                <ul className="text-left font-mono text-sm">
+                  {searchResults.map((item, idx) => (
+                    <li 
+                      key={idx} 
+                      onClick={() => handleSelectTicker(item.symbol)}
+                      className="p-3 hover:bg-[#27272a] cursor-pointer border-b border-[#27272a] last:border-0"
+                    >
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-[#60a5fa]">{item.symbol}</span>
+                        <span className="text-[10px] text-[#71717a] bg-[#09090b] px-1 rounded">{item.exchange}</span>
+                      </div>
+                      <div className="text-xs text-[#a1a1aa] truncate">{item.name}</div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="p-3 text-xs text-[#71717a] font-mono text-center">No se encontraron resultados</div>
+              )}
+            </div>
+          )}
         </div>
+        
         <div className="w-full md:w-32">
           <label className="block text-xs font-mono text-[#71717a] mb-1">Cantidad</label>
           <input 
