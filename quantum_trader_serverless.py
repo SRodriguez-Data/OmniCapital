@@ -172,55 +172,63 @@ def run_top5_opportunities():
     if not supabase or not llm: return
 
     try:
-        # Get all distinct tickers from history
-        res_tickers = supabase.table("precios_historicos").select("ticker").execute()
-        all_tickers = list(set([r['ticker'] for r in res_tickers.data])) if res_tickers.data else []
-        
+        # Import the universe of tickers from miner.py to avoid 1000-row limit on Supabase select
+        try:
+            from miner import obtener_universo_masivo
+            all_tickers = obtener_universo_masivo()
+        except:
+            all_tickers = get_portfolio_tickers()
+
         if not all_tickers: return
 
-        # Fetch recent 20 days for all tickers
-        res = supabase.table("precios_historicos")\
-            .select("date, ticker, close")\
-            .order("date", desc=True)\
-            .limit(20 * len(all_tickers)).execute()
+        # Fetch in batches of 30 tickers to avoid massive queries
+        candidates = []
+        batch_size = 30
+        for i in range(0, len(all_tickers), batch_size):
+            batch = all_tickers[i:i+batch_size]
+            res = supabase.table("precios_historicos")\
+                .select("date, ticker, close")\
+                .in_("ticker", batch)\
+                .order("date", desc=True)\
+                .limit(20 * len(batch)).execute()
             
-        df = pd.DataFrame(res.data)
+            if not res.data: continue
+            df = pd.DataFrame(res.data)
+            
+            for ticker in batch:
+                t_data = df[df['ticker'] == ticker]
+                if len(t_data) < 15: continue
+                
+                closes = t_data['close'].values
+                curr = closes[0]
+                
+                # simple RSI approx
+                diff = np.diff(closes[::-1])
+                gains = diff[diff > 0].sum()
+                losses = -diff[diff < 0].sum()
+                rs = gains / losses if losses > 0 else 0
+                rsi = 100 - (100 / (1 + rs)) if losses > 0 else 100
+                
+                # Bollinger
+                last20 = closes[:20] if len(closes) >= 20 else closes
+                sma = np.mean(last20)
+                std = np.std(last20)
+                lower = sma - (2*std)
+                
+                # Condition: RSI < 45 or Price near Lower Band
+                if rsi < 45 or curr <= (lower * 1.05):
+                    candidates.append(f"- {ticker}: Precio ${curr:.2f}, RSI {rsi:.1f}, LBB ${lower:.2f}")
+
     except Exception as e:
         logging.error(f"Error: {e}")
         return
-
-    # Filter pre-candidates based on simple technicals
-    candidates = []
-    for ticker in all_tickers:
-        t_data = df[df['ticker'] == ticker]
-        if len(t_data) < 20: continue
-        
-        closes = t_data['close'].values
-        curr = closes[0]
-        
-        # simple RSI approx
-        diff = np.diff(closes[::-1])
-        gains = diff[diff > 0].sum()
-        losses = -diff[diff < 0].sum()
-        rs = gains / losses if losses > 0 else 0
-        rsi = 100 - (100 / (1 + rs)) if losses > 0 else 100
-        
-        # Bollinger
-        last20 = closes[:20]
-        sma = np.mean(last20)
-        std = np.std(last20)
-        lower = sma - (2*std)
-        
-        # Condition: RSI < 45 or Price near Lower Band
-        if rsi < 45 or curr <= (lower * 1.05):
-            candidates.append(f"- {ticker}: Precio ${curr:.2f}, RSI {rsi:.1f}, LBB ${lower:.2f}")
 
     if not candidates:
         logging.info("No hay candidatos claros.")
         return
 
-    # Send top candidates (up to 30) to Gemini
-    context_str = "\\n".join(candidates[:30])
+    # Send top candidates (up to 40) to Gemini
+    context_str = "\\n".join(candidates[:40])
     prompt = f"""Eres un Gestor de Fondos de Cobertura Cuantitativo. 
 He escaneado el mercado y encontré estos activos sobrevendidos o cerca de soportes críticos (Límites Inferiores de Bollinger):
 {context_str}
@@ -242,9 +250,22 @@ Debes devolver estrictamente un JSON válido con esta estructura:
 
     try:
         response = llm.generate_content(prompt)
-        texto_ia = response.text.replace("```json", "").replace("```", "").strip()
-        ia_data = json.loads(texto_ia, strict=False)
+        raw_text = response.text
         
+        # Extract everything between first { and last }
+        start_idx = raw_text.find('{')
+        end_idx = raw_text.rfind('}')
+        if start_idx != -1 and end_idx != -1:
+            json_str = raw_text[start_idx:end_idx+1]
+        else:
+            json_str = raw_text.replace("```json", "").replace("```", "").strip()
+            
+        try:
+            ia_data = json.loads(json_str, strict=False)
+        except json.JSONDecodeError as e:
+            logging.error(f"Error parseando JSON de Gemini. Respuesta cruda: {raw_text}")
+            return
+            
         # Save Top 5
         # We find the latest analisis_ia and UPDATE it with the top 5
         latest = supabase.table("analisis_ia").select("id, candidatos_json").order("fecha", desc=True).limit(1).execute()
