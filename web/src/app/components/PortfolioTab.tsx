@@ -3,7 +3,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
+import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, Legend, AreaChart, Area, XAxis, YAxis, CartesianGrid } from 'recharts';
 import SymbolSearchModal from './SymbolSearchModal';
 import { Search } from 'lucide-react';
 
@@ -20,6 +20,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
 
 export default function PortfolioTab() {
   const [items, setItems] = useState<PortfolioItem[]>([]);
+  const [historyData, setHistoryData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
   // Form state
@@ -45,8 +46,21 @@ export default function PortfolioTab() {
     }
   }
 
+  async function fetchHistory() {
+    try {
+      const res = await fetch('/api/portfolio/history');
+      if (res.ok) {
+        const data = await res.json();
+        setHistoryData(data);
+      }
+    } catch (error) {
+      console.error("Error fetching history", error);
+    }
+  }
+
   useEffect(() => {
     fetchPortfolio();
+    fetchHistory();
   }, []);
 
   const handleSelectTicker = (selectedTicker: string) => {
@@ -76,6 +90,7 @@ export default function PortfolioTab() {
       if (res.ok) {
         setTicker(''); setCantidad(''); setPrecio('');
         await fetchPortfolio();
+        await fetchHistory(); // refresh history as well
       }
     } catch {
       console.error("Error al añadir");
@@ -89,6 +104,7 @@ export default function PortfolioTab() {
       const res = await fetch(`/api/portfolio?id=${id}`, { method: 'DELETE' });
       if (res.ok) {
         await fetchPortfolio();
+        await fetchHistory();
       }
     } catch {
       console.error("Error al eliminar");
@@ -163,6 +179,48 @@ export default function PortfolioTab() {
         onClose={() => setIsModalOpen(false)} 
         onSelect={handleSelectTicker} 
       />
+
+      {/* HISTORICAL P&L CHART */}
+      {historyData.length > 0 && (
+        <div className="bg-[#18181b] border border-[#27272a] rounded p-6 h-96 flex flex-col">
+          <div className="flex justify-between items-center border-b border-[#27272a] pb-4 mb-6">
+            <h2 className="text-xs font-mono font-bold text-[#e4e4e7] uppercase">Evolución P&L (Simulado 45D)</h2>
+            <div className="text-right">
+              <p className="text-[10px] text-[#71717a] font-mono uppercase">P&L Actual</p>
+              <p className={`text-lg font-bold font-mono ${historyData[historyData.length - 1].profitLoss >= 0 ? 'text-[#34d399]' : 'text-[#f87171]'}`}>
+                ${historyData[historyData.length - 1].profitLoss.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+              </p>
+            </div>
+          </div>
+          <div className="flex-1">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={historyData} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#34d399" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#34d399" stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="colorLoss" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#f87171" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#f87171" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                <XAxis dataKey="date" stroke="#71717a" fontSize={10} tickFormatter={(tick) => tick.substring(5)} tickMargin={10} axisLine={false} tickLine={false} />
+                <YAxis stroke="#71717a" fontSize={10} tickFormatter={(val) => `$${val.toLocaleString()}`} axisLine={false} tickLine={false} width={80} domain={['auto', 'auto']} />
+                <RechartsTooltip 
+                  contentStyle={{backgroundColor: '#09090b', borderColor: '#27272a', fontFamily: 'monospace'}} 
+                  itemStyle={{color: '#e4e4e7'}} 
+                  labelStyle={{color: '#71717a'}}
+                  formatter={(value: any, name: any) => [`$${Number(value).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`, name]}
+                />
+                <Area type="monotone" dataKey="totalValue" stroke="#60a5fa" fill="transparent" strokeWidth={2} name="Valor Total" />
+                <Area type="monotone" dataKey="profitLoss" stroke={(historyData[historyData.length - 1]?.profitLoss >= 0) ? "#34d399" : "#f87171"} fill={(historyData[historyData.length - 1]?.profitLoss >= 0) ? "url(#colorProfit)" : "url(#colorLoss)"} strokeWidth={2} name="Ganancia/Pérdida" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* USD PIE CHART */}
