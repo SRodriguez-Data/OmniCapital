@@ -1,0 +1,50 @@
+import { NextResponse } from 'next/server';
+import YahooFinance from 'yahoo-finance2';
+
+const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
+
+export async function GET() {
+  try {
+    const tickers = ['^VIX', '^TNX', 'HG=F', 'CL=F', '^GSPC'];
+    
+    const results = await Promise.all(
+      tickers.map(async (ticker) => {
+        try {
+          const quote = await yahooFinance.quote(ticker) as any;
+          return {
+            symbol: ticker,
+            price: quote.regularMarketPrice || 0,
+            change: quote.regularMarketChange || 0,
+            changePercent: quote.regularMarketChangePercent || 0,
+            name: quote.shortName || ticker,
+          };
+        } catch (e) {
+          console.error(`Error fetching macro for ${ticker}:`, e);
+          return null;
+        }
+      })
+    );
+
+    const validResults = results.filter(r => r !== null);
+    
+    // Format names for UI
+    const nameMap: Record<string, string> = {
+      '^VIX': 'VIX (Miedo)',
+      '^TNX': 'Bono US 10Y',
+      'HG=F': 'Cobre (COMEX)',
+      'CL=F': 'Petróleo WTI',
+      '^GSPC': 'S&P 500'
+    };
+
+    const formattedResults = validResults.map(r => ({
+      ...r,
+      displayName: nameMap[r!.symbol] || r!.name
+    }));
+
+    return NextResponse.json(formattedResults);
+
+  } catch (err: any) {
+    console.error('API Macro Error:', err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}

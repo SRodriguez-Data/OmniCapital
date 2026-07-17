@@ -7,6 +7,7 @@ import ScreenerTab from './components/ScreenerTab';
 import SizingTab from './components/SizingTab';
 import TopOportunidadesTab from './components/TopOportunidadesTab';
 import DividendsTab from './components/DividendsTab';
+import MacroPanel from './components/MacroPanel';
 import { Briefcase, Activity, Search, Calculator, Target, DollarSign } from 'lucide-react';
 
 export default function Home() {
@@ -24,6 +25,8 @@ export default function Home() {
           </p>
         </div>
       </header>
+
+      <MacroPanel />
       
       {/* TABS MENU */}
       <div className="flex flex-wrap border-b-2 border-[#27272a] bg-[#09090b]">
