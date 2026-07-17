@@ -1,14 +1,15 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Briefcase, Activity, Search, Calculator } from 'lucide-react';
 import PortfolioTab from './components/PortfolioTab';
 import RecommendationsTab from './components/RecommendationsTab';
 import ScreenerTab from './components/ScreenerTab';
 import SizingTab from './components/SizingTab';
+import TopOportunidadesTab from './components/TopOportunidadesTab';
+import { Briefcase, Activity, Search, Calculator, Target } from 'lucide-react';
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA'>('PORTFOLIO');
+  const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA' | 'TOP5'>('PORTFOLIO');
 
   return (
     <main className="min-h-screen bg-[#09090b] text-[#fafafa] font-sans">
@@ -35,25 +36,32 @@ export default function Home() {
           onClick={() => setActiveTab('RECOMENDACIONES')}
           className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 font-mono font-bold text-xs uppercase tracking-wider transition-colors border-l border-[#27272a] ${activeTab === 'RECOMENDACIONES' ? 'bg-[#18181b] border-t-2 border-[#60a5fa] text-[#e4e4e7]' : 'text-[#71717a] hover:bg-[#18181b] hover:text-[#a1a1aa]'}`}
         >
-          <Activity className="w-4 h-4" /> [02] Recomendaciones
+          <Activity className="w-4 h-4" /> [02] Mi Diagnóstico IA
+        </button>
+        <button 
+          onClick={() => setActiveTab('TOP5')}
+          className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 font-mono font-bold text-xs uppercase tracking-wider transition-colors border-l border-[#27272a] ${activeTab === 'TOP5' ? 'bg-[#18181b] border-t-2 border-[#d946ef] text-[#e4e4e7]' : 'text-[#71717a] hover:bg-[#18181b] hover:text-[#a1a1aa]'}`}
+        >
+          <Target className="w-4 h-4" /> [03] Top 5 Oportunidades
         </button>
         <button 
           onClick={() => setActiveTab('BUSCADOR')}
           className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 font-mono font-bold text-xs uppercase tracking-wider transition-colors border-l border-[#27272a] ${activeTab === 'BUSCADOR' ? 'bg-[#18181b] border-t-2 border-[#60a5fa] text-[#e4e4e7]' : 'text-[#71717a] hover:bg-[#18181b] hover:text-[#a1a1aa]'}`}
         >
-          <Search className="w-4 h-4" /> [03] Buscador Límite
+          <Search className="w-4 h-4" /> [04] Buscador Límite
         </button>
         <button 
           onClick={() => setActiveTab('CALCULADORA')}
           className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 font-mono font-bold text-xs uppercase tracking-wider transition-colors border-l border-[#27272a] ${activeTab === 'CALCULADORA' ? 'bg-[#18181b] border-t-2 border-[#60a5fa] text-[#e4e4e7]' : 'text-[#71717a] hover:bg-[#18181b] hover:text-[#a1a1aa]'}`}
         >
-          <Calculator className="w-4 h-4" /> [04] Calculadora Riesgo
+          <Calculator className="w-4 h-4" /> [05] Calculadora Riesgo
         </button>
       </div>
 
       <div className="p-4 md:p-6">
         {activeTab === 'PORTFOLIO' && <PortfolioTab />}
         {activeTab === 'RECOMENDACIONES' && <RecommendationsTab />}
+        {activeTab === 'TOP5' && <TopOportunidadesTab />}
         {activeTab === 'BUSCADOR' && <ScreenerTab />}
         {activeTab === 'CALCULADORA' && <SizingTab />}
       </div>

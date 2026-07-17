@@ -62,7 +62,7 @@ def obtener_universo_masivo() -> list[str]:
         "SMU.SN", "ENTEL.SN", "VAPORES.SN", "ITAUCL.SN", "AGUAS-A.SN", 
         "IAM.SN", "CAP.SN", "COLBUN.SN", "ECL.SN", "PARAUCO.SN", "MALLPLAZA.SN",
         "RIPLEY.SN", "FALABELLA.SN", "SONDA.SN", "CONCHATORO.SN", "CCU.SN",
-        "ILC.SN", "QUINENCO.SN", 
+        "ILC.SN", "QUINENCO.SN", "CFINRENTAS.SN", "CFMITNIPSA.SN",
         "TSM", "SONY", "TM", "HMC", "KEP", "BABA", "JD", "MUFG", "INFY", "WIT",
         "NTTYY", "BUD", "SFTBY", "BHP", "BIDU", "PDD", "LI", "NIO", 
         "NVO", "SAP", "SHEL", "UL", "SNY", "BP", "DEO", "BTI", "GSK", "SAN", 

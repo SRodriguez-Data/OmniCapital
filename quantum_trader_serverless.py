@@ -152,17 +152,111 @@ Responde estrictamente en formato JSON válido (SIN MARKDOWN, NI BLOQUES DE CÓD
     # Vamos a reusar analisis_ia insertando con una key especial para no crear otra tabla
     try:
         # We will save this in analisis_ia, using vision_radar as the diagnostico
+        # Fetch previous data to merge if we want, or just insert new
+        candidatos = {"portafolio_recomendaciones": ia_data.get("recomendaciones", [])}
+        
         supabase.table("analisis_ia").insert({
-            "candidatos_json": {"portafolio_recomendaciones": ia_data.get("recomendaciones", [])},
+            "candidatos_json": candidatos,
             "vision_radar": ia_data.get("diagnostico_global", ""),
             "seleccion_fondo": "N/A",
             "setup_tecnico": "N/A",
             "contexto_macro": "N/A",
             "insights_tickers": {}
         }).execute()
-        logging.info("✅ Pipeline de Recomendaciones de Portafolio Finalizado y guardado.")
+        logging.info("✅ Pipeline de Recomendaciones de Portafolio Finalizado.")
     except Exception as e:
         logging.error(f"Error guardando IA en Supabase: {e}")
 
+def run_top5_opportunities():
+    logging.info("🚀 Iniciando Búsqueda de Top 5 Oportunidades Globales...")
+    if not supabase or not llm: return
+
+    try:
+        # Get all distinct tickers from history
+        res_tickers = supabase.table("precios_historicos").select("ticker").execute()
+        all_tickers = list(set([r['ticker'] for r in res_tickers.data])) if res_tickers.data else []
+        
+        if not all_tickers: return
+
+        # Fetch recent 20 days for all tickers
+        res = supabase.table("precios_historicos")\
+            .select("date, ticker, close")\
+            .order("date", desc=True)\
+            .limit(20 * len(all_tickers)).execute()
+            
+        df = pd.DataFrame(res.data)
+    except Exception as e:
+        logging.error(f"Error: {e}")
+        return
+
+    # Filter pre-candidates based on simple technicals
+    candidates = []
+    for ticker in all_tickers:
+        t_data = df[df['ticker'] == ticker]
+        if len(t_data) < 20: continue
+        
+        closes = t_data['close'].values
+        curr = closes[0]
+        
+        # simple RSI approx
+        diff = np.diff(closes[::-1])
+        gains = diff[diff > 0].sum()
+        losses = -diff[diff < 0].sum()
+        rs = gains / losses if losses > 0 else 0
+        rsi = 100 - (100 / (1 + rs)) if losses > 0 else 100
+        
+        # Bollinger
+        last20 = closes[:20]
+        sma = np.mean(last20)
+        std = np.std(last20)
+        lower = sma - (2*std)
+        
+        # Condition: RSI < 45 or Price near Lower Band
+        if rsi < 45 or curr <= (lower * 1.05):
+            candidates.append(f"- {ticker}: Precio ${curr:.2f}, RSI {rsi:.1f}, LBB ${lower:.2f}")
+
+    if not candidates:
+        logging.info("No hay candidatos claros.")
+        return
+
+    # Send top candidates (up to 30) to Gemini
+    context_str = "\\n".join(candidates[:30])
+    prompt = f"""Eres un Gestor de Fondos de Cobertura Cuantitativo. 
+He escaneado el mercado y encontré estos activos sobrevendidos o cerca de soportes críticos (Límites Inferiores de Bollinger):
+{context_str}
+
+Tu tarea es seleccionar las 5 MEJORES oportunidades de compra (Top 5).
+Debes devolver estrictamente un JSON válido con esta estructura:
+{{
+  "top5": [
+    {{
+      "ticker": "TICKER",
+      "precio_entrada_ideal": "Ej: $500",
+      "target_price": "Ej: $600",
+      "riesgo": "ALTO/MEDIO/BAJO",
+      "justificacion": "Análisis profundo de por qué es una excelente oportunidad ahora."
+    }}
+  ]
+}}
+"""
+
+    try:
+        response = llm.generate_content(prompt)
+        texto_ia = response.text.replace("```json", "").replace("```", "").strip()
+        ia_data = json.loads(texto_ia, strict=False)
+        
+        # Save Top 5
+        # We find the latest analisis_ia and UPDATE it with the top 5
+        latest = supabase.table("analisis_ia").select("id, candidatos_json").order("fecha", desc=True).limit(1).execute()
+        if latest.data:
+            row_id = latest.data[0]["id"]
+            c_json = latest.data[0].get("candidatos_json", {})
+            c_json["top5_oportunidades"] = ia_data.get("top5", [])
+            supabase.table("analisis_ia").update({"candidatos_json": c_json}).eq("id", row_id).execute()
+            logging.info("✅ Top 5 Oportunidades guardadas con éxito.")
+    except Exception as e:
+        logging.error(f"Error Top 5: {e}")
+
 if __name__ == "__main__":
     run_serverless_screener()
+    run_top5_opportunities()
