@@ -9,10 +9,11 @@ import TopOportunidadesTab from './components/TopOportunidadesTab';
 import DividendsTab from './components/DividendsTab';
 import MacroPanel from './components/MacroPanel';
 import NotificationBell from './components/NotificationBell';
-import { Briefcase, Activity, Search, Calculator, Target, DollarSign } from 'lucide-react';
+import BacktestTab from './components/BacktestTab';
+import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History } from 'lucide-react';
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA' | 'TOP5' | 'DIVIDENDOS'>('PORTFOLIO');
+  const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA' | 'TOP5' | 'DIVIDENDOS' | 'BACKTEST'>('PORTFOLIO');
 
   return (
     <main className="min-h-screen bg-[#09090b] text-[#fafafa] font-sans">
