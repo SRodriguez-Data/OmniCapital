@@ -29,7 +29,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'El portafolio está vacío' }, { status: 400 });
     }
 
-    // 2. Obtener precios actuales
+    // 2. Obtener Top 5 Oportunidades Externas
+    const { data: iaData } = await supabase
+      .from('analisis_ia')
+      .select('candidatos_json')
+      .order('fecha', { ascending: false })
+      .limit(1);
+    
+    let externalOpportunities: any[] = [];
+    if (iaData && iaData.length > 0) {
+      externalOpportunities = iaData[0].candidatos_json?.top5_oportunidades || [];
+    }
+
+    // 3. Obtener precios actuales del portafolio
     const portfolioWithPrices = await Promise.all(
       portfolio.map(async (item) => {
         try {
@@ -41,33 +53,37 @@ export async function POST(request: Request) {
             moneda: quote.currency || item.moneda
           };
         } catch (e) {
-          console.error(`Error fetching price for ${item.ticker}:`, e);
           return {
             ticker: item.ticker,
             cantidad: item.cantidad,
-            precioActual: item.precio_compra, // fallback
+            precioActual: item.precio_compra,
             moneda: item.moneda
           };
         }
       })
     );
 
-    // 3. Formular prompt para Gemini
+    // 4. Formular prompt para Gemini
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     
     const prompt = `
 Eres un portfolio manager cuantitativo. 
-Tengo el siguiente portafolio de inversiones:
+Tengo el siguiente portafolio ACTUAL de inversiones:
 ${JSON.stringify(portfolioWithPrices, null, 2)}
 
+Y el mercado (tu modelo de IA interno) acaba de detectar estas 5 OPORTUNIDADES EXTERNAS (que actualmente NO tengo o podría tener):
+${JSON.stringify(externalOpportunities, null, 2)}
+
 Tengo un presupuesto extra de exactamente $${budget} para invertir HOY.
-Tu objetivo es sugerirme cuántas acciones (número ENTERO de "sharesToBuy") debo comprar de CADA activo para optimizar y rebalancear mi portafolio hacia un perfil de riesgo moderado/seguro, maximizando la diversificación.
+Tu objetivo es sugerirme cuántas acciones (número ENTERO de "sharesToBuy") debo comprar. 
+Puedes elegir comprar activos de MI PORTAFOLIO ACTUAL (para rebalancear) O comprar activos de las OPORTUNIDADES EXTERNAS (para capturar alfa y diversificar), o una mezcla de ambos.
 
 REGLAS ESTRICTAS:
 1. "sharesToBuy" debe ser un número entero mayor o igual a 0.
 2. El costo total (sharesToBuy * precioActual) de todas las compras sumadas NO DEBE EXCEDER el presupuesto de $${budget}.
-3. Si la moneda del activo no es USD, ignora el tipo de cambio y asume que el presupuesto está en la moneda principal de la cuenta, pero intenta distribuir matemáticamente. Para simplificar, asume que todo el budget y los precios están en la misma unidad para este cálculo.
-4. Explica en 1 oración el porqué de tu asignación en "rationale".
+3. Si recomiendas una oportunidad externa, estima su "precioActual" en base al "precio_entrada_ideal" que viene en el JSON.
+4. Si la moneda del activo no es USD, ignora el tipo de cambio y asume que el presupuesto está en la moneda principal de la cuenta, pero intenta distribuir matemáticamente.
+5. Explica en 1 oración el porqué de tu asignación en "rationale".
 
 Responde ÚNICAMENTE con un JSON Array válido con esta estructura estricta, sin markdown ni texto adicional:
 [
