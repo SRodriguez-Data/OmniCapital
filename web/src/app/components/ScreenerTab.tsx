@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { Search, Loader2, Sparkles } from 'lucide-react';
+import SymbolSearchModal from './SymbolSearchModal';
 
 interface MarketData {
   ticker: string;
@@ -18,71 +19,23 @@ interface MarketData {
   error?: string;
 }
 
-interface SearchResult {
-  symbol: string;
-  name: string;
-  exchange: string;
-}
-
 export default function ScreenerTab() {
   const [ticker, setTicker] = useState('');
   const [data, setData] = useState<MarketData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // Autocomplete state
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [showDropdown, setShowDropdown] = useState(false);
-  const dropdownRef = useRef<HTMLFormElement>(null);
-
-  // Debounced search
-  useEffect(() => {
-    const delayDebounceFn = setTimeout(() => {
-      if (ticker.length >= 2 && showDropdown) {
-        setIsSearching(true);
-        fetch(`/api/search?q=${encodeURIComponent(ticker)}`)
-          .then(res => res.json())
-          .then(data => {
-            if (Array.isArray(data)) setSearchResults(data);
-          })
-          .catch(() => setSearchResults([]))
-          .finally(() => setIsSearching(false));
-      } else {
-        setSearchResults([]);
-      }
-    }, 300);
-
-    return () => clearTimeout(delayDebounceFn);
-  }, [ticker, showDropdown]);
-
-  // Click outside listener
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setShowDropdown(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const handleSelectTicker = (selectedTicker: string) => {
-    setTicker(selectedTicker);
-    setShowDropdown(false);
-  };
-
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!ticker) return;
-    setShowDropdown(false);
-    
+  const handleSearch = async (searchTicker: string) => {
+    if (!searchTicker) return;
+    setTicker(searchTicker);
     setLoading(true);
     setError('');
     setData(null);
 
     try {
-      const res = await fetch(`/api/market?ticker=${encodeURIComponent(ticker)}`);
+      const res = await fetch(`/api/market?ticker=${encodeURIComponent(searchTicker)}`);
       const json = await res.json();
       
       if (!res.ok) {
@@ -90,7 +43,7 @@ export default function ScreenerTab() {
       } else {
         setData(json);
       }
-    } catch (e) {
+    } catch {
       setError('Error de red al consultar el mercado.');
     } finally {
       setLoading(false);
@@ -103,58 +56,31 @@ export default function ScreenerTab() {
         <h2 className="text-lg font-mono text-[#e4e4e7] mb-2">Buscador Técnico Global + IA</h2>
         <p className="text-[#a1a1aa] text-sm font-sans mb-6">Busca cualquier acción o ETF global para calcular sus zonas de valor al instante.</p>
         
-        <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-2 max-w-xl mx-auto relative" ref={dropdownRef}>
-          <div className="flex-1 relative">
-            <input 
-              type="text" 
-              placeholder="Ej: AAPL, TSLA, SQM-B.SN, CHILE.SN"
-              value={ticker}
-              onChange={e => {
-                setTicker(e.target.value);
-                setShowDropdown(true);
-              }}
-              onFocus={() => { if(ticker.length >= 2) setShowDropdown(true); }}
-              className="w-full bg-[#09090b] border border-[#3f3f46] text-[#e4e4e7] p-3 font-mono focus:outline-none focus:border-[#60a5fa] text-left uppercase"
-            />
-            
-            {/* AUTOCOMPLETE DROPDOWN */}
-            {showDropdown && (ticker.length >= 2) && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-[#18181b] border border-[#3f3f46] rounded-sm shadow-xl z-50 max-h-60 overflow-y-auto">
-                {isSearching ? (
-                  <div className="p-3 text-xs text-[#a1a1aa] font-mono text-center">Buscando...</div>
-                ) : searchResults.length > 0 ? (
-                  <ul className="text-left font-mono text-sm">
-                    {searchResults.map((item, idx) => (
-                      <li 
-                        key={idx} 
-                        onClick={() => handleSelectTicker(item.symbol)}
-                        className="p-3 hover:bg-[#27272a] cursor-pointer border-b border-[#27272a] last:border-0"
-                      >
-                        <div className="flex justify-between items-center">
-                          <span className="font-bold text-[#60a5fa]">{item.symbol}</span>
-                          <span className="text-[10px] text-[#71717a] bg-[#09090b] px-1 rounded">{item.exchange}</span>
-                        </div>
-                        <div className="text-xs text-[#a1a1aa] truncate">{item.name}</div>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="p-3 text-xs text-[#71717a] font-mono text-center">No se encontraron resultados</div>
-                )}
-              </div>
-            )}
-          </div>
-
+        <div className="flex flex-col sm:flex-row gap-2 max-w-xl mx-auto">
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="flex-1 bg-[#09090b] border border-[#3f3f46] hover:border-[#60a5fa] text-[#71717a] hover:text-[#e4e4e7] p-3 font-mono text-left uppercase transition-colors flex items-center gap-3"
+          >
+            <Search className="w-5 h-5 text-[#60a5fa]" />
+            {ticker ? <span className="text-[#e4e4e7] font-bold">{ticker}</span> : 'Buscar un ticker o instrumento...'}
+          </button>
+          
           <button 
-            type="submit"
+            onClick={() => handleSearch(ticker)}
             disabled={loading || !ticker}
             className="bg-[#60a5fa] hover:bg-[#3b82f6] text-[#09090b] px-6 py-3 font-bold font-mono transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
             ANALIZAR
           </button>
-        </form>
+        </div>
       </div>
+
+      <SymbolSearchModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        onSelect={(t) => handleSearch(t)} 
+      />
 
       {error && (
         <div className="bg-[#7f1d1d] border border-[#b91c1c] text-[#fca5a5] p-4 text-sm font-mono text-center">
