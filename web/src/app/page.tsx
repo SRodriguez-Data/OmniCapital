@@ -8,6 +8,7 @@ import SizingTab from './components/SizingTab';
 import TopOportunidadesTab from './components/TopOportunidadesTab';
 import DividendsTab from './components/DividendsTab';
 import MacroPanel from './components/MacroPanel';
+import NotificationBell from './components/NotificationBell';
 import { Briefcase, Activity, Search, Calculator, Target, DollarSign } from 'lucide-react';
 
 export default function Home() {
@@ -23,6 +24,9 @@ export default function Home() {
           <p className="text-[#a1a1aa] text-xs font-mono uppercase tracking-widest mt-1">
             Terminal Institucional Interactiva
           </p>
+        </div>
+        <div className="mt-4 md:mt-0 flex items-center gap-4">
+          <NotificationBell />
         </div>
       </header>
 
