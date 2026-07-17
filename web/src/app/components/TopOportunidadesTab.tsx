@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Target, TrendingUp, ShieldAlert, Sparkles, AlertTriangle } from 'lucide-react';
-import { supabase } from '../lib/supabaseClient';
+import { supabase } from '@/lib/supabase';
 
 interface TopOpportunity {
   ticker: string;
@@ -25,10 +25,12 @@ export default function TopOportunidadesTab() {
           .from('analisis_ia')
           .select('*')
           .order('fecha', { ascending: false })
-          .limit(1);
+          .limit(1)
+          .gt('id', '00000000-0000-0000-0000-000000000000'); // Force new query cache buster
 
         if (!error && data && data.length > 0) {
           const report = data[0];
+          console.log("DEBUG: report =", report);
           setFecha(report.fecha);
           const top5 = report.candidatos_json?.top5_oportunidades || [];
           setOportunidades(top5);
