@@ -1,34 +1,28 @@
 import { NextResponse } from 'next/server';
+import yahooFinance from 'yahoo-finance2';
 
-async function fetchHistoricalData(ticker: string, range: string, interval: string) {
-  const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${interval}&range=${range}`;
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)'
-    }
+async function fetchHistoricalData(ticker: string, years: number, interval: '1d' | '1wk' | '1mo') {
+  const period2 = new Date();
+  const period1 = new Date();
+  period1.setFullYear(period2.getFullYear() - years);
+
+  const result: any = await yahooFinance.chart(ticker, {
+    period1: period1,
+    period2: period2,
+    interval: interval
   });
 
-  if (!res.ok) {
-    throw new Error(`Error fetching data for ${ticker}`);
-  }
-
-  const data = await res.json();
-  const result = data?.chart?.result?.[0];
-  if (!result || !result.timestamp || !result.indicators?.quote?.[0]?.close) {
+  if (!result || !result.quotes || result.quotes.length === 0) {
     throw new Error(`No data available for ${ticker}`);
   }
 
-  const timestamps = result.timestamp as number[];
-  const rawCloses = result.indicators.quote[0].close as (number | null)[];
-  
-  // Clean up nulls
   const cleanData = [];
-  for (let i = 0; i < timestamps.length; i++) {
-    if (rawCloses[i] !== null) {
+  for (const quote of result.quotes) {
+    if (quote.close !== null && quote.close !== undefined) {
       cleanData.push({
-        date: new Date(timestamps[i] * 1000).toISOString().split('T')[0],
-        timestamp: timestamps[i],
-        price: rawCloses[i] as number
+        date: quote.date.toISOString().split('T')[0],
+        timestamp: quote.date.getTime() / 1000,
+        price: quote.close
       });
     }
   }
@@ -44,13 +38,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Faltan parámetros (ticker, capital, years)' }, { status: 400 });
     }
 
-    const range = `${years}y`;
     const interval = years > 2 ? '1wk' : '1d';
 
     // Fetch data for target ticker and S&P 500 benchmark
     const [targetData, benchmarkData] = await Promise.all([
-      fetchHistoricalData(ticker, range, interval),
-      fetchHistoricalData('^GSPC', range, interval)
+      fetchHistoricalData(ticker, years, interval),
+      fetchHistoricalData('^GSPC', years, interval)
     ]);
 
     if (targetData.length === 0 || benchmarkData.length === 0) {
