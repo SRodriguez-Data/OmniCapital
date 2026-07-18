@@ -71,6 +71,12 @@ export default function Home() {
         >
           <Calculator className="w-4 h-4" /> [06] Optimizador IA
         </button>
+        <button 
+          onClick={() => setActiveTab('BACKTEST')}
+          className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 font-mono font-bold text-xs uppercase tracking-wider transition-colors border-l border-[#27272a] ${activeTab === 'BACKTEST' ? 'bg-[#18181b] border-t-2 border-[#60a5fa] text-[#e4e4e7]' : 'text-[#71717a] hover:bg-[#18181b] hover:text-[#a1a1aa]'}`}
+        >
+          <History className="w-4 h-4" /> [07] Backtesting
+        </button>
       </div>
 
       <div className="p-4 md:p-6">
@@ -80,6 +86,7 @@ export default function Home() {
         {activeTab === 'DIVIDENDOS' && <DividendsTab />}
         {activeTab === 'BUSCADOR' && <ScreenerTab />}
         {activeTab === 'CALCULADORA' && <SizingTab />}
+        {activeTab === 'BACKTEST' && <BacktestTab />}
       </div>
     </main>
   );
