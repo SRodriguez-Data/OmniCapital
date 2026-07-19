@@ -22,8 +22,8 @@ export default function BacktestTab() {
 
   const isCLP = ticker.toUpperCase().endsWith('.SN');
   
-  const formatCurrency = (val: number, isTooltip: boolean = false) => {
-    if (isCLP) {
+  const formatCurrency = (val: number, isTooltip: boolean = false, forceUSD: boolean = false) => {
+    if (isCLP && !forceUSD) {
       return `CLP$ ${val.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
     }
     return `$${val.toLocaleString(undefined, { minimumFractionDigits: isTooltip ? 2 : 0, maximumFractionDigits: isTooltip ? 2 : 0 })}`;
@@ -62,13 +62,16 @@ export default function BacktestTab() {
       return (
         <div className="bg-[#18181b] border border-[#27272a] p-3 rounded shadow-lg">
           <p className="text-[#a1a1aa] text-xs font-mono mb-2">{label}</p>
-          {payload.map((entry: any, index: number) => (
-            <div key={index} className="flex items-center gap-2 text-sm font-mono">
-              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
-              <span className="text-[#e4e4e7]">{entry.name}:</span>
-              <span className="font-bold text-white">{formatCurrency(entry.value, true)}</span>
-            </div>
-          ))}
+          {payload.map((entry: any, index: number) => {
+            const isBench = entry.name === "S&P 500";
+            return (
+              <div key={index} className="flex items-center gap-2 text-sm font-mono">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+                <span className="text-[#e4e4e7]">{entry.name}:</span>
+                <span className="font-bold text-white">{formatCurrency(entry.value, true, isBench)}</span>
+              </div>
+            );
+          })}
         </div>
       );
     }
@@ -165,7 +168,7 @@ export default function BacktestTab() {
               <p className={`text-2xl font-bold font-mono ${result.metrics.benchmarkReturn >= 0 ? 'text-[#60a5fa]' : 'text-[#f87171]'}`}>
                 {result.metrics.benchmarkReturn >= 0 ? '+' : ''}{result.metrics.benchmarkReturn.toFixed(2)}%
               </p>
-              <p className="text-[#a1a1aa] text-xs font-mono mt-1">{formatCurrency(result.metrics.finalBenchmarkValue)}</p>
+              <p className="text-[#a1a1aa] text-xs font-mono mt-1">{formatCurrency(result.metrics.finalBenchmarkValue, false, true)}</p>
             </div>
             <div className="bg-[#18181b] border border-[#27272a] p-4 rounded text-center">
               <p className="text-xs font-mono text-[#71717a] uppercase mb-1">Victoria vs Mercado</p>
