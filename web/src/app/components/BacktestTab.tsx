@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { History, Loader2, TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
+import { History, Loader2, TrendingUp, TrendingDown, DollarSign, Search } from 'lucide-react';
+import SymbolSearchModal from './SymbolSearchModal';
 
 export default function BacktestTab() {
   const [ticker, setTicker] = useState('NVDA');
@@ -12,6 +13,21 @@ export default function BacktestTab() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<any>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const handleSelectTicker = (selectedTicker: string) => {
+    setTicker(selectedTicker);
+    setIsModalOpen(false);
+  };
+
+  const isCLP = ticker.toUpperCase().endsWith('.SN');
+  
+  const formatCurrency = (val: number, isTooltip: boolean = false) => {
+    if (isCLP) {
+      return `CLP$ ${val.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+    }
+    return `$${val.toLocaleString(undefined, { minimumFractionDigits: isTooltip ? 2 : 0, maximumFractionDigits: isTooltip ? 2 : 0 })}`;
+  };
 
   const runBacktest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,7 +66,7 @@ export default function BacktestTab() {
             <div key={index} className="flex items-center gap-2 text-sm font-mono">
               <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
               <span className="text-[#e4e4e7]">{entry.name}:</span>
-              <span className="font-bold text-white">${entry.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span className="font-bold text-white">{formatCurrency(entry.value, true)}</span>
             </div>
           ))}
         </div>
@@ -76,23 +92,25 @@ export default function BacktestTab() {
         <form onSubmit={runBacktest} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
           <div>
             <label className="block text-xs font-mono text-[#71717a] mb-1">Ticker / Activo</label>
-            <input 
-              type="text" 
-              required
-              value={ticker}
-              onChange={e => setTicker(e.target.value)}
-              className="w-full bg-[#09090b] border border-[#3f3f46] text-[#e4e4e7] p-3 font-mono uppercase focus:outline-none focus:border-[#60a5fa]"
-              placeholder="NVDA"
-            />
+            <button
+              type="button"
+              onClick={() => setIsModalOpen(true)}
+              className="w-full h-[50px] bg-[#09090b] border border-[#3f3f46] hover:border-[#60a5fa] text-[#71717a] hover:text-[#e4e4e7] p-3 text-sm font-mono text-left uppercase transition-colors flex items-center justify-between"
+            >
+              <span className={ticker ? "text-[#e4e4e7] font-bold text-base" : ""}>
+                {ticker || "Buscar Símbolo..."}
+              </span>
+              <Search className="w-4 h-4 text-[#60a5fa]" />
+            </button>
           </div>
           <div>
-            <label className="block text-xs font-mono text-[#71717a] mb-1">Capital Inicial ($)</label>
+            <label className="block text-xs font-mono text-[#71717a] mb-1">Capital Inicial ({isCLP ? 'CLP' : 'USD'})</label>
             <input 
               type="number" 
               required
               value={capital}
               onChange={e => setCapital(e.target.value)}
-              className="w-full bg-[#09090b] border border-[#3f3f46] text-[#e4e4e7] p-3 font-mono focus:outline-none focus:border-[#60a5fa]"
+              className="w-full h-[50px] bg-[#09090b] border border-[#3f3f46] text-[#e4e4e7] p-3 font-mono focus:outline-none focus:border-[#60a5fa]"
               placeholder="10000"
             />
           </div>
@@ -101,7 +119,7 @@ export default function BacktestTab() {
             <select 
               value={years}
               onChange={e => setYears(e.target.value)}
-              className="w-full bg-[#09090b] border border-[#3f3f46] text-[#e4e4e7] p-3 font-mono focus:outline-none focus:border-[#60a5fa]"
+              className="w-full h-[50px] bg-[#09090b] border border-[#3f3f46] text-[#e4e4e7] p-3 font-mono focus:outline-none focus:border-[#60a5fa]"
             >
               <option value="1">1 Año</option>
               <option value="3">3 Años</option>
@@ -119,6 +137,12 @@ export default function BacktestTab() {
         </form>
       </div>
 
+      <SymbolSearchModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        onSelect={handleSelectTicker} 
+      />
+
       {error && (
         <div className="bg-[#f87171]/10 border border-[#f87171]/50 text-[#f87171] p-4 rounded text-sm font-mono">
           [ERROR] {error}
@@ -134,14 +158,14 @@ export default function BacktestTab() {
               <p className={`text-2xl font-bold font-mono ${result.metrics.targetReturn >= 0 ? 'text-[#34d399]' : 'text-[#f87171]'}`}>
                 {result.metrics.targetReturn >= 0 ? '+' : ''}{result.metrics.targetReturn.toFixed(2)}%
               </p>
-              <p className="text-[#a1a1aa] text-xs font-mono mt-1">${result.metrics.finalTargetValue.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+              <p className="text-[#a1a1aa] text-xs font-mono mt-1">{formatCurrency(result.metrics.finalTargetValue)}</p>
             </div>
             <div className="bg-[#18181b] border border-[#27272a] p-4 rounded text-center">
               <p className="text-xs font-mono text-[#71717a] uppercase mb-1">Rendimiento S&P 500</p>
               <p className={`text-2xl font-bold font-mono ${result.metrics.benchmarkReturn >= 0 ? 'text-[#60a5fa]' : 'text-[#f87171]'}`}>
                 {result.metrics.benchmarkReturn >= 0 ? '+' : ''}{result.metrics.benchmarkReturn.toFixed(2)}%
               </p>
-              <p className="text-[#a1a1aa] text-xs font-mono mt-1">${result.metrics.finalBenchmarkValue.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+              <p className="text-[#a1a1aa] text-xs font-mono mt-1">{formatCurrency(result.metrics.finalBenchmarkValue)}</p>
             </div>
             <div className="bg-[#18181b] border border-[#27272a] p-4 rounded text-center">
               <p className="text-xs font-mono text-[#71717a] uppercase mb-1">Victoria vs Mercado</p>
@@ -182,7 +206,7 @@ export default function BacktestTab() {
                 <YAxis 
                   stroke="#71717a" 
                   fontSize={10}
-                  tickFormatter={(val) => `$${(val / 1000)}k`}
+                  tickFormatter={(val) => isCLP ? `CLP$ ${(val/1000).toFixed(0)}k` : `$${(val / 1000)}k`}
                   domain={['auto', 'auto']}
                 />
                 <Tooltip content={<CustomTooltip />} />

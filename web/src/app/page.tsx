@@ -34,7 +34,7 @@ export default function Home() {
       <MacroPanel />
       
       {/* TABS MENU */}
-      <div className="flex flex-wrap border-b-2 border-[#27272a] bg-[#09090b]">
+      <div className="flex overflow-x-auto whitespace-nowrap border-b-2 border-[#27272a] bg-[#09090b] scrollbar-hide">
         <button 
           onClick={() => setActiveTab('PORTFOLIO')}
           className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 font-mono font-bold text-xs uppercase tracking-wider transition-colors ${activeTab === 'PORTFOLIO' ? 'bg-[#18181b] border-t-2 border-[#60a5fa] text-[#e4e4e7]' : 'text-[#71717a] hover:bg-[#18181b] hover:text-[#a1a1aa]'}`}
