@@ -10,23 +10,25 @@ import DividendsTab from './components/DividendsTab';
 import MacroPanel from './components/MacroPanel';
 import NotificationBell from './components/NotificationBell';
 import BacktestTab from './components/BacktestTab';
+import { ThemeToggle } from './components/ThemeToggle';
 import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History } from 'lucide-react';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA' | 'TOP5' | 'DIVIDENDOS' | 'BACKTEST'>('PORTFOLIO');
 
   return (
-    <main className="min-h-screen bg-[#09090b] text-[#fafafa] font-sans">
-      <header className="border-b border-[#27272a] bg-[#18181b] px-6 py-4 flex flex-col md:flex-row items-center justify-between">
+    <main className="min-h-screen bg-zinc-100 dark:bg-[#09090b] text-zinc-900 dark:text-[#fafafa] font-sans transition-colors duration-300">
+      <header className="border-b border-zinc-200 dark:border-[#27272a] bg-white dark:bg-[#18181b] px-6 py-4 flex flex-col md:flex-row items-center justify-between shadow-sm dark:shadow-none transition-colors duration-300">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-[#e4e4e7] font-mono">
+          <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-[#e4e4e7] font-sans">
             QUANTUM TRADER V2
           </h1>
-          <p className="text-[#a1a1aa] text-xs font-mono uppercase tracking-widest mt-1">
+          <p className="text-zinc-500 dark:text-[#a1a1aa] text-xs font-mono uppercase tracking-widest mt-1">
             Terminal Institucional Interactiva
           </p>
         </div>
         <div className="mt-4 md:mt-0 flex items-center gap-4">
+          <ThemeToggle />
           <NotificationBell />
         </div>
       </header>
@@ -34,52 +36,52 @@ export default function Home() {
       <MacroPanel />
       
       {/* TABS MENU */}
-      <div className="flex overflow-x-auto whitespace-nowrap border-b-2 border-[#27272a] bg-[#09090b] scrollbar-hide">
+      <div className="flex overflow-x-auto whitespace-nowrap border-b border-zinc-200 dark:border-[#27272a] bg-white dark:bg-[#09090b] scrollbar-hide transition-colors duration-300 shadow-sm dark:shadow-none">
         <button 
           onClick={() => setActiveTab('PORTFOLIO')}
-          className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 font-mono font-bold text-xs uppercase tracking-wider transition-colors ${activeTab === 'PORTFOLIO' ? 'bg-[#18181b] border-t-2 border-[#60a5fa] text-[#e4e4e7]' : 'text-[#71717a] hover:bg-[#18181b] hover:text-[#a1a1aa]'}`}
+          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors ${activeTab === 'PORTFOLIO' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-[#60a5fa] text-blue-600 dark:text-[#e4e4e7]' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
         >
           <Briefcase className="w-4 h-4" /> [01] Mi Portafolio
         </button>
         <button 
           onClick={() => setActiveTab('RECOMENDACIONES')}
-          className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 font-mono font-bold text-xs uppercase tracking-wider transition-colors border-l border-[#27272a] ${activeTab === 'RECOMENDACIONES' ? 'bg-[#18181b] border-t-2 border-[#60a5fa] text-[#e4e4e7]' : 'text-[#71717a] hover:bg-[#18181b] hover:text-[#a1a1aa]'}`}
+          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors border-l border-zinc-200 dark:border-[#27272a] ${activeTab === 'RECOMENDACIONES' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-[#60a5fa] text-blue-600 dark:text-[#e4e4e7]' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
         >
           <Activity className="w-4 h-4" /> [02] Mi Diagnóstico IA
         </button>
         <button 
           onClick={() => setActiveTab('TOP5')}
-          className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 font-mono font-bold text-xs uppercase tracking-wider transition-colors border-l border-[#27272a] ${activeTab === 'TOP5' ? 'bg-[#18181b] border-t-2 border-[#d946ef] text-[#e4e4e7]' : 'text-[#71717a] hover:bg-[#18181b] hover:text-[#a1a1aa]'}`}
+          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors border-l border-zinc-200 dark:border-[#27272a] ${activeTab === 'TOP5' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-[#d946ef] text-fuchsia-600 dark:text-[#e4e4e7]' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
         >
           <Target className="w-4 h-4" /> [03] Top 5 Oportunidades
         </button>
         <button 
           onClick={() => setActiveTab('DIVIDENDOS')}
-          className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 font-mono font-bold text-xs uppercase tracking-wider transition-colors border-l border-[#27272a] ${activeTab === 'DIVIDENDOS' ? 'bg-[#18181b] border-t-2 border-[#34d399] text-[#e4e4e7]' : 'text-[#71717a] hover:bg-[#18181b] hover:text-[#a1a1aa]'}`}
+          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors border-l border-zinc-200 dark:border-[#27272a] ${activeTab === 'DIVIDENDOS' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-[#34d399] text-emerald-600 dark:text-[#e4e4e7]' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
         >
           <DollarSign className="w-4 h-4" /> [04] Ingresos Pasivos
         </button>
         <button 
           onClick={() => setActiveTab('BUSCADOR')}
-          className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 font-mono font-bold text-xs uppercase tracking-wider transition-colors border-l border-[#27272a] ${activeTab === 'BUSCADOR' ? 'bg-[#18181b] border-t-2 border-[#60a5fa] text-[#e4e4e7]' : 'text-[#71717a] hover:bg-[#18181b] hover:text-[#a1a1aa]'}`}
+          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors border-l border-zinc-200 dark:border-[#27272a] ${activeTab === 'BUSCADOR' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-[#60a5fa] text-blue-600 dark:text-[#e4e4e7]' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
         >
           <Search className="w-4 h-4" /> [05] Buscador Límite
         </button>
         <button 
           onClick={() => setActiveTab('CALCULADORA')}
-          className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 font-mono font-bold text-xs uppercase tracking-wider transition-colors border-l border-[#27272a] ${activeTab === 'CALCULADORA' ? 'bg-[#18181b] border-t-2 border-[#d946ef] text-[#e4e4e7]' : 'text-[#71717a] hover:bg-[#18181b] hover:text-[#a1a1aa]'}`}
+          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors border-l border-zinc-200 dark:border-[#27272a] ${activeTab === 'CALCULADORA' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-[#d946ef] text-fuchsia-600 dark:text-[#e4e4e7]' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
         >
           <Calculator className="w-4 h-4" /> [06] Optimizador IA
         </button>
         <button 
           onClick={() => setActiveTab('BACKTEST')}
-          className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 font-mono font-bold text-xs uppercase tracking-wider transition-colors border-l border-[#27272a] ${activeTab === 'BACKTEST' ? 'bg-[#18181b] border-t-2 border-[#60a5fa] text-[#e4e4e7]' : 'text-[#71717a] hover:bg-[#18181b] hover:text-[#a1a1aa]'}`}
+          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors border-l border-zinc-200 dark:border-[#27272a] ${activeTab === 'BACKTEST' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-[#60a5fa] text-blue-600 dark:text-[#e4e4e7]' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
         >
           <History className="w-4 h-4" /> [07] Backtesting
         </button>
       </div>
 
-      <div className="p-4 md:p-6">
+      <div className="p-4 md:p-6 max-w-[1600px] mx-auto">
         {activeTab === 'PORTFOLIO' && <PortfolioTab />}
         {activeTab === 'RECOMENDACIONES' && <RecommendationsTab />}
         {activeTab === 'TOP5' && <TopOportunidadesTab />}

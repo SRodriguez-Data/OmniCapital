@@ -60,14 +60,14 @@ export default function BacktestTab() {
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       return (
-        <div className="bg-[#18181b] border border-[#27272a] p-3 rounded shadow-lg">
-          <p className="text-[#a1a1aa] text-xs font-mono mb-2">{label}</p>
+        <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-3 rounded shadow-lg">
+          <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans font-medium mb-2">{label}</p>
           {payload.map((entry: any, index: number) => {
             const isBench = entry.name === "S&P 500";
             return (
-              <div key={index} className="flex items-center gap-2 text-sm font-mono">
+              <div key={index} className="flex items-center gap-2 text-sm font-mono rounded-lg">
                 <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
-                <span className="text-[#e4e4e7]">{entry.name}:</span>
+                <span className="text-zinc-900 dark:text-[#e4e4e7]">{entry.name}:</span>
                 <span className="font-bold text-white">{formatCurrency(entry.value, true, isBench)}</span>
               </div>
             );
@@ -81,12 +81,12 @@ export default function BacktestTab() {
   return (
     <div className="space-y-6">
       
-      <div className="bg-[#18181b] border border-[#27272a] rounded p-6">
-        <div className="flex items-center gap-3 mb-6 border-b border-[#27272a] pb-4">
+      <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-sm dark:shadow-none p-6">
+        <div className="flex items-center gap-3 mb-6 border-b border-zinc-200 dark:border-[#27272a] pb-4">
           <History className="w-6 h-6 text-[#d946ef]" />
           <div>
-            <h2 className="text-lg font-mono text-[#e4e4e7] uppercase tracking-wider">Máquina del Tiempo (Backtesting)</h2>
-            <p className="text-[#a1a1aa] text-xs font-sans">
+            <h2 className="text-lg font-sans font-bold tracking-tight text-zinc-900 dark:text-[#e4e4e7] uppercase tracking-wider">Máquina del Tiempo (Backtesting)</h2>
+            <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans">
               Viaja al pasado. Simula qué hubiera pasado si invertías tu capital en un activo vs el S&P 500.
             </p>
           </div>
@@ -94,35 +94,35 @@ export default function BacktestTab() {
 
         <form onSubmit={runBacktest} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
           <div>
-            <label className="block text-xs font-mono text-[#71717a] mb-1">Ticker / Activo</label>
+            <label className="block text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] mb-1">Ticker / Activo</label>
             <button
               type="button"
               onClick={() => setIsModalOpen(true)}
-              className="w-full h-[50px] bg-[#09090b] border border-[#3f3f46] hover:border-[#60a5fa] text-[#71717a] hover:text-[#e4e4e7] p-3 text-sm font-mono text-left uppercase transition-colors flex items-center justify-between"
+              className="w-full h-[50px] bg-zinc-50 dark:bg-[#09090b] border border-zinc-300 dark:border-[#3f3f46] hover:border-blue-500 dark:hover:border-[#60a5fa] text-zinc-500 dark:text-[#71717a] hover:text-zinc-900 dark:text-[#e4e4e7] p-3 text-sm font-mono text-left uppercase transition-colors flex items-center justify-between"
             >
-              <span className={ticker ? "text-[#e4e4e7] font-bold text-base" : ""}>
+              <span className={ticker ? "text-zinc-900 dark:text-[#e4e4e7] font-bold text-base" : ""}>
                 {ticker || "Buscar Símbolo..."}
               </span>
               <Search className="w-4 h-4 text-[#60a5fa]" />
             </button>
           </div>
           <div>
-            <label className="block text-xs font-mono text-[#71717a] mb-1">Capital Inicial ({isCLP ? 'CLP' : 'USD'})</label>
+            <label className="block text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] mb-1">Capital Inicial ({isCLP ? 'CLP' : 'USD'})</label>
             <input 
               type="number" 
               required
               value={capital}
               onChange={e => setCapital(e.target.value)}
-              className="w-full h-[50px] bg-[#09090b] border border-[#3f3f46] text-[#e4e4e7] p-3 font-mono focus:outline-none focus:border-[#60a5fa]"
+              className="w-full h-[50px] bg-zinc-50 dark:bg-[#09090b] border border-zinc-300 dark:border-[#3f3f46] text-zinc-900 dark:text-[#e4e4e7] p-3 font-mono rounded-lg focus:outline-none focus:border-[#60a5fa]"
               placeholder="10000"
             />
           </div>
           <div>
-            <label className="block text-xs font-mono text-[#71717a] mb-1">Años al Pasado</label>
+            <label className="block text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] mb-1">Años al Pasado</label>
             <select 
               value={years}
               onChange={e => setYears(e.target.value)}
-              className="w-full h-[50px] bg-[#09090b] border border-[#3f3f46] text-[#e4e4e7] p-3 font-mono focus:outline-none focus:border-[#60a5fa]"
+              className="w-full h-[50px] bg-zinc-50 dark:bg-[#09090b] border border-zinc-300 dark:border-[#3f3f46] text-zinc-900 dark:text-[#e4e4e7] p-3 font-mono rounded-lg focus:outline-none focus:border-[#60a5fa]"
             >
               <option value="1">1 Año</option>
               <option value="3">3 Años</option>
@@ -133,7 +133,7 @@ export default function BacktestTab() {
           <button 
             type="submit"
             disabled={loading}
-            className="w-full bg-[#d946ef] hover:bg-[#c026d3] disabled:bg-[#27272a] disabled:text-[#71717a] text-white p-3 font-bold font-mono transition-colors flex items-center justify-center h-[50px]"
+            className="w-full bg-[#d946ef] hover:bg-[#c026d3] disabled:bg-[#27272a] disabled:text-zinc-500 dark:text-[#71717a] text-white p-3 font-bold font-mono transition-colors flex items-center justify-center h-[50px]"
           >
             {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'SIMULAR'}
           </button>
@@ -156,36 +156,36 @@ export default function BacktestTab() {
         <div className="space-y-6 animate-fade-in">
           {/* Metrics */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-[#18181b] border border-[#27272a] p-4 rounded text-center">
-              <p className="text-xs font-mono text-[#71717a] uppercase mb-1">Rendimiento {ticker}</p>
-              <p className={`text-2xl font-bold font-mono ${result.metrics.targetReturn >= 0 ? 'text-[#34d399]' : 'text-[#f87171]'}`}>
+            <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 rounded text-center">
+              <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase mb-1">Rendimiento {ticker}</p>
+              <p className={`text-2xl font-bold font-sans tracking-tight ${result.metrics.targetReturn >= 0 ? 'text-[#34d399]' : 'text-[#f87171]'}`}>
                 {result.metrics.targetReturn >= 0 ? '+' : ''}{result.metrics.targetReturn.toFixed(2)}%
               </p>
-              <p className="text-[#a1a1aa] text-xs font-mono mt-1">{formatCurrency(result.metrics.finalTargetValue)}</p>
+              <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans font-medium mt-1">{formatCurrency(result.metrics.finalTargetValue)}</p>
             </div>
-            <div className="bg-[#18181b] border border-[#27272a] p-4 rounded text-center">
-              <p className="text-xs font-mono text-[#71717a] uppercase mb-1">Rendimiento S&P 500</p>
-              <p className={`text-2xl font-bold font-mono ${result.metrics.benchmarkReturn >= 0 ? 'text-[#60a5fa]' : 'text-[#f87171]'}`}>
+            <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 rounded text-center">
+              <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase mb-1">Rendimiento S&P 500</p>
+              <p className={`text-2xl font-bold font-sans tracking-tight ${result.metrics.benchmarkReturn >= 0 ? 'text-[#60a5fa]' : 'text-[#f87171]'}`}>
                 {result.metrics.benchmarkReturn >= 0 ? '+' : ''}{result.metrics.benchmarkReturn.toFixed(2)}%
               </p>
-              <p className="text-[#a1a1aa] text-xs font-mono mt-1">{formatCurrency(result.metrics.finalBenchmarkValue, false, true)}</p>
+              <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans font-medium mt-1">{formatCurrency(result.metrics.finalBenchmarkValue, false, true)}</p>
             </div>
-            <div className="bg-[#18181b] border border-[#27272a] p-4 rounded text-center">
-              <p className="text-xs font-mono text-[#71717a] uppercase mb-1">Victoria vs Mercado</p>
-              <p className={`text-2xl font-bold font-mono ${result.metrics.targetReturn > result.metrics.benchmarkReturn ? 'text-[#34d399]' : 'text-[#f87171]'}`}>
+            <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 rounded text-center">
+              <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase mb-1">Victoria vs Mercado</p>
+              <p className={`text-2xl font-bold font-sans tracking-tight ${result.metrics.targetReturn > result.metrics.benchmarkReturn ? 'text-[#34d399]' : 'text-[#f87171]'}`}>
                 {result.metrics.targetReturn > result.metrics.benchmarkReturn ? 'SI' : 'NO'}
               </p>
             </div>
-            <div className="bg-[#18181b] border border-[#27272a] p-4 rounded text-center">
-              <p className="text-xs font-mono text-[#71717a] uppercase mb-1">Caída Máxima (Drawdown)</p>
-              <p className="text-2xl font-bold font-mono text-[#f87171]">
+            <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 rounded text-center">
+              <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase mb-1">Caída Máxima (Drawdown)</p>
+              <p className="text-2xl font-bold font-sans tracking-tight text-[#f87171]">
                 -{result.metrics.maxDrawdown.toFixed(2)}%
               </p>
             </div>
           </div>
 
           {/* Chart */}
-          <div className="bg-[#18181b] border border-[#27272a] p-4 rounded h-[400px]">
+          <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 rounded h-[400px]">
              <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={result.chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <defs>

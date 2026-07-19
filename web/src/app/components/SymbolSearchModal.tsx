@@ -62,22 +62,22 @@ export default function SymbolSearchModal({ isOpen, onClose, onSelect }: SymbolS
       />
       
       {/* Modal */}
-      <div className="relative w-full max-w-2xl bg-[#18181b] border border-[#27272a] rounded-lg shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+      <div className="relative w-full max-w-2xl bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-sm dark:shadow-none-lg shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
         
         {/* Search Header */}
-        <div className="flex items-center px-4 py-4 border-b border-[#27272a] bg-[#09090b]">
+        <div className="flex items-center px-4 py-4 border-b border-zinc-200 dark:border-[#27272a] bg-zinc-50 dark:bg-[#09090b]">
           <Search className="w-5 h-5 text-[#60a5fa] mr-3" />
           <input
             ref={inputRef}
             type="text"
             placeholder="Buscar por símbolo o nombre de empresa (Ej: AAPL, Tesla, CHILE.SN)"
-            className="flex-1 bg-transparent text-[#e4e4e7] text-lg font-mono focus:outline-none placeholder-[#71717a]"
+            className="flex-1 bg-transparent text-zinc-900 dark:text-[#e4e4e7] text-lg font-sans font-bold tracking-tight focus:outline-none placeholder-[#71717a]"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
           <button 
             onClick={onClose}
-            className="ml-3 p-2 hover:bg-[#27272a] rounded-full transition-colors text-[#a1a1aa] hover:text-white"
+            className="ml-3 p-2 hover:bg-[#27272a] rounded-full transition-colors text-zinc-600 dark:text-[#a1a1aa] hover:text-white"
           >
             <X className="w-5 h-5" />
           </button>
@@ -86,19 +86,19 @@ export default function SymbolSearchModal({ isOpen, onClose, onSelect }: SymbolS
         {/* Results List */}
         <div className="flex-1 overflow-y-auto">
           {loading && (
-            <div className="flex items-center justify-center p-8 text-[#a1a1aa] font-mono text-sm">
+            <div className="flex items-center justify-center p-8 text-zinc-600 dark:text-[#a1a1aa] font-mono text-sm">
               <Loader2 className="w-5 h-5 animate-spin mr-2" /> Buscando mercados...
             </div>
           )}
 
           {!loading && query.length > 0 && query.length < 2 && (
-            <div className="p-8 text-center text-[#71717a] font-mono text-sm">
+            <div className="p-8 text-center text-zinc-500 dark:text-[#71717a] font-mono text-sm">
               Escribe al menos 2 caracteres...
             </div>
           )}
 
           {!loading && query.length >= 2 && results.length === 0 && (
-            <div className="p-8 text-center text-[#71717a] font-mono text-sm">
+            <div className="p-8 text-center text-zinc-500 dark:text-[#71717a] font-mono text-sm">
               No se encontraron instrumentos para "{query}"
             </div>
           )}
@@ -112,17 +112,17 @@ export default function SymbolSearchModal({ isOpen, onClose, onSelect }: SymbolS
                     onSelect(item.symbol);
                     onClose();
                   }}
-                  className="flex items-center justify-between px-6 py-4 hover:bg-[#27272a] cursor-pointer group transition-colors border-b border-[#27272a] last:border-0"
+                  className="flex items-center justify-between px-6 py-4 hover:bg-[#27272a] cursor-pointer group transition-colors border-b border-zinc-200 dark:border-[#27272a] last:border-0"
                 >
                   <div className="flex items-center gap-4">
                     <div className="bg-[#27272a] group-hover:bg-[#3f3f46] p-2 rounded transition-colors">
                       <Building2 className="w-5 h-5 text-[#60a5fa]" />
                     </div>
                     <div>
-                      <h4 className="font-mono text-lg font-bold text-[#e4e4e7] group-hover:text-white transition-colors">
+                      <h4 className="font-mono text-lg font-bold text-zinc-900 dark:text-[#e4e4e7] group-hover:text-white transition-colors">
                         {item.symbol}
                       </h4>
-                      <p className="font-sans text-sm text-[#a1a1aa] truncate max-w-[200px] sm:max-w-md">
+                      <p className="font-sans text-sm text-zinc-600 dark:text-[#a1a1aa] truncate max-w-[200px] sm:max-w-md">
                         {item.name}
                       </p>
                     </div>
@@ -139,8 +139,8 @@ export default function SymbolSearchModal({ isOpen, onClose, onSelect }: SymbolS
         </div>
         
         {/* Footer */}
-        <div className="p-3 bg-[#09090b] border-t border-[#27272a] text-center">
-          <p className="text-[10px] font-mono text-[#71717a] uppercase tracking-widest">
+        <div className="p-3 bg-zinc-50 dark:bg-[#09090b] border-t border-zinc-200 dark:border-[#27272a] text-center">
+          <p className="text-[10px] font-mono text-zinc-500 dark:text-[#71717a] uppercase tracking-widest">
             Desarrollado para Quantum Trader V2
           </p>
         </div>

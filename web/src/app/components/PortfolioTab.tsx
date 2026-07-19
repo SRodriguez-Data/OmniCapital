@@ -114,20 +114,20 @@ export default function PortfolioTab() {
   const dataUSD = items.filter(i => i.moneda === 'USD').map(i => ({ name: i.ticker, value: i.cantidad * i.precio_compra }));
   const dataCLP = items.filter(i => i.moneda === 'CLP').map(i => ({ name: i.ticker, value: i.cantidad * i.precio_compra }));
 
-  if (loading) return <div className="text-center p-12 font-mono text-[#a1a1aa]">Cargando portafolio...</div>;
+  if (loading) return <div className="text-center p-12 font-mono text-zinc-600 dark:text-[#a1a1aa]">Cargando portafolio...</div>;
 
   return (
     <div className="space-y-6">
       
       {/* ADD NEW ITEM FORM */}
-      <div className="bg-[#18181b] border border-[#27272a] p-4 rounded flex flex-col md:flex-row gap-4 items-end">
+      <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 rounded flex flex-col md:flex-row gap-4 items-end">
         <div className="flex-1 w-full">
-          <label className="block text-xs font-mono text-[#71717a] mb-1">Ticker / Activo</label>
+          <label className="block text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] mb-1">Ticker / Activo</label>
           <button
             onClick={() => setIsModalOpen(true)}
-            className="w-full bg-[#09090b] border border-[#3f3f46] hover:border-[#60a5fa] text-[#71717a] hover:text-[#e4e4e7] p-2 text-sm font-mono text-left uppercase transition-colors flex items-center justify-between"
+            className="w-full bg-zinc-50 dark:bg-[#09090b] border border-zinc-300 dark:border-[#3f3f46] hover:border-blue-500 dark:hover:border-[#60a5fa] text-zinc-500 dark:text-[#71717a] hover:text-zinc-900 dark:text-[#e4e4e7] p-2 text-sm font-mono rounded-lg text-left uppercase transition-colors flex items-center justify-between"
           >
-            <span className={ticker ? "text-[#e4e4e7] font-bold" : ""}>
+            <span className={ticker ? "text-zinc-900 dark:text-[#e4e4e7] font-bold" : ""}>
               {ticker || "Buscar Símbolo..."}
             </span>
             <Search className="w-4 h-4 text-[#60a5fa]" />
@@ -135,31 +135,31 @@ export default function PortfolioTab() {
         </div>
         
         <div className="w-full md:w-32">
-          <label className="block text-xs font-mono text-[#71717a] mb-1">Cantidad</label>
+          <label className="block text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] mb-1">Cantidad</label>
           <input 
             type="number" 
             placeholder="0.0" 
             value={cantidad}
             onChange={e => setCantidad(e.target.value)}
-            className="w-full bg-[#09090b] border border-[#3f3f46] text-[#e4e4e7] p-2 text-sm font-mono focus:outline-none focus:border-[#60a5fa]"
+            className="w-full bg-zinc-50 dark:bg-[#09090b] border border-zinc-300 dark:border-[#3f3f46] text-zinc-900 dark:text-[#e4e4e7] p-2 text-sm font-mono rounded-lg focus:outline-none focus:border-[#60a5fa]"
           />
         </div>
         <div className="w-full md:w-32">
-          <label className="block text-xs font-mono text-[#71717a] mb-1">Precio Compra</label>
+          <label className="block text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] mb-1">Precio Compra</label>
           <input 
             type="number" 
             placeholder="0.0" 
             value={precio}
             onChange={e => setPrecio(e.target.value)}
-            className="w-full bg-[#09090b] border border-[#3f3f46] text-[#e4e4e7] p-2 text-sm font-mono focus:outline-none focus:border-[#60a5fa]"
+            className="w-full bg-zinc-50 dark:bg-[#09090b] border border-zinc-300 dark:border-[#3f3f46] text-zinc-900 dark:text-[#e4e4e7] p-2 text-sm font-mono rounded-lg focus:outline-none focus:border-[#60a5fa]"
           />
         </div>
         <div className="w-full md:w-24">
-          <label className="block text-xs font-mono text-[#71717a] mb-1">Moneda</label>
+          <label className="block text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] mb-1">Moneda</label>
           <select 
             value={moneda}
             onChange={e => setMoneda(e.target.value as 'USD'|'CLP')}
-            className="w-full bg-[#09090b] border border-[#3f3f46] text-[#e4e4e7] p-2 text-sm font-mono focus:outline-none focus:border-[#60a5fa]"
+            className="w-full bg-zinc-50 dark:bg-[#09090b] border border-zinc-300 dark:border-[#3f3f46] text-zinc-900 dark:text-[#e4e4e7] p-2 text-sm font-mono rounded-lg focus:outline-none focus:border-[#60a5fa]"
           >
             <option value="USD">USD</option>
             <option value="CLP">CLP</option>
@@ -182,11 +182,11 @@ export default function PortfolioTab() {
 
       {/* HISTORICAL P&L CHART */}
       {historyData.length > 0 && (
-        <div className="bg-[#18181b] border border-[#27272a] rounded p-6 h-96 flex flex-col">
-          <div className="flex justify-between items-center border-b border-[#27272a] pb-4 mb-6">
-            <h2 className="text-xs font-mono font-bold text-[#e4e4e7] uppercase">Evolución P&L (Simulado 45D)</h2>
+        <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-sm dark:shadow-none p-6 h-96 flex flex-col">
+          <div className="flex justify-between items-center border-b border-zinc-200 dark:border-[#27272a] pb-4 mb-6">
+            <h2 className="text-xs font-sans font-medium font-bold text-zinc-900 dark:text-[#e4e4e7] uppercase">Evolución P&L (Simulado 45D)</h2>
             <div className="text-right">
-              <p className="text-[10px] text-[#71717a] font-mono uppercase">P&L Actual</p>
+              <p className="text-[10px] text-zinc-500 dark:text-[#71717a] font-mono uppercase">P&L Actual</p>
               <p className={`text-lg font-bold font-mono ${historyData[historyData.length - 1].profitLoss >= 0 ? 'text-[#34d399]' : 'text-[#f87171]'}`}>
                 ${historyData[historyData.length - 1].profitLoss.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
               </p>
@@ -224,8 +224,8 @@ export default function PortfolioTab() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* USD PIE CHART */}
-        <div className="bg-[#18181b] border border-[#27272a] rounded p-4 h-80 flex flex-col">
-          <h2 className="text-xs font-mono font-bold text-[#60a5fa] uppercase border-b border-[#27272a] pb-2 mb-2">Distribución Capital (USD)</h2>
+        <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-sm dark:shadow-none p-4 h-80 flex flex-col">
+          <h2 className="text-xs font-sans font-medium font-bold text-[#60a5fa] uppercase border-b border-zinc-200 dark:border-[#27272a] pb-2 mb-2">Distribución Capital (USD)</h2>
           <div className="flex-1">
             {dataUSD.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -237,13 +237,13 @@ export default function PortfolioTab() {
                   <Legend wrapperStyle={{fontFamily: 'monospace', fontSize: '12px', color: '#a1a1aa'}} />
                 </PieChart>
               </ResponsiveContainer>
-            ) : <p className="text-center mt-20 text-[#71717a] font-mono text-sm">No hay posiciones en USD</p>}
+            ) : <p className="text-center mt-20 text-zinc-500 dark:text-[#71717a] font-mono text-sm">No hay posiciones en USD</p>}
           </div>
         </div>
 
         {/* CLP PIE CHART */}
-        <div className="bg-[#18181b] border border-[#27272a] rounded p-4 h-80 flex flex-col">
-          <h2 className="text-xs font-mono font-bold text-[#34d399] uppercase border-b border-[#27272a] pb-2 mb-2">Distribución Capital (CLP)</h2>
+        <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-sm dark:shadow-none p-4 h-80 flex flex-col">
+          <h2 className="text-xs font-sans font-medium font-bold text-[#34d399] uppercase border-b border-zinc-200 dark:border-[#27272a] pb-2 mb-2">Distribución Capital (CLP)</h2>
           <div className="flex-1">
             {dataCLP.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -255,15 +255,15 @@ export default function PortfolioTab() {
                   <Legend wrapperStyle={{fontFamily: 'monospace', fontSize: '12px', color: '#a1a1aa'}} />
                 </PieChart>
               </ResponsiveContainer>
-            ) : <p className="text-center mt-20 text-[#71717a] font-mono text-sm">No hay posiciones en CLP</p>}
+            ) : <p className="text-center mt-20 text-zinc-500 dark:text-[#71717a] font-mono text-sm">No hay posiciones en CLP</p>}
           </div>
         </div>
       </div>
 
       {/* PORTFOLIO TABLE */}
-      <div className="bg-[#09090b] border border-[#27272a] rounded overflow-hidden">
+      <div className="bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-[#27272a] rounded overflow-hidden">
         <table className="w-full text-left text-sm font-mono border-collapse">
-          <thead className="bg-[#18181b] text-[#a1a1aa] text-[11px] uppercase border-b border-[#3f3f46]">
+          <thead className="bg-white dark:bg-[#18181b] text-zinc-600 dark:text-[#a1a1aa] text-[11px] uppercase border-b border-zinc-300 dark:border-[#3f3f46]">
             <tr>
               <th className="py-2 px-4 font-semibold">Ticker</th>
               <th className="py-2 px-4 font-semibold text-right">Cant.</th>
@@ -273,14 +273,14 @@ export default function PortfolioTab() {
               <th className="py-2 px-4 font-semibold text-center">Acción</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-[#27272a]">
+          <tbody className="divide-y divide-zinc-200 dark:divide-[#27272a]">
             {items.map((row) => (
-              <tr key={row.id} className="hover:bg-[#18181b] transition-colors">
-                <td className="py-2 px-4 font-bold text-[#e4e4e7]">{row.ticker}</td>
-                <td className="py-2 px-4 text-right text-[#a1a1aa]">{row.cantidad}</td>
-                <td className="py-2 px-4 text-right text-[#a1a1aa]">${row.precio_compra.toFixed(2)}</td>
-                <td className="py-2 px-4 text-right text-[#71717a]">{row.moneda}</td>
-                <td className="py-2 px-4 text-right font-bold text-[#e4e4e7]">${(row.cantidad * row.precio_compra).toLocaleString()}</td>
+              <tr key={row.id} className="hover:bg-white dark:bg-[#18181b] transition-colors">
+                <td className="py-2 px-4 font-bold text-zinc-900 dark:text-[#e4e4e7]">{row.ticker}</td>
+                <td className="py-2 px-4 text-right text-zinc-600 dark:text-[#a1a1aa]">{row.cantidad}</td>
+                <td className="py-2 px-4 text-right text-zinc-600 dark:text-[#a1a1aa]">${row.precio_compra.toFixed(2)}</td>
+                <td className="py-2 px-4 text-right text-zinc-500 dark:text-[#71717a]">{row.moneda}</td>
+                <td className="py-2 px-4 text-right font-bold text-zinc-900 dark:text-[#e4e4e7]">${(row.cantidad * row.precio_compra).toLocaleString()}</td>
                 <td className="py-2 px-4 text-center">
                   <button onClick={() => handleDelete(row.id)} className="text-[#f87171] hover:text-[#b91c1c] text-xs font-bold border border-[#7f1d1d] px-2 py-1 rounded transition-colors">
                     QUITAR
@@ -289,7 +289,7 @@ export default function PortfolioTab() {
               </tr>
             ))}
             {items.length === 0 && (
-              <tr><td colSpan={6} className="py-8 text-center text-[#71717a]">Portafolio vacío.</td></tr>
+              <tr><td colSpan={6} className="py-8 text-center text-zinc-500 dark:text-[#71717a]">Portafolio vacío.</td></tr>
             )}
           </tbody>
         </table>

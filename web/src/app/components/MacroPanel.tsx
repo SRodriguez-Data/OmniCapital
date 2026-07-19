@@ -35,14 +35,14 @@ export default function MacroPanel() {
 
   if (data.length === 0) {
     return (
-      <div className="bg-[#09090b] border-b border-[#27272a] py-2 px-6 flex gap-6 overflow-x-auto text-xs font-mono text-[#71717a]">
+      <div className="bg-zinc-50 dark:bg-[#09090b] border-b border-zinc-200 dark:border-[#27272a] py-2 px-6 flex gap-6 overflow-x-auto text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a]">
         Cargando indicadores macroeconómicos...
       </div>
     );
   }
 
   return (
-    <div className="bg-[#09090b] border-b border-[#27272a] py-2 px-6 flex gap-6 overflow-x-auto hide-scrollbar whitespace-nowrap">
+    <div className="bg-zinc-50 dark:bg-[#09090b] border-b border-zinc-200 dark:border-[#27272a] py-2 px-6 flex gap-6 overflow-x-auto hide-scrollbar whitespace-nowrap">
       {data.map((item, i) => {
         const isVix = item.symbol === '^VIX';
         // For VIX, "up" is bad (fear). For everything else, "up" is generally green/positive (or neutral).
@@ -50,17 +50,17 @@ export default function MacroPanel() {
         // For now, simple logic: change > 0 is green, < 0 is red. Exception VIX: change > 0 is red, < 0 is green.
         const isUp = item.change > 0;
         
-        let colorClass = "text-[#a1a1aa]";
+        let colorClass = "text-zinc-600 dark:text-[#a1a1aa]";
         if (isVix) {
           colorClass = isUp ? "text-[#f87171]" : "text-[#34d399]";
         } else {
-          colorClass = isUp ? "text-[#34d399]" : (item.change < 0 ? "text-[#f87171]" : "text-[#a1a1aa]");
+          colorClass = isUp ? "text-[#34d399]" : (item.change < 0 ? "text-[#f87171]" : "text-zinc-600 dark:text-[#a1a1aa]");
         }
 
         return (
-          <div key={i} className="flex items-center gap-2 text-xs font-mono">
-            <span className="text-[#a1a1aa] font-bold">{item.displayName}:</span>
-            <span className="text-[#e4e4e7]">{item.price.toFixed(2)}</span>
+          <div key={i} className="flex items-center gap-2 text-xs font-sans font-medium">
+            <span className="text-zinc-600 dark:text-[#a1a1aa] font-bold">{item.displayName}:</span>
+            <span className="text-zinc-900 dark:text-[#e4e4e7]">{item.price.toFixed(2)}</span>
             <span className={`flex items-center ${colorClass}`}>
               {isUp ? <TrendingUp className="w-3 h-3 mr-1" /> : <TrendingDown className="w-3 h-3 mr-1" />}
               {Math.abs(item.changePercent * 100).toFixed(2)}%
