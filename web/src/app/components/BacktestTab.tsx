@@ -24,7 +24,7 @@ export default function BacktestTab() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          ticker: ticker.toUpperCase(), 
+          ticker: ticker.trim().toUpperCase(), 
           capital: Number(capital), 
           years: Number(years) 
         })
