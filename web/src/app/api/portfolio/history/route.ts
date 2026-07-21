@@ -6,8 +6,11 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUP
 
 const supabase = createClient(supabaseUrl || '', supabaseKey || '');
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const range = searchParams.get('range') || '45D';
+
     // 1. Obtener portafolio actual
     const { data: portfolio, error: portError } = await supabase
       .from('mi_portafolio')
@@ -27,9 +30,20 @@ export async function GET() {
       totalCost += p.cantidad * p.precio_compra;
     });
 
-    // 2. Obtener precios históricos de los últimos 45 días para estos tickers
+    // 2. Determinar la fecha límite según el rango
     const dateLimit = new Date();
-    dateLimit.setDate(dateLimit.getDate() - 45);
+    if (range === '1W') dateLimit.setDate(dateLimit.getDate() - 7);
+    else if (range === '1M') dateLimit.setMonth(dateLimit.getMonth() - 1);
+    else if (range === '3M') dateLimit.setMonth(dateLimit.getMonth() - 3);
+    else if (range === '6M') dateLimit.setMonth(dateLimit.getMonth() - 6);
+    else if (range === 'YTD') {
+      dateLimit.setMonth(0);
+      dateLimit.setDate(1);
+    }
+    else if (range === '1Y') dateLimit.setFullYear(dateLimit.getFullYear() - 1);
+    else if (range === 'ALL') dateLimit.setFullYear(dateLimit.getFullYear() - 10);
+    else dateLimit.setDate(dateLimit.getDate() - 45); // Default 45D
+
     const dateStr = dateLimit.toISOString().split('T')[0];
 
     const { data: history, error: histError } = await supabase

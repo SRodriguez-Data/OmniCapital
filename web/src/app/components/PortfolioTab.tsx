@@ -31,6 +31,7 @@ export default function PortfolioTab() {
   const [submitting, setSubmitting] = useState(false);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [range, setRange] = useState<'1W' | '1M' | '3M' | '6M' | 'YTD' | '1Y' | 'ALL'>('1M');
 
   async function fetchPortfolio() {
     try {
@@ -46,9 +47,9 @@ export default function PortfolioTab() {
     }
   }
 
-  async function fetchHistory() {
+  async function fetchHistory(selectedRange = range) {
     try {
-      const res = await fetch('/api/portfolio/history');
+      const res = await fetch(`/api/portfolio/history?range=${selectedRange}`);
       if (res.ok) {
         const data = await res.json();
         setHistoryData(data);
@@ -60,8 +61,11 @@ export default function PortfolioTab() {
 
   useEffect(() => {
     fetchPortfolio();
-    fetchHistory();
   }, []);
+
+  useEffect(() => {
+    fetchHistory(range);
+  }, [range]);
 
   const handleSelectTicker = (selectedTicker: string) => {
     setTicker(selectedTicker);
@@ -183,10 +187,23 @@ export default function PortfolioTab() {
       {/* HISTORICAL P&L CHART */}
       {historyData.length > 0 && (
         <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-sm dark:shadow-none p-6 h-96 flex flex-col">
-          <div className="flex justify-between items-center border-b border-zinc-200 dark:border-[#27272a] pb-4 mb-6">
-            <h2 className="text-xs font-sans font-medium font-bold text-zinc-900 dark:text-[#e4e4e7] uppercase">Evolución P&L (Simulado 45D)</h2>
-            <div className="text-right">
-              <p className="text-[10px] text-zinc-500 dark:text-[#71717a] font-mono uppercase">P&L Actual</p>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-zinc-200 dark:border-[#27272a] pb-4 mb-6 gap-4">
+            <div>
+              <h2 className="text-xs font-sans font-medium font-bold text-zinc-900 dark:text-[#e4e4e7] uppercase">Evolución P&L</h2>
+              <div className="flex gap-2 mt-2">
+                {['1W', '1M', '3M', '6M', 'YTD', '1Y', 'ALL'].map(r => (
+                  <button
+                    key={r}
+                    onClick={() => setRange(r as any)}
+                    className={`text-[10px] px-2 py-1 rounded font-mono font-bold transition-colors ${range === r ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300' : 'bg-zinc-100 dark:bg-[#27272a] text-zinc-500 dark:text-[#a1a1aa] hover:bg-zinc-200 dark:hover:bg-[#3f3f46]'}`}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="text-left sm:text-right">
+              <p className="text-[10px] text-zinc-500 dark:text-[#71717a] font-mono uppercase">P&L ({range})</p>
               <p className={`text-lg font-bold font-mono ${historyData[historyData.length - 1].profitLoss >= 0 ? 'text-[#34d399]' : 'text-[#f87171]'}`}>
                 ${historyData[historyData.length - 1].profitLoss.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
               </p>
