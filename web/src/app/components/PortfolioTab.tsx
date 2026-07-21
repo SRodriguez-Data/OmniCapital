@@ -231,8 +231,14 @@ export default function PortfolioTab() {
                   labelStyle={{color: '#71717a'}}
                   formatter={(value: any, name: any) => [`$${Number(value).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`, name]}
                 />
-                <Area type="monotone" dataKey="totalValue" stroke="#60a5fa" fill="transparent" strokeWidth={2} name="Valor Total" />
-                <Area type="monotone" dataKey="profitLoss" stroke={(historyData[historyData.length - 1]?.profitLoss >= 0) ? "#34d399" : "#f87171"} fill={(historyData[historyData.length - 1]?.profitLoss >= 0) ? "url(#colorProfit)" : "url(#colorLoss)"} strokeWidth={2} name="Ganancia/Pérdida" />
+                <Area 
+                  type="monotone" 
+                  dataKey="totalValue" 
+                  stroke={(historyData[historyData.length - 1]?.profitLoss >= 0) ? "#34d399" : "#f87171"} 
+                  fill={(historyData[historyData.length - 1]?.profitLoss >= 0) ? "url(#colorProfit)" : "url(#colorLoss)"} 
+                  strokeWidth={2} 
+                  name="Valor Portafolio" 
+                />
               </AreaChart>
             </ResponsiveContainer>
           </div>

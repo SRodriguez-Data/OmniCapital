@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     // 1. Obtener portafolio actual
     const { data: portfolio, error: portError } = await supabase
       .from('mi_portafolio')
-      .select('ticker, cantidad, precio_compra');
+      .select('ticker, cantidad, precio_compra, moneda');
 
     if (portError) throw portError;
     if (!portfolio || portfolio.length === 0) {
@@ -22,12 +22,16 @@ export async function GET(request: Request) {
     }
 
     const tickers = portfolio.map(p => p.ticker);
-    const portfolioDict: Record<string, { cantidad: number, precio_compra: number }> = {};
-    let totalCost = 0;
+    const portfolioDict: Record<string, { cantidad: number, precio_compra: number, isCLP: boolean }> = {};
+    const USD_CLP = 940; // Fixed exchange rate proxy
     
     portfolio.forEach(p => {
-      portfolioDict[p.ticker] = { cantidad: p.cantidad, precio_compra: p.precio_compra };
-      totalCost += p.cantidad * p.precio_compra;
+      const isCLP = p.moneda === 'CLP' || p.ticker.endsWith('.SN');
+      portfolioDict[p.ticker] = { 
+        cantidad: p.cantidad, 
+        precio_compra: isCLP ? p.precio_compra / USD_CLP : p.precio_compra,
+        isCLP
+      };
     });
 
     // 2. Determinar la fecha límite según el rango
@@ -76,6 +80,7 @@ export async function GET(request: Request) {
 
     for (const d of sortedDates) {
       let dailyValue = 0;
+      let dailyCost = 0;
       let validTickersCount = 0;
 
       for (const t of tickers) {
@@ -84,7 +89,9 @@ export async function GET(request: Request) {
         }
 
         if (currentPrices[t] !== undefined) {
-          dailyValue += currentPrices[t] * portfolioDict[t].cantidad;
+          const priceUSD = portfolioDict[t].isCLP ? currentPrices[t] / USD_CLP : currentPrices[t];
+          dailyValue += priceUSD * portfolioDict[t].cantidad;
+          dailyCost += portfolioDict[t].precio_compra * portfolioDict[t].cantidad;
           validTickersCount++;
         }
       }
@@ -94,8 +101,8 @@ export async function GET(request: Request) {
         result.push({
           date: d,
           totalValue: dailyValue,
-          totalCost: totalCost,
-          profitLoss: dailyValue - totalCost
+          totalCost: dailyCost,
+          profitLoss: dailyValue - dailyCost
         });
       }
     }
