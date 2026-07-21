@@ -2,7 +2,6 @@ yfinance
 pandas
 numpy
 scipy
-alpaca-trade-api
 requests
 alpha-vantage==2.3.1
 supabase

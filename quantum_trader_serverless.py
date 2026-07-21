@@ -196,10 +196,10 @@ def run_serverless_screener():
     # 2. Filtrado Cuantitativo Separado (EE.UU. vs Chile)
     for row in activos_hoy:
         ticker = row['ticker']
-        rsi = row.get('rsi', 50)
-        close = row.get('close', 0)
-        volumen = row.get('volume', 0)
-        pvc_ema200 = row.get('pvc_ema200', 0)
+        rsi = row.get('rsi') or 50
+        close = row.get('close') or 0
+        volumen = row.get('volume') or 0
+        pvc_ema200 = row.get('pvc_ema200') or 0
         
         if rsi is None or pvc_ema200 is None:
             continue
