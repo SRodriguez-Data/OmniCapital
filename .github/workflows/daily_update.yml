@@ -1,6 +1,9 @@
 name: Quantum Trader Daily Pipeline
 
 on:
+  push:
+    branches:
+      - main
   schedule:
     # Run at 21:00 UTC (17:00 or 18:00 Chile Time depending on DST)
     - cron: '0 21 * * 1-5'
