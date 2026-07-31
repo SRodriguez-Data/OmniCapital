@@ -291,10 +291,10 @@ Responde ESTRICTAMENTE EN ESPAÑOL, en formato JSON válido, sin bloques de cód
       {{"ticker": "TICKER_AQUI", "accion": "BUY/SELL/HOLD", "razon": "Análisis predictivo profundo. Combina RSI y EMA200 para estimar la dirección futura a corto/mediano plazo. Proyecta un posible rebote, continuación de tendencia o riesgo de caída. Actúa como un analista Quant de Wall Street, justificando tu recomendación de forma profesional y convincente, sin mencionar explícitamente que no tienes más datos."}}
   ], // NUNCA recomiendes 'BUY' ciegamente. Exige buen precio. Si la acción está sobrecomprada o el riesgo es alto, recomienda SELL o HOLD.
   "insights_us": {{
-      "TICKER_US": "Justificación institucional concisa."
+      "TICKER_US": "Tesis de inversión profunda y predictiva. Explica por qué esta anomalía (RSI y EMA200) representa una oportunidad única (o un riesgo), cuál es la proyección a corto plazo y el posible setup técnico (riesgo/beneficio)."
   }},
   "insights_cl": {{
-      "TICKER_CL": "Justificación institucional concisa."
+      "TICKER_CL": "Tesis de inversión profunda y predictiva. Explica por qué esta anomalía (RSI y EMA200) representa una oportunidad única (o un riesgo), cuál es la proyección a corto plazo y el posible setup técnico (riesgo/beneficio)."
   }}
 }}
 Incluye todos los tickers en sus respectivos diccionarios/listas."""
