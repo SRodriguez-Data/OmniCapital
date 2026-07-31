@@ -309,7 +309,9 @@ Incluye todos los tickers en sus respectivos diccionarios/listas."""
     # Como analisis_ia actual solo tiene candidatos_json, guardaremos un objeto combinado para no romper la DB actual.
     combined_candidates = {
         "us": top_us,
-        "cl": top_cl
+        "cl": top_cl,
+        "diagnostico_portafolio": ia_data.get("diagnostico_mi_portafolio", "Sin diagnóstico específico."),
+        "recomendaciones_portafolio": ia_data.get("recomendaciones_mi_portafolio", [])
     }
     
     try:
@@ -319,9 +321,7 @@ Incluye todos los tickers en sus respectivos diccionarios/listas."""
             "seleccion_fondo": ia_data.get("seleccion_fondo", ""),
             "setup_tecnico": ia_data.get("setup_tecnico", ""),
             "contexto_macro": ia_data.get("contexto_macro", ""),
-            "insights_tickers": {**ia_data.get("insights_us", {}), **ia_data.get("insights_cl", {})},
-            "diagnostico_portafolio": ia_data.get("diagnostico_mi_portafolio", "Sin diagnóstico específico."),
-            "recomendaciones_portafolio": ia_data.get("recomendaciones_mi_portafolio", [])
+            "insights_tickers": {**ia_data.get("insights_us", {}), **ia_data.get("insights_cl", {})}
         }).execute()
     except Exception as e:
         logging.error(f"Error guardando IA en Supabase: {e}")

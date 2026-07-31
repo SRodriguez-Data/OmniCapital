@@ -32,8 +32,8 @@ export default function RecommendationsTab() {
         const report = aiRes[0];
         
         let parsedRecs: Recommendation[] = [];
-        if (report.recomendaciones_portafolio && report.recomendaciones_portafolio.length > 0) {
-          parsedRecs = report.recomendaciones_portafolio.map((c: any) => ({
+        if (report.candidatos_json && report.candidatos_json.recomendaciones_portafolio && report.candidatos_json.recomendaciones_portafolio.length > 0) {
+          parsedRecs = report.candidatos_json.recomendaciones_portafolio.map((c: any) => ({
             ticker: c.ticker,
             accion: c.accion || 'HOLD',
             razon: c.razon || 'Sin justificación detallada.'
@@ -50,7 +50,7 @@ export default function RecommendationsTab() {
 
         setData({
           fecha: report.fecha,
-          diagnostico: report.diagnostico_portafolio || report.vision_radar || "Sin diagnóstico.",
+          diagnostico: (report.candidatos_json && report.candidatos_json.diagnostico_portafolio) ? report.candidatos_json.diagnostico_portafolio : (report.vision_radar || "Sin diagnóstico."),
           recomendaciones: parsedRecs
         });
       }
