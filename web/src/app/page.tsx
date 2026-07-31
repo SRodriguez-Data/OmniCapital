@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import PortfolioTab from './components/PortfolioTab';
 import RecommendationsTab from './components/RecommendationsTab';
 import ScreenerTab from './components/ScreenerTab';
