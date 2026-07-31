@@ -283,8 +283,8 @@ Responde ESTRICTAMENTE EN ESPAÑOL, en formato JSON válido, sin bloques de cód
   "setup_tecnico": "Evaluación técnica del riesgo de mercado actual.",
   "diagnostico_mi_portafolio": "Un diagnóstico crítico y duro sobre MI PORTAFOLIO ACTUAL. Evalúa diversificación, riesgos ocultos, y sobre-exposición.",
   "recomendaciones_mi_portafolio": [
-      {{"ticker": "TICKER_DE_MI_PORTAFOLIO", "accion": "BUY/SELL/HOLD", "razon": "Justificación"}}
-  ], // DEBES INCLUIR UNA RECOMENDACIÓN PARA ABSOLUTAMENTE TODOS LOS TICKERS DE 'MI PORTAFOLIO ACTUAL'
+      {{"ticker": "TICKER_DE_MI_PORTAFOLIO", "accion": "BUY/SELL/HOLD", "razon": "Justificación técnica estricta basada en RSI y EMA200"}}
+  ], // DEBES INCLUIR UNA RECOMENDACIÓN PARA TODOS LOS TICKERS DE 'MI PORTAFOLIO ACTUAL'. NUNCA recomiendes 'BUY' sólo por estar en el portafolio; exige RSI bajo y buen precio vs EMA200. Si está sobrecomprada, recomienda SELL o HOLD. Sé duro.
   "insights_us": {{
       "TICKER_US": "Justificación institucional concisa."
   }},
