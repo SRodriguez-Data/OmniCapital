@@ -6,6 +6,7 @@ import React, { useEffect, useState } from 'react';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, Legend, AreaChart, Area, XAxis, YAxis, CartesianGrid } from 'recharts';
 import SymbolSearchModal from './SymbolSearchModal';
 import { Search } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 interface PortfolioItem {
   id: string;
@@ -35,7 +36,10 @@ export default function PortfolioTab() {
 
   async function fetchPortfolio() {
     try {
-      const res = await fetch('/api/portfolio');
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch('/api/portfolio', {
+        headers: { 'Authorization': `Bearer ${session?.access_token}` }
+      });
       if (res.ok) {
         const data = await res.json();
         setItems(data);
@@ -49,7 +53,10 @@ export default function PortfolioTab() {
 
   async function fetchHistory(selectedRange = range) {
     try {
-      const res = await fetch(`/api/portfolio/history?range=${selectedRange}`);
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`/api/portfolio/history?range=${selectedRange}`, {
+        headers: { 'Authorization': `Bearer ${session?.access_token}` }
+      });
       if (res.ok) {
         const data = await res.json();
         setHistoryData(data);
@@ -81,9 +88,13 @@ export default function PortfolioTab() {
     e.preventDefault();
     setSubmitting(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch('/api/portfolio', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`
+        },
         body: JSON.stringify({
           ticker: ticker.toUpperCase(),
           cantidad: Number(cantidad),
@@ -105,7 +116,11 @@ export default function PortfolioTab() {
 
   const handleDelete = async (id: string) => {
     try {
-      const res = await fetch(`/api/portfolio?id=${id}`, { method: 'DELETE' });
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`/api/portfolio?id=${id}`, { 
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${session?.access_token}` }
+      });
       if (res.ok) {
         await fetchPortfolio();
         await fetchHistory();

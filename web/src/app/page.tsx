@@ -11,10 +11,43 @@ import MacroPanel from './components/MacroPanel';
 import NotificationBell from './components/NotificationBell';
 import BacktestTab from './components/BacktestTab';
 import { ThemeToggle } from './components/ThemeToggle';
-import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History } from 'lucide-react';
+import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History, LogOut } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { useRouter } from 'next/navigation';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA' | 'TOP5' | 'DIVIDENDOS' | 'BACKTEST'>('PORTFOLIO');
+  const [session, setSession] = useState<any>(null);
+  const router = useRouter();
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) {
+        router.push('/login');
+      } else {
+        setSession(session);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) {
+        router.push('/login');
+      } else {
+        setSession(session);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [router]);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    router.push('/login');
+  };
+
+  if (!session) {
+    return <div className="min-h-screen bg-[#09090b] flex items-center justify-center font-mono text-zinc-500">Cargando Terminal...</div>;
+  }
 
   return (
     <main className="min-h-screen bg-zinc-100 dark:bg-[#09090b] text-zinc-900 dark:text-[#fafafa] font-sans transition-colors duration-300">
@@ -30,6 +63,12 @@ export default function Home() {
         <div className="mt-4 md:mt-0 flex items-center gap-4">
           <ThemeToggle />
           <NotificationBell />
+          <button 
+            onClick={handleSignOut}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-mono font-bold text-zinc-500 hover:text-red-500 transition-colors border border-zinc-200 dark:border-[#27272a] hover:border-red-500 rounded"
+          >
+            <LogOut className="w-4 h-4" /> SALIR
+          </button>
         </div>
       </header>
 

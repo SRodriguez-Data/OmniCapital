@@ -8,9 +8,12 @@ if (!supabaseUrl || !supabaseKey) {
   console.warn("Missing Supabase env variables in Next.js");
 }
 
-const supabase = createClient(supabaseUrl || '', supabaseKey || '');
+export async function GET(request: Request) {
+  const authHeader = request.headers.get('Authorization');
+  const supabase = createClient(supabaseUrl || '', supabaseKey || '', {
+    global: { headers: { Authorization: authHeader || '' } }
+  });
 
-export async function GET() {
   const { data, error } = await supabase
     .from('mi_portafolio')
     .select('*')
@@ -25,6 +28,11 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const authHeader = request.headers.get('Authorization');
+    const supabase = createClient(supabaseUrl || '', supabaseKey || '', {
+      global: { headers: { Authorization: authHeader || '' } }
+    });
+
     const body = await request.json();
     const { ticker, cantidad, precio_compra, moneda } = body;
 
@@ -56,6 +64,11 @@ export async function DELETE(request: Request) {
   if (!id) {
     return NextResponse.json({ error: 'ID is required' }, { status: 400 });
   }
+
+  const authHeader = request.headers.get('Authorization');
+  const supabase = createClient(supabaseUrl || '', supabaseKey || '', {
+    global: { headers: { Authorization: authHeader || '' } }
+  });
 
   const { error } = await supabase
     .from('mi_portafolio')
