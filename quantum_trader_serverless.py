@@ -248,12 +248,23 @@ def run_serverless_screener():
     except Exception as e:
         logging.error(f"Error guardando matemáticas del portafolio en Supabase: {e}")
 
-    # 4. Generación Analista Institucional (Gemini)
+    # 4. Generación Analista Institucional (Gemini) - Mercado Global
     prompt_us = "\\n".join([f"- {c['ticker']}: Precio ${c['price']:.2f}, RSI {c['rsi']:.1f}, Distancia EMA200 {c['distancia_ema200']*100:.1f}%, Score {c['score']:.1f}" for c in top_us])
     prompt_cl = "\\n".join([f"- {c['ticker']}: Precio ${c['price']:.2f}, RSI {c['rsi']:.1f}, Distancia EMA200 {c['distancia_ema200']*100:.1f}%, Score {c['score']:.1f}" for c in top_cl])
     
+    # Nuevo: Extraer info del portafolio del usuario
+    portfolio_data = []
+    if 'portfolio_tickers' in locals() and portfolio_tickers:
+        for row in activos_hoy:
+            if row['ticker'] in portfolio_tickers:
+                portfolio_data.append(row)
+                
+    prompt_mi_portafolio = "Portafolio Vacío"
+    if portfolio_data:
+        prompt_mi_portafolio = "\\n".join([f"- {r['ticker']}: Precio ${r.get('close',0):.2f}, RSI {r.get('rsi',0):.1f}, Dist. EMA200 {(r.get('pvc_ema200',0)*100):.1f}%" for r in portfolio_data])
+
     prompt_macro = f"""Eres el Estratega Cuantitativo Jefe. 
-Analiza los siguientes dos mercados y provee un reporte institucional estricto.
+Analiza los siguientes dos mercados y el portafolio del cliente, luego provee un reporte institucional estricto.
 
 Mercado EE.UU. (Top 5 Anomalías):
 {prompt_us}
@@ -261,12 +272,19 @@ Mercado EE.UU. (Top 5 Anomalías):
 Mercado Chile (Top 5 Anomalías):
 {prompt_cl}
 
+MI PORTAFOLIO ACTUAL:
+{prompt_mi_portafolio}
+
 Responde ESTRICTAMENTE EN ESPAÑOL, en formato JSON válido, sin bloques de código markdown, con la siguiente estructura exacta:
 {{
   "contexto_macro": "Análisis macroeconómico de 2 párrafos (tasas, inflación, etc).",
-  "vision_radar": "Resumen de las anomalías detectadas en ambos mercados.",
+  "vision_radar": "Resumen de las anomalías detectadas en los mercados globales.",
   "seleccion_fondo": "Tu selección #1 global justificando su ventaja (Moat).",
   "setup_tecnico": "Evaluación técnica del riesgo de mercado actual.",
+  "diagnostico_mi_portafolio": "Un diagnóstico crítico y duro sobre MI PORTAFOLIO ACTUAL. Evalúa diversificación, riesgos ocultos, sobre-exposición, y da 3 recomendaciones accionables.",
+  "recomendaciones_mi_portafolio": [
+      {{"ticker": "TICKER_DE_MI_PORTAFOLIO", "accion": "BUY/SELL/HOLD", "razon": "Justificación"}}
+  ],
   "insights_us": {{
       "TICKER_US": "Justificación institucional concisa."
   }},
@@ -274,7 +292,7 @@ Responde ESTRICTAMENTE EN ESPAÑOL, en formato JSON válido, sin bloques de cód
       "TICKER_CL": "Justificación institucional concisa."
   }}
 }}
-Incluye todos los tickers en sus respectivos diccionarios."""
+Incluye todos los tickers en sus respectivos diccionarios/listas."""
 
     try:
         response = llm.generate_content(prompt_macro)
@@ -301,7 +319,9 @@ Incluye todos los tickers en sus respectivos diccionarios."""
             "seleccion_fondo": ia_data.get("seleccion_fondo", ""),
             "setup_tecnico": ia_data.get("setup_tecnico", ""),
             "contexto_macro": ia_data.get("contexto_macro", ""),
-            "insights_tickers": {**ia_data.get("insights_us", {}), **ia_data.get("insights_cl", {})}
+            "insights_tickers": {**ia_data.get("insights_us", {}), **ia_data.get("insights_cl", {})},
+            "diagnostico_portafolio": ia_data.get("diagnostico_mi_portafolio", "Sin diagnóstico específico."),
+            "recomendaciones_portafolio": ia_data.get("recomendaciones_mi_portafolio", [])
         }).execute()
     except Exception as e:
         logging.error(f"Error guardando IA en Supabase: {e}")

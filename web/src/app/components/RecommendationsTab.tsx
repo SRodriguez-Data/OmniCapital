@@ -32,21 +32,25 @@ export default function RecommendationsTab() {
         const report = aiRes[0];
         
         let parsedRecs: Recommendation[] = [];
-        if (report.candidatos_json) {
+        if (report.recomendaciones_portafolio && report.recomendaciones_portafolio.length > 0) {
+          parsedRecs = report.recomendaciones_portafolio.map((c: any) => ({
+            ticker: c.ticker,
+            accion: c.accion || 'HOLD',
+            razon: c.razon || 'Sin justificación detallada.'
+          }));
+        } else if (report.candidatos_json) {
+          // Fallback to global top anomalies if no specific portfolio analysis exists yet
           const combined = [...(report.candidatos_json.us || []), ...(report.candidatos_json.cl || [])];
           parsedRecs = combined.map(c => ({
             ticker: c.ticker,
             accion: c.signal || (c.score > 50 ? 'BUY' : 'HOLD'),
             razon: (report.insights_tickers && report.insights_tickers[c.ticker]) || `Oportunidad técnica detectada. Score: ${c.score.toFixed(1)}`
           }));
-        } else {
-           // Fallback for old data structure if needed
-           parsedRecs = report.candidatos_json?.portafolio_recomendaciones || [];
         }
 
         setData({
           fecha: report.fecha,
-          diagnostico: report.vision_radar || "Sin diagnóstico.",
+          diagnostico: report.diagnostico_portafolio || report.vision_radar || "Sin diagnóstico.",
           recomendaciones: parsedRecs
         });
       }
@@ -75,7 +79,7 @@ export default function RecommendationsTab() {
   return (
     <div className="space-y-6">
       <div className="bg-white dark:bg-[#18181b] border-l-4 border-l-[#60a5fa] border-y border-r border-zinc-200 dark:border-[#27272a] p-4 rounded-sm">
-        <h3 className="text-[10px] font-sans font-bold tracking-tight text-[#60a5fa] uppercase tracking-widest mb-2">Diagnóstico Global del Portafolio</h3>
+        <h3 className="text-[10px] font-sans font-bold tracking-tight text-[#60a5fa] uppercase tracking-widest mb-2">Diagnóstico de Mi Portafolio</h3>
         <p className="text-sm font-sans text-[#d4d4d8] leading-relaxed">
           {data.diagnostico}
         </p>

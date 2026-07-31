@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell } from 'recharts';
 import { DollarSign, Percent, TrendingUp } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 interface DividendItem {
   id: string;
@@ -21,8 +22,10 @@ export default function DividendsTab() {
   const [loading, setLoading] = useState(true);
 
   async function fetchDividends() {
-    try {
-      const res = await fetch('/api/dividends');
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch('/api/dividends', {
+        headers: { 'Authorization': `Bearer ${session?.access_token}` }
+      });
       if (res.ok) {
         const data = await res.json();
         setItems(data);

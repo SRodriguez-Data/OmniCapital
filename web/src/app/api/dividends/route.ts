@@ -9,9 +9,14 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUP
 
 const supabase = createClient(supabaseUrl || '', supabaseKey || '');
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const { data: portfolio, error } = await supabase
+    const authHeader = req.headers.get('authorization');
+    const supabaseClient = createClient(supabaseUrl || '', supabaseKey || '', {
+      global: { headers: { Authorization: authHeader || '' } }
+    });
+
+    const { data: portfolio, error } = await supabaseClient
       .from('mi_portafolio')
       .select('*');
 
