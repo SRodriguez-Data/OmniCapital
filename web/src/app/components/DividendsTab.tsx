@@ -22,6 +22,7 @@ export default function DividendsTab() {
   const [loading, setLoading] = useState(true);
 
   async function fetchDividends() {
+    try {
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch('/api/dividends', {
         headers: { 'Authorization': `Bearer ${session?.access_token}` }
