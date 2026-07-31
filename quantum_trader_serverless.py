@@ -33,8 +33,7 @@ SUPABASE_KEY = os.getenv("SUPABASE_SECRET_KEY")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-PORTFOLIO_TICKERS_RAW = os.getenv("PORTFOLIO_TICKERS", "")
-PORTFOLIO_TICKERS = [t.strip() for t in PORTFOLIO_TICKERS_RAW.split(",") if t.strip()]
+# Tickers will be dynamically fetched from mi_portafolio
 
 if SUPABASE_URL and SUPABASE_KEY:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -236,15 +235,18 @@ def run_serverless_screener():
 
     # 3. Matemáticas de Portafolio Real
     logging.info("🧮 Calculando Matriz de Correlación y Markowitz SOBRE MI PORTAFOLIO...")
-    if PORTFOLIO_TICKERS:
-        corr_json, frontier_points = compute_quant_math(PORTFOLIO_TICKERS)
-        try:
-            if corr_json:
-                supabase.table("correlaciones").insert({"matriz_json": corr_json}).execute()
-            if frontier_points:
-                supabase.table("frontera_eficiente").insert({"puntos_json": frontier_points}).execute()
-        except Exception as e:
-            logging.error(f"Error guardando matemáticas del portafolio en Supabase: {e}")
+    try:
+        res_tickers = supabase.table("mi_portafolio").select("ticker").execute()
+        if res_tickers.data:
+            portfolio_tickers = list(set([row['ticker'] for row in res_tickers.data]))
+            if portfolio_tickers:
+                corr_json, frontier_points = compute_quant_math(portfolio_tickers)
+                if corr_json:
+                    supabase.table("correlaciones").insert({"matriz_json": corr_json}).execute()
+                if frontier_points:
+                    supabase.table("frontera_eficiente").insert({"puntos_json": frontier_points}).execute()
+    except Exception as e:
+        logging.error(f"Error guardando matemáticas del portafolio en Supabase: {e}")
 
     # 4. Generación Analista Institucional (Gemini)
     prompt_us = "\\n".join([f"- {c['ticker']}: Precio ${c['price']:.2f}, RSI {c['rsi']:.1f}, Distancia EMA200 {c['distancia_ema200']*100:.1f}%, Score {c['score']:.1f}" for c in top_us])

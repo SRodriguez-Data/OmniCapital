@@ -32,7 +32,21 @@ export default function TopOportunidadesTab() {
           const report = data[0];
           console.log("DEBUG: report =", report);
           setFecha(report.fecha);
-          const top5 = report.candidatos_json?.top5_oportunidades || [];
+          
+          let top5: TopOpportunity[] = [];
+          if (report.candidatos_json) {
+            const combined = [...(report.candidatos_json.us || []), ...(report.candidatos_json.cl || [])];
+            const sorted = combined.sort((a, b) => b.score - a.score).slice(0, 5);
+            top5 = sorted.map(c => ({
+              ticker: c.ticker,
+              precio_entrada_ideal: c.bollinger_lower ? `$${c.bollinger_lower.toFixed(2)}` : `$${c.price.toFixed(2)}`,
+              target_price: c.bollinger_upper ? `$${c.bollinger_upper.toFixed(2)}` : `$${(c.price * 1.1).toFixed(2)}`,
+              riesgo: c.distancia_ema200 < -0.1 ? 'ALTO' : 'MODERADO',
+              justificacion: (report.insights_tickers && report.insights_tickers[c.ticker]) || `Score Quant: ${c.score.toFixed(1)}. Distancia EMA200: ${(c.distancia_ema200 * 100).toFixed(1)}%`
+            }));
+          } else {
+             top5 = report.candidatos_json?.top5_oportunidades || [];
+          }
           setOportunidades(top5);
         }
       } catch (e) {
