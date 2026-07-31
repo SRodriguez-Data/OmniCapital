@@ -30,10 +30,24 @@ export default function RecommendationsTab() {
 
       if (!error && aiRes && aiRes.length > 0) {
         const report = aiRes[0];
+        
+        let parsedRecs: Recommendation[] = [];
+        if (report.candidatos_json) {
+          const combined = [...(report.candidatos_json.us || []), ...(report.candidatos_json.cl || [])];
+          parsedRecs = combined.map(c => ({
+            ticker: c.ticker,
+            accion: c.signal || (c.score > 50 ? 'BUY' : 'HOLD'),
+            razon: (report.insights_tickers && report.insights_tickers[c.ticker]) || `Oportunidad técnica detectada. Score: ${c.score.toFixed(1)}`
+          }));
+        } else {
+           // Fallback for old data structure if needed
+           parsedRecs = report.candidatos_json?.portafolio_recomendaciones || [];
+        }
+
         setData({
           fecha: report.fecha,
           diagnostico: report.vision_radar || "Sin diagnóstico.",
-          recomendaciones: report.candidatos_json?.portafolio_recomendaciones || []
+          recomendaciones: parsedRecs
         });
       }
     } catch (e) {
