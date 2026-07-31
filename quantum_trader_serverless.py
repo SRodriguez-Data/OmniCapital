@@ -295,7 +295,7 @@ Responde ESTRICTAMENTE EN ESPAÑOL, en formato JSON válido, sin bloques de cód
 Incluye todos los tickers en sus respectivos diccionarios/listas."""
 
     try:
-        response = llm.generate_content(prompt_macro)
+        response = llm.generate_content(prompt_macro, generation_config={"response_mime_type": "application/json"})
         texto_ia = response.text.replace("```json", "").replace("```", "").strip()
         ia_data = json.loads(texto_ia)
     except Exception as e:
