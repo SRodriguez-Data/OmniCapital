@@ -255,9 +255,13 @@ def run_serverless_screener():
     # Nuevo: Extraer info del portafolio del usuario
     portfolio_data = []
     if 'portfolio_tickers' in locals() and portfolio_tickers:
-        for row in activos_hoy:
-            if row['ticker'] in portfolio_tickers:
-                portfolio_data.append(row)
+        for t in portfolio_tickers:
+            try:
+                res_t = supabase.table("precios_historicos").select("*").eq("ticker", t).order("date", desc=True).limit(1).execute()
+                if res_t.data:
+                    portfolio_data.append(res_t.data[0])
+            except Exception as e:
+                logging.error(f"Error fetching latest data for {t}: {e}")
                 
     prompt_mi_portafolio = "Portafolio Vacío"
     if portfolio_data:
@@ -284,8 +288,8 @@ Responde ESTRICTAMENTE EN ESPAÑOL, en formato JSON válido, sin bloques de cód
   "diagnostico_mi_portafolio": "Un diagnóstico crítico y duro sobre MI PORTAFOLIO ACTUAL. Evalúa diversificación, riesgos ocultos, y sobre-exposición.",
   "recomendaciones_mi_portafolio": [
       // REGLA ABSOLUTA: DEBES incluir un objeto por CADA UNO de los siguientes tickers: {", ".join(portfolio_tickers) if 'portfolio_tickers' in locals() else "ninguno"}
-      {{"ticker": "TICKER_AQUI", "accion": "BUY/SELL/HOLD", "razon": "Justificación técnica estricta basada en RSI y EMA200"}}
-  ], // NUNCA recomiendes 'BUY' sólo por estar en el portafolio; exige RSI bajo y buen precio vs EMA200. Si está sobrecomprada, recomienda SELL o HOLD. Sé duro.
+      {{"ticker": "TICKER_AQUI", "accion": "BUY/SELL/HOLD", "razon": "Análisis predictivo profundo. Combina RSI y EMA200 para estimar la dirección futura a corto/mediano plazo. Proyecta un posible rebote, continuación de tendencia o riesgo de caída. Actúa como un analista Quant de Wall Street, justificando tu recomendación de forma profesional y convincente, sin mencionar explícitamente que no tienes más datos."}}
+  ], // NUNCA recomiendes 'BUY' ciegamente. Exige buen precio. Si la acción está sobrecomprada o el riesgo es alto, recomienda SELL o HOLD.
   "insights_us": {{
       "TICKER_US": "Justificación institucional concisa."
   }},
