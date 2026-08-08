@@ -14,6 +14,9 @@ interface TopOpportunity {
   rsi: number;
   distancia_ema200: number;
   score: number;
+  pe: string | number;
+  div_str: string;
+  deuda: string | number;
 }
 
 export default function TopOportunidadesTab() {
@@ -59,7 +62,10 @@ export default function TopOportunidadesTab() {
               price: c.price,
               rsi: c.rsi,
               distancia_ema200: c.distancia_ema200,
-              score: c.score
+              score: c.score,
+              pe: c.pe || 'N/A',
+              div_str: c.div_str || '0.00%',
+              deuda: c.deuda || 'N/A'
             }));
           }
           setOportunidades(top5);
@@ -87,7 +93,10 @@ export default function TopOportunidadesTab() {
           price: op.price,
           rsi: op.rsi,
           ema200: op.distancia_ema200,
-          score: op.score
+          score: op.score,
+          pe: op.pe,
+          div_str: op.div_str,
+          deuda: op.deuda
         })
       });
 
