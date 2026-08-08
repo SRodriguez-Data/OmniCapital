@@ -288,7 +288,7 @@ Responde ESTRICTAMENTE EN ESPAÑOL, en formato JSON válido, sin bloques de cód
   "diagnostico_mi_portafolio": "Un diagnóstico crítico y duro sobre MI PORTAFOLIO ACTUAL. Evalúa diversificación, riesgos ocultos, y sobre-exposición.",
   "recomendaciones_mi_portafolio": [
       // REGLA ABSOLUTA: DEBES incluir un objeto por CADA UNO de los siguientes tickers: {", ".join(portfolio_tickers) if 'portfolio_tickers' in locals() else "ninguno"}
-      {{"ticker": "TICKER_AQUI", "accion": "BUY/SELL/HOLD", "razon": "Análisis predictivo profundo. Combina RSI y EMA200 para estimar la dirección futura a corto/mediano plazo. Proyecta un posible rebote, continuación de tendencia o riesgo de caída. Actúa como un analista Quant de Wall Street, justificando tu recomendación de forma profesional y convincente, sin mencionar explícitamente que no tienes más datos."}}
+      {{"ticker": "TICKER_AQUI", "accion": "🟢 BUY (Aumentar) / 🟡 HOLD (Mantener) / 🔴 SELL (Recortar)", "stop_loss": "Calcula un precio o porcentaje exacto de salida de emergencia, justificándolo matemáticamente con el RSI o la distancia a la EMA proporcionada", "analisis": "Actúa como un Gestor de Riesgos de un Fondo Cuantitativo. Tu respuesta debe ser quirúrgica. Máximo 3 líneas resumiendo el riesgo y el momento técnico del activo."}}
   ], // NUNCA recomiendes 'BUY' ciegamente. Exige buen precio. Si la acción está sobrecomprada o el riesgo es alto, recomienda SELL o HOLD.
   "insights_us": {{
       "TICKER_US": "Tesis de inversión profunda y predictiva. Explica por qué esta anomalía (RSI y EMA200) representa una oportunidad única (o un riesgo), cuál es la proyección a corto plazo y el posible setup técnico (riesgo/beneficio)."
