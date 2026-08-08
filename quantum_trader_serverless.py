@@ -5,6 +5,7 @@ import requests
 import json
 import logging
 import pandas as pd
+import yfinance as yf
 import numpy as np
 from datetime import datetime
 from supabase import create_client, Client
@@ -108,6 +109,23 @@ def compute_quant_math(tickers):
     except Exception as e:
         logging.error(f"Error calculando Matemáticas Cuantitativas: {e}")
         return {}, []
+
+
+def get_fundamentals(ticker):
+    try:
+        info = yf.Ticker(ticker).info
+        pe = info.get('trailingPE', info.get('forwardPE', -1))
+        div = info.get('dividendYield', 0)
+        div_str = f"{div*100:.2f}%" if isinstance(div, (int, float)) else "0.00%"
+        deuda = info.get('debtToEquity', 0)
+        
+        if not isinstance(pe, (int, float)): pe = -1
+        if not isinstance(deuda, (int, float)): deuda = 0
+        
+        return {"pe": pe, "div_str": div_str, "deuda": deuda}
+    except Exception as e:
+        logging.error(f"Error fetching YF for {ticker}: {e}")
+        return {"pe": -1, "div_str": "0.00%", "deuda": 0}
 
 def calculate_trading_limits(candidates):
     if not candidates or not supabase:
@@ -226,8 +244,27 @@ def run_serverless_screener():
             else:
                 all_us.append(data_dict)
 
-    top_us = sorted(all_us, key=lambda x: x['score'], reverse=True)[:5]
-    top_cl = sorted(all_cl, key=lambda x: x['score'], reverse=True)[:5]
+    all_us.sort(key=lambda x: x['score'], reverse=True)
+    all_cl.sort(key=lambda x: x['score'], reverse=True)
+    
+    top_us = []
+    logging.info("⏳ Filtrando fundamentales en YFinance para US...")
+    for c in all_us:
+        if len(top_us) >= 5: break
+        fund = get_fundamentals(c['ticker'])
+        # Iron Filter: P/E between 0 and 35, Debt/Eq < 200 (if data exists)
+        if (fund['pe'] == -1 or (0 < fund['pe'] < 35)) and (fund['deuda'] == 0 or fund['deuda'] < 200):
+            c.update(fund)
+            top_us.append(c)
+
+    top_cl = []
+    logging.info("⏳ Filtrando fundamentales en YFinance para CL...")
+    for c in all_cl:
+        if len(top_cl) >= 5: break
+        fund = get_fundamentals(c['ticker'])
+        if (fund['pe'] == -1 or (0 < fund['pe'] < 35)) and (fund['deuda'] == 0 or fund['deuda'] < 200):
+            c.update(fund)
+            top_cl.append(c)
     
     # Agregar métricas institucionales (Bollinger, Max Sell, Min Buy, Signal)
     top_us = calculate_trading_limits(top_us)
