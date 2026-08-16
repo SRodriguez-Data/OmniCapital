@@ -230,7 +230,7 @@ def run_serverless_screener():
         elif not ticker.endswith(".SN") and volumen_nominal < 500_000:
             continue
             
-        if rsi < 60 and pvc_ema200 > -0.20:
+        if rsi < 70 and pvc_ema200 > -0.20:
             score = (50 - rsi) + (pvc_ema200 * 100)
             data_dict = {
                 'ticker': ticker,
@@ -252,8 +252,8 @@ def run_serverless_screener():
     for c in all_us:
         if len(top_us) >= 5: break
         fund = get_fundamentals(c['ticker'])
-        # Iron Filter: P/E between 0 and 35, Debt/Eq < 200 (if data exists)
-        if (fund['pe'] == -1 or (0 < fund['pe'] < 35)) and (fund['deuda'] == 0 or fund['deuda'] < 200):
+        # Iron Filter Relaxed: P/E < 50 (or negative) and Debt/Eq < 300
+        if (fund['pe'] == -1 or fund['pe'] < 50) and (fund['deuda'] == 0 or fund['deuda'] < 300):
             c.update(fund)
             top_us.append(c)
 
@@ -262,7 +262,7 @@ def run_serverless_screener():
     for c in all_cl:
         if len(top_cl) >= 5: break
         fund = get_fundamentals(c['ticker'])
-        if (fund['pe'] == -1 or (0 < fund['pe'] < 35)) and (fund['deuda'] == 0 or fund['deuda'] < 200):
+        if (fund['pe'] == -1 or fund['pe'] < 50) and (fund['deuda'] == 0 or fund['deuda'] < 300):
             c.update(fund)
             top_cl.append(c)
     
@@ -322,16 +322,16 @@ Responde ESTRICTAMENTE EN ESPAÑOL, en formato JSON válido, sin bloques de cód
   "vision_radar": "Resumen de las anomalías detectadas en los mercados globales.",
   "seleccion_fondo": "Tu selección #1 global justificando su ventaja (Moat).",
   "setup_tecnico": "Evaluación técnica del riesgo de mercado actual.",
-  "diagnostico_mi_portafolio": "Un diagnóstico crítico y duro sobre MI PORTAFOLIO ACTUAL. Evalúa diversificación, riesgos ocultos, y sobre-exposición.",
+  "diagnostico_mi_portafolio": "Un diagnóstico crítico y duro sobre MI PORTAFOLIO ACTUAL. Tu análisis debe ser exhaustivo y de grado institucional. El apartado de ANÁLISIS debe contener al menos 2 párrafos robustos detallando el momentum técnico, riesgos macroeconómicos y justificación de la decisión (BUY/HOLD/SELL). No escatimes en detalles. Usa un tono de banquero de inversión.",
   "recomendaciones_mi_portafolio": [
       // REGLA ABSOLUTA: DEBES incluir un objeto por CADA UNO de los siguientes tickers: {", ".join(portfolio_tickers) if 'portfolio_tickers' in locals() else "ninguno"}
-      {{"ticker": "TICKER_AQUI", "accion": "🟢 BUY (Aumentar) / 🟡 HOLD (Mantener) / 🔴 SELL (Recortar)", "stop_loss": "Calcula un precio o porcentaje exacto de salida de emergencia, justificándolo matemáticamente con el RSI o la distancia a la EMA proporcionada", "analisis": "Actúa como un Gestor de Riesgos de un Fondo Cuantitativo. Tu respuesta debe ser quirúrgica. Máximo 3 líneas resumiendo el riesgo y el momento técnico del activo."}}
+      {{"ticker": "TICKER_AQUI", "accion": "🟢 BUY (Aumentar) / 🟡 HOLD (Mantener) / 🔴 SELL (Recortar)", "stop_loss": "Calcula un precio exacto de salida de emergencia, justificándolo.", "analisis": "Tu análisis debe ser exhaustivo y de grado institucional. Explica el momentum técnico y justifica la decisión fuertemente."}}
   ], // NUNCA recomiendes 'BUY' ciegamente. Exige buen precio. Si la acción está sobrecomprada o el riesgo es alto, recomienda SELL o HOLD.
   "insights_us": {{
-      "TICKER_US": "Tesis de inversión profunda y predictiva. Explica por qué esta anomalía (RSI y EMA200) representa una oportunidad única (o un riesgo), cuál es la proyección a corto plazo y el posible setup técnico (riesgo/beneficio)."
+      "TICKER_US": "Tesis de inversión institucional y predictiva de grado bancario (mínimo 2 párrafos). Explica por qué esta anomalía (RSI y EMA200) representa una oportunidad única (o un riesgo), proyección a corto plazo y setup técnico (riesgo/beneficio)."
   }},
   "insights_cl": {{
-      "TICKER_CL": "Tesis de inversión profunda y predictiva. Explica por qué esta anomalía (RSI y EMA200) representa una oportunidad única (o un riesgo), cuál es la proyección a corto plazo y el posible setup técnico (riesgo/beneficio)."
+      "TICKER_CL": "Tesis de inversión institucional y predictiva de grado bancario (mínimo 2 párrafos). Explica por qué esta anomalía (RSI y EMA200) representa una oportunidad única (o un riesgo), proyección a corto plazo y setup técnico (riesgo/beneficio)."
   }}
 }}
 Incluye todos los tickers en sus respectivos diccionarios/listas."""

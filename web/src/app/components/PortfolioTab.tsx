@@ -16,6 +16,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
 export default function PortfolioTab() {
   const { items, loading, isDemo, refreshPortfolio } = usePortfolio();
   const [historyData, setHistoryData] = useState<any[]>([]);
+  const [livePrices, setLivePrices] = useState<Record<string, number>>({});
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   
   // Form state
@@ -68,7 +69,44 @@ export default function PortfolioTab() {
 
   useEffect(() => {
     fetchHistory(range);
-  }, [range]);
+  }, [range, isDemo]);
+
+  useEffect(() => {
+    async function fetchLivePrices() {
+      if (items.length === 0) return;
+      const tickers = items.map(i => i.ticker).join(',');
+      try {
+        const res = await fetch(`/api/portfolio/live?symbols=${encodeURIComponent(tickers)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setLivePrices(data);
+        }
+      } catch (err) {
+        console.error("Error fetching live prices", err);
+      }
+    }
+    fetchLivePrices();
+  }, [items]);
+
+  const USD_CLP = 930;
+
+  // Calculamos KPIs
+  let totalInvestedUSD = 0;
+  let totalCurrentUSD = 0;
+
+  items.forEach(item => {
+    const isCLP = item.moneda === 'CLP';
+    const invested = item.cantidad * item.precio_compra;
+    const currentPrice = livePrices[item.ticker] || item.precio_compra;
+    const currentVal = item.cantidad * currentPrice;
+
+    totalInvestedUSD += isCLP ? (invested / USD_CLP) : invested;
+    totalCurrentUSD += isCLP ? (currentVal / USD_CLP) : currentVal;
+  });
+
+  const totalPnL_USD = totalCurrentUSD - totalInvestedUSD;
+  const totalPnL_Percent = totalInvestedUSD > 0 ? (totalPnL_USD / totalInvestedUSD) * 100 : 0;
+  const pnlColor = totalPnL_USD >= 0 ? 'text-[#34d399]' : 'text-[#f87171]';
 
   const handleSelectTicker = (selectedTicker: string) => {
     setTicker(selectedTicker);
@@ -319,6 +357,29 @@ export default function PortfolioTab() {
         </div>
       </div>
 
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="bg-zinc-50 dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-4 flex flex-col justify-center">
+          <span className="text-xs font-mono text-zinc-500 dark:text-[#a1a1aa] uppercase tracking-wider mb-1">Valor Total (Actual)</span>
+          <span className="text-2xl font-bold font-sans text-zinc-900 dark:text-[#fafafa]">${totalCurrentUSD.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} <span className="text-sm font-normal text-zinc-500">USD</span></span>
+        </div>
+        <div className="bg-zinc-50 dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-4 flex flex-col justify-center">
+          <span className="text-xs font-mono text-zinc-500 dark:text-[#a1a1aa] uppercase tracking-wider mb-1">Capital Invertido</span>
+          <span className="text-2xl font-bold font-sans text-zinc-900 dark:text-[#fafafa]">${totalInvestedUSD.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} <span className="text-sm font-normal text-zinc-500">USD</span></span>
+        </div>
+        <div className="bg-zinc-50 dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-4 flex flex-col justify-center">
+          <span className="text-xs font-mono text-zinc-500 dark:text-[#a1a1aa] uppercase tracking-wider mb-1">Retorno Total (P&L)</span>
+          <div className="flex items-baseline gap-2">
+            <span className={`text-2xl font-bold font-sans ${pnlColor}`}>
+              {totalPnL_USD >= 0 ? '+' : ''}{totalPnL_USD.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+            </span>
+            <span className={`text-sm font-bold font-mono ${pnlColor} bg-opacity-10 px-2 py-0.5 rounded`}>
+              {totalPnL_Percent >= 0 ? '+' : ''}{totalPnL_Percent.toFixed(2)}%
+            </span>
+          </div>
+        </div>
+      </div>
+
       {/* PORTFOLIO TABLE */}
       <div className="bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-[#27272a] rounded overflow-hidden">
         <table className="w-full text-left text-sm font-mono border-collapse">
@@ -329,41 +390,58 @@ export default function PortfolioTab() {
               <th className="py-2 px-4 font-semibold text-right">Cant.</th>
               <th className="py-2 px-4 font-semibold text-right">Fecha Compra</th>
               <th className="py-2 px-4 font-semibold text-right">Precio Compra</th>
+              <th className="py-2 px-4 font-semibold text-right">Precio Actual</th>
               <th className="py-2 px-4 font-semibold text-right">Moneda</th>
-              <th className="py-2 px-4 font-semibold text-right">Capital</th>
+              <th className="py-2 px-4 font-semibold text-right">Invertido</th>
+              <th className="py-2 px-4 font-semibold text-right">Valor Actual</th>
+              <th className="py-2 px-4 font-semibold text-right">P&L</th>
               <th className="py-2 px-4 font-semibold text-center">Acción</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-200 dark:divide-[#27272a]">
-            {items.map((row) => (
-              <React.Fragment key={row.id}>
-                <tr className="hover:bg-white dark:bg-[#18181b] transition-colors cursor-pointer" onClick={() => toggleRow(row.id)}>
-                  <td className="py-2 px-4 text-center">
-                    {expandedRows[row.id] ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
-                  </td>
-                  <td className="py-2 px-4 font-bold text-zinc-900 dark:text-[#e4e4e7]">{row.ticker}</td>
-                  <td className="py-2 px-4 text-right text-zinc-600 dark:text-[#a1a1aa]">{row.cantidad}</td>
-                  <td className="py-2 px-4 text-right text-zinc-500 dark:text-[#71717a]">{row.purchase_date || '-'}</td>
-                  <td className="py-2 px-4 text-right text-zinc-600 dark:text-[#a1a1aa]">${row.precio_compra.toFixed(2)}</td>
-                  <td className="py-2 px-4 text-right text-zinc-500 dark:text-[#71717a]">{row.moneda}</td>
-                  <td className="py-2 px-4 text-right font-bold text-zinc-900 dark:text-[#e4e4e7]">${(row.cantidad * row.precio_compra).toLocaleString()}</td>
-                  <td className="py-2 px-4 text-center">
-                    <button onClick={(e) => { e.stopPropagation(); handleDelete(row.id); }} className="text-[#f87171] hover:text-[#b91c1c] text-xs font-bold border border-[#7f1d1d] px-2 py-1 rounded transition-colors">
-                      QUITAR
-                    </button>
-                  </td>
-                </tr>
-                {expandedRows[row.id] && (
-                  <tr className="bg-zinc-100 dark:bg-[#111113]">
-                    <td colSpan={8} className="p-4 border-t border-zinc-200 dark:border-[#27272a]">
-                      <AssetSparkline ticker={row.ticker} purchaseDate={row.purchase_date} />
+            {items.map((row) => {
+              const livePrice = livePrices[row.ticker] || row.precio_compra;
+              const invested = row.cantidad * row.precio_compra;
+              const currentVal = row.cantidad * livePrice;
+              const pnlVal = currentVal - invested;
+              const pnlPct = invested > 0 ? (pnlVal / invested) * 100 : 0;
+              const isWin = pnlVal >= 0;
+              
+              return (
+                <React.Fragment key={row.id}>
+                  <tr className="hover:bg-white dark:bg-[#18181b] transition-colors cursor-pointer" onClick={() => toggleRow(row.id)}>
+                    <td className="py-2 px-4 text-center">
+                      {expandedRows[row.id] ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
+                    </td>
+                    <td className="py-2 px-4 font-bold text-zinc-900 dark:text-[#e4e4e7]">{row.ticker}</td>
+                    <td className="py-2 px-4 text-right text-zinc-600 dark:text-[#a1a1aa]">{row.cantidad}</td>
+                    <td className="py-2 px-4 text-right text-zinc-500 dark:text-[#71717a]">{row.purchase_date || '-'}</td>
+                    <td className="py-2 px-4 text-right text-zinc-600 dark:text-[#a1a1aa]">${row.precio_compra.toFixed(2)}</td>
+                    <td className="py-2 px-4 text-right text-zinc-900 dark:text-[#fafafa] font-bold">${livePrice.toFixed(2)}</td>
+                    <td className="py-2 px-4 text-right text-zinc-500 dark:text-[#71717a]">{row.moneda}</td>
+                    <td className="py-2 px-4 text-right text-zinc-600 dark:text-[#a1a1aa]">${invested.toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
+                    <td className="py-2 px-4 text-right font-bold text-zinc-900 dark:text-[#e4e4e7]">${currentVal.toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
+                    <td className={`py-2 px-4 text-right font-bold ${isWin ? 'text-[#34d399]' : 'text-[#f87171]'}`}>
+                      {isWin ? '+' : ''}{pnlPct.toFixed(2)}%
+                    </td>
+                    <td className="py-2 px-4 text-center">
+                      <button onClick={(e) => { e.stopPropagation(); handleDelete(row.id); }} className="text-[#f87171] hover:text-[#b91c1c] text-xs font-bold border border-[#7f1d1d] px-2 py-1 rounded transition-colors">
+                        QUITAR
+                      </button>
                     </td>
                   </tr>
-                )}
-              </React.Fragment>
-            ))}
+                  {expandedRows[row.id] && (
+                    <tr className="bg-zinc-100 dark:bg-[#111113]">
+                      <td colSpan={11} className="p-4 border-t border-zinc-200 dark:border-[#27272a]">
+                        <AssetSparkline ticker={row.ticker} purchaseDate={row.purchase_date} />
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
             {items.length === 0 && (
-              <tr><td colSpan={8} className="py-8 text-center text-zinc-500 dark:text-[#71717a]">Portafolio vacío.</td></tr>
+              <tr><td colSpan={11} className="py-8 text-center text-zinc-500 dark:text-[#71717a]">Portafolio vacío.</td></tr>
             )}
           </tbody>
         </table>

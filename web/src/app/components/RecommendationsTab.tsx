@@ -28,12 +28,12 @@ export default function RecommendationsTab() {
       if (isDemo) {
         setData({
           fecha: new Date().toISOString().split('T')[0],
-          diagnostico: "Análisis Cuantitativo (Modo Demo): El portafolio presenta una excelente diversificación tecnológica (AAPL, MSFT, NVDA) con coberturas defensivas (KHC, SCHD). La exposición a commodities (SQM) añade volatilidad, pero la estructura general es robusta para el ciclo macroeconómico actual.",
+          diagnostico: "Análisis Cuantitativo (Modo Demo): El portafolio actual presenta una diversificación estratégica robusta, con una marcada sobreponderación en mega-caps tecnológicas (AAPL, MSFT, NVDA) que capturan el momentum secular de la inteligencia artificial. Sin embargo, esta concentración expone a la cartera a riesgos de regresión a la media ante posibles recortes de tasas agresivos por parte de la Reserva Federal. Las coberturas defensivas en el sector consumo (KHC) y ETFs de dividendos aristócratas (SCHD) proveen un colchón de liquidez esencial frente a escenarios de alta volatilidad.\n\nDesde una perspectiva macroeconómica, la inclusión táctica de activos emergentes y materias primas (SQM-B.SN, ENELCHILE) añade un beta asimétrico atractivo, protegiendo el poder adquisitivo frente a shocks inflacionarios persistentes. El algoritmo recomienda mantener la liquidez actual y aplicar estrategias de rebalanceo dinámico si el VIX supera la barrera de los 25 puntos, priorizando la preservación de capital institucional.",
           recomendaciones: items.map(item => ({
             ticker: item.ticker,
             accion: Math.random() > 0.5 ? '🟢 BUY' : '🟡 HOLD',
-            stop_loss: `$${(item.precio_compra * 0.85).toFixed(2)} (-15% SL)`,
-            analisis: `El modelo quant sugiere mantener o acumular posiciones en ${item.ticker} debido a su momentum positivo y fuerte soporte en la EMA200.`
+            stop_loss: `$${(item.precio_compra * 0.85).toFixed(2)} (-15% SL estricto)`,
+            analisis: `El modelo quant sugiere mantener o acumular posiciones en ${item.ticker} debido a su momentum positivo, fuerte soporte institucional en la EMA200 y una prima de riesgo justificada por sus sólidos fundamentales operativos.`
           }))
         });
         setLoading(false);
