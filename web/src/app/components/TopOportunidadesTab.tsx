@@ -94,6 +94,14 @@ export default function TopOportunidadesTab() {
   const generateThesis = async (op: TopOpportunity) => {
     if (theses[op.ticker]?.loading || theses[op.ticker]?.content) return;
 
+    // Verificar caché local primero
+    const cacheKey = `quantum_thesis_${op.ticker}_${fecha}`;
+    const cachedThesis = localStorage.getItem(cacheKey);
+    if (cachedThesis) {
+      setTheses(prev => ({ ...prev, [op.ticker]: { loading: false, content: cachedThesis } }));
+      return;
+    }
+
     setTheses(prev => ({ ...prev, [op.ticker]: { loading: true, content: '' } }));
 
     try {
@@ -115,6 +123,8 @@ export default function TopOportunidadesTab() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Error al generar tesis');
 
+      // Guardar en caché
+      localStorage.setItem(cacheKey, data.thesis);
       setTheses(prev => ({ ...prev, [op.ticker]: { loading: false, content: data.thesis } }));
     } catch (e: any) {
       setTheses(prev => ({ ...prev, [op.ticker]: { loading: false, content: '', error: e.message } }));
