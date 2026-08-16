@@ -36,6 +36,17 @@ export default function PortfolioTab() {
 
   async function fetchPortfolio() {
     try {
+      if (typeof window !== 'undefined' && localStorage.getItem('isDemo') === 'true') {
+        setItems([
+          { id: 'demo-1', ticker: 'AAPL', cantidad: 10, precio_compra: 150, moneda: 'USD' },
+          { id: 'demo-2', ticker: 'TSLA', cantidad: 5, precio_compra: 200, moneda: 'USD' },
+          { id: 'demo-3', ticker: 'MSFT', cantidad: 8, precio_compra: 300, moneda: 'USD' },
+          { id: 'demo-4', ticker: 'SQM-B.SN', cantidad: 50, precio_compra: 40000, moneda: 'CLP' }
+        ]);
+        setLoading(false);
+        return;
+      }
+
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch('/api/portfolio', {
         headers: { 'Authorization': `Bearer ${session?.access_token}` }
@@ -53,6 +64,26 @@ export default function PortfolioTab() {
 
   async function fetchHistory(selectedRange = range) {
     try {
+      if (typeof window !== 'undefined' && localStorage.getItem('isDemo') === 'true') {
+        const mockHistory = [];
+        let currentDate = new Date();
+        currentDate.setDate(currentDate.getDate() - 30);
+        let baseValue = 10000;
+        let basePnL = 500;
+        for(let i=0; i<30; i++) {
+          currentDate.setDate(currentDate.getDate() + 1);
+          baseValue += (Math.random() - 0.4) * 200; // Ligera tendencia alcista
+          basePnL += (Math.random() - 0.4) * 50;
+          mockHistory.push({
+            date: currentDate.toISOString().split('T')[0],
+            totalValue: baseValue,
+            profitLoss: basePnL
+          });
+        }
+        setHistoryData(mockHistory);
+        return;
+      }
+
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch(`/api/portfolio/history?range=${selectedRange}`, {
         headers: { 'Authorization': `Bearer ${session?.access_token}` }
@@ -86,6 +117,12 @@ export default function PortfolioTab() {
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (typeof window !== 'undefined' && localStorage.getItem('isDemo') === 'true') {
+      alert("⛔ Operación de escritura bloqueada. El modo Jurado (Demo) es de solo lectura y tus datos están aislados por seguridad.");
+      setTicker(''); setCantidad(''); setPrecio('');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -115,6 +152,11 @@ export default function PortfolioTab() {
   };
 
   const handleDelete = async (id: string) => {
+    if (typeof window !== 'undefined' && localStorage.getItem('isDemo') === 'true') {
+      alert("⛔ Operación de eliminación bloqueada. El modo Jurado (Demo) es de solo lectura.");
+      return;
+    }
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch(`/api/portfolio?id=${id}`, { 

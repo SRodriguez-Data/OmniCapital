@@ -68,5 +68,6 @@ async def upload_cartolas(files: List[UploadFile] = File(...)):
 # Punto de entrada principal
 if __name__ == "__main__":
     import uvicorn
-    # Se debe correr con: uvicorn backend:app --reload --port 8000
-    uvicorn.run("backend:app", host="0.0.0.0", port=8000, reload=True)
+    # Se debe correr en nube con el puerto dinámico asignado por Render/Railway
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("backend:app", host="0.0.0.0", port=port)
