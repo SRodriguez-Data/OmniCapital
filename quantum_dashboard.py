@@ -29,6 +29,34 @@ def save_portfolio(new_list):
     os.environ["PORTFOLIO_TICKERS"] = new_val
 
 # ==========================================
+# LOGIN SCREEN (Con Bypass Semillero)
+# ==========================================
+if "user_role" not in st.session_state:
+    st.session_state.user_role = None
+
+if st.session_state.user_role is None:
+    st.title("🔐 Acceso al Quantum Terminal")
+    st.markdown("Ingresa tus credenciales o accede al modo demo.")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        pwd = st.text_input("Contraseña", type="password")
+        if st.button("Ingresar (Usuario Regular)", use_container_width=True):
+            if pwd == "admin":
+                st.session_state.user_role = "admin"
+                st.rerun()
+            else:
+                st.error("Credenciales incorrectas")
+                
+    with col2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🚀 Entrar como Jurado (Demo Mode)", use_container_width=True, type="primary"):
+            st.session_state.user_role = "demo"
+            st.session_state.portfolio = ["AAPL", "MSFT", "NVDA", "SPY"] # Portafolio predefinido de prueba
+            st.rerun()
+    st.stop()
+
+# ==========================================
 # 1. BARRA LATERAL (SIDEBAR) - MI PORTAFOLIO
 # ==========================================
 with st.sidebar:
@@ -67,7 +95,54 @@ st.title("🌌 Quantum Portfolio Dashboard")
 st.markdown("Bienvenido al terminal financiero de próxima generación.")
 
 # Pestañas principales
-tab_scanner, tab_robo = st.tabs(["📊 Escáner Cuantitativo", "🤖 Robo-Advisor"])
+tab_data, tab_scanner, tab_robo = st.tabs(["[00] DATA WAREHOUSE", "📊 Escáner Cuantitativo", "🤖 Robo-Advisor"])
+
+# ==========================================
+# 2. PANEL PRINCIPAL - DATA WAREHOUSE
+# ==========================================
+with tab_data:
+    st.header("Carga de Cartolas (Data Ingestion)")
+    st.markdown("Sube tus cartolas en PDF y el motor multi-broker extraerá todas las operaciones financieras.")
+    
+    uploaded_files = st.file_uploader('Sube tus cartolas de brokers', accept_multiple_files=True, type=['pdf'])
+    
+    if st.button("🚀 Procesar Cartolas", use_container_width=True):
+        if uploaded_files:
+            import os
+            import tempfile
+            import glob
+            import sys
+            
+            # Asegurar que Cartolas esté en el path para importar el script
+            if "Cartolas" not in sys.path:
+                sys.path.append(os.path.join(os.getcwd(), "Cartolas"))
+                
+            from Cartolas.extractor_cartolas import orquestador_extraccion
+            
+            with st.spinner("Procesando archivos con OCR y Regex..."):
+                with tempfile.TemporaryDirectory() as tmp_in:
+                    with tempfile.TemporaryDirectory() as tmp_out:
+                        # Guardar los archivos nuevos (ignorando locales)
+                        for f in uploaded_files:
+                            with open(os.path.join(tmp_in, f.name), "wb") as out_f:
+                                out_f.write(f.read())
+                        
+                        # Procesar
+                        orquestador_extraccion(tmp_in, tmp_out)
+                        
+                        # Mostrar vista previa
+                        csv_files = glob.glob(os.path.join(tmp_out, "**/*.csv"), recursive=True)
+                        if csv_files:
+                            st.success(f"¡Se procesaron los datos exitosamente! Se generaron {len(csv_files)} archivos de resultados.")
+                            for csv_f in csv_files:
+                                broker_name = os.path.basename(os.path.dirname(csv_f))
+                                st.subheader(f"📊 {broker_name} - {os.path.basename(csv_f)}")
+                                df = pd.read_csv(csv_f)
+                                st.dataframe(df, use_container_width=True)
+                        else:
+                            st.warning("No se encontraron operaciones financieras en las cartolas subidas.")
+        else:
+            st.error("Por favor, sube al menos un archivo PDF.")
 
 # ==========================================
 # 2. PANEL PRINCIPAL - ESCÁNER CUANTITATIVO
