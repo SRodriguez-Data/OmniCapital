@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Target, TrendingUp, ShieldAlert, Sparkles, AlertTriangle, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import ReactMarkdown from 'react-markdown';
+import { usePortfolio } from '../context/PortfolioContext';
 
 interface TopOpportunity {
   ticker: string;
@@ -20,6 +21,7 @@ interface TopOpportunity {
 }
 
 export default function TopOportunidadesTab() {
+  const { isDemo } = usePortfolio();
   const [oportunidades, setOportunidades] = useState<TopOpportunity[]>([]);
   const [fecha, setFecha] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -29,6 +31,16 @@ export default function TopOportunidadesTab() {
   useEffect(() => {
     async function fetchTop5() {
       try {
+        if (isDemo) {
+          setOportunidades([
+            { ticker: 'AMZN', precio_entrada_ideal: '$130.00', target_price: '$160.00', riesgo: 'MODERADO', price: 135.00, rsi: 35, distancia_ema200: -5, score: 85, pe: 45, div_str: '0%', deuda: 0.5 },
+            { ticker: 'GOOGL', precio_entrada_ideal: '$120.00', target_price: '$145.00', riesgo: 'BAJO', price: 125.00, rsi: 40, distancia_ema200: -2, score: 80, pe: 25, div_str: '0%', deuda: 0.1 }
+          ]);
+          setFecha(new Date().toISOString().split('T')[0]);
+          setLoading(false);
+          return;
+        }
+
         const { data, error } = await supabase
           .from('analisis_ia')
           .select('*')

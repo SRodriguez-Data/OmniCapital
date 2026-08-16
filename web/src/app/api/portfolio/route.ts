@@ -34,16 +34,16 @@ export async function POST(request: Request) {
     });
 
     const body = await request.json();
-    const { ticker, cantidad, precio_compra, moneda } = body;
+    const { ticker, cantidad, precio_compra, moneda, purchase_date } = body;
 
-    if (!ticker || !cantidad || !precio_compra || !moneda) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    if (!ticker || !cantidad || !precio_compra || !moneda || !purchase_date) {
+      return NextResponse.json({ error: 'Missing required fields including purchase_date' }, { status: 400 });
     }
 
     const { data, error } = await supabase
       .from('mi_portafolio')
       .insert([
-        { ticker: ticker.toUpperCase(), cantidad, precio_compra, moneda }
+        { ticker: ticker.toUpperCase(), cantidad, precio_compra, moneda, purchase_date }
       ])
       .select();
 

@@ -5,66 +5,33 @@
 import React, { useEffect, useState } from 'react';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, Legend, AreaChart, Area, XAxis, YAxis, CartesianGrid } from 'recharts';
 import SymbolSearchModal from './SymbolSearchModal';
-import { Search } from 'lucide-react';
+import { Search, ChevronDown, ChevronUp } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-
-interface PortfolioItem {
-  id: string;
-  ticker: string;
-  cantidad: number;
-  precio_compra: number;
-  moneda: 'USD' | 'CLP';
-}
+import { usePortfolio } from '../context/PortfolioContext';
+import AssetSparkline from './AssetSparkline';
 
 const COLORS_USD = ['#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8', '#1e40af', '#1e3a8a'];
 const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064e3b'];
 
 export default function PortfolioTab() {
-  const [items, setItems] = useState<PortfolioItem[]>([]);
+  const { items, loading, isDemo, refreshPortfolio } = usePortfolio();
   const [historyData, setHistoryData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   
   // Form state
   const [ticker, setTicker] = useState('');
   const [cantidad, setCantidad] = useState('');
   const [precio, setPrecio] = useState('');
   const [moneda, setMoneda] = useState<'USD'|'CLP'>('USD');
+  const [purchaseDate, setPurchaseDate] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [range, setRange] = useState<'1W' | '1M' | '3M' | '6M' | 'YTD' | '1Y' | 'ALL'>('1M');
 
-  async function fetchPortfolio() {
-    try {
-      if (typeof window !== 'undefined' && localStorage.getItem('isDemo') === 'true') {
-        setItems([
-          { id: 'demo-1', ticker: 'AAPL', cantidad: 10, precio_compra: 150, moneda: 'USD' },
-          { id: 'demo-2', ticker: 'TSLA', cantidad: 5, precio_compra: 200, moneda: 'USD' },
-          { id: 'demo-3', ticker: 'MSFT', cantidad: 8, precio_compra: 300, moneda: 'USD' },
-          { id: 'demo-4', ticker: 'SQM-B.SN', cantidad: 50, precio_compra: 40000, moneda: 'CLP' }
-        ]);
-        setLoading(false);
-        return;
-      }
-
-      const { data: { session } } = await supabase.auth.getSession();
-      const res = await fetch('/api/portfolio', {
-        headers: { 'Authorization': `Bearer ${session?.access_token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setItems(data);
-      }
-    } catch (error) {
-      console.error("Error fetching portfolio", error);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function fetchHistory(selectedRange = range) {
     try {
-      if (typeof window !== 'undefined' && localStorage.getItem('isDemo') === 'true') {
+      if (isDemo) {
         const mockHistory = [];
         let currentDate = new Date();
         currentDate.setDate(currentDate.getDate() - 30);
@@ -97,9 +64,7 @@ export default function PortfolioTab() {
     }
   }
 
-  useEffect(() => {
-    fetchPortfolio();
-  }, []);
+  // useEffect(() => { fetchPortfolio(); }, []); // Eliminado porque se usa Context
 
   useEffect(() => {
     fetchHistory(range);
@@ -117,9 +82,9 @@ export default function PortfolioTab() {
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (typeof window !== 'undefined' && localStorage.getItem('isDemo') === 'true') {
+    if (isDemo) {
       alert("⛔ Operación de escritura bloqueada. El modo Jurado (Demo) es de solo lectura y tus datos están aislados por seguridad.");
-      setTicker(''); setCantidad(''); setPrecio('');
+      setTicker(''); setCantidad(''); setPrecio(''); setPurchaseDate('');
       return;
     }
 
@@ -136,12 +101,13 @@ export default function PortfolioTab() {
           ticker: ticker.toUpperCase(),
           cantidad: Number(cantidad),
           precio_compra: Number(precio),
-          moneda
+          moneda,
+          purchase_date: purchaseDate
         })
       });
       if (res.ok) {
-        setTicker(''); setCantidad(''); setPrecio('');
-        await fetchPortfolio();
+        setTicker(''); setCantidad(''); setPrecio(''); setPurchaseDate('');
+        await refreshPortfolio();
         await fetchHistory(); // refresh history as well
       }
     } catch {
@@ -152,7 +118,7 @@ export default function PortfolioTab() {
   };
 
   const handleDelete = async (id: string) => {
-    if (typeof window !== 'undefined' && localStorage.getItem('isDemo') === 'true') {
+    if (isDemo) {
       alert("⛔ Operación de eliminación bloqueada. El modo Jurado (Demo) es de solo lectura.");
       return;
     }
@@ -164,12 +130,16 @@ export default function PortfolioTab() {
         headers: { 'Authorization': `Bearer ${session?.access_token}` }
       });
       if (res.ok) {
-        await fetchPortfolio();
+        await refreshPortfolio();
         await fetchHistory();
       }
     } catch {
       console.error("Error al eliminar");
     }
+  };
+
+  const toggleRow = (id: string) => {
+    setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
   const dataUSD = items.filter(i => i.moneda === 'USD').map(i => ({ name: i.ticker, value: i.cantidad * i.precio_compra }));
@@ -215,6 +185,15 @@ export default function PortfolioTab() {
             className="w-full bg-zinc-50 dark:bg-[#09090b] border border-zinc-300 dark:border-[#3f3f46] text-zinc-900 dark:text-[#e4e4e7] p-2 text-sm font-mono rounded-lg focus:outline-none focus:border-[#60a5fa]"
           />
         </div>
+        <div className="w-full md:w-36">
+          <label className="block text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] mb-1">Fecha Compra</label>
+          <input 
+            type="date" 
+            value={purchaseDate}
+            onChange={e => setPurchaseDate(e.target.value)}
+            className="w-full bg-zinc-50 dark:bg-[#09090b] border border-zinc-300 dark:border-[#3f3f46] text-zinc-900 dark:text-[#e4e4e7] p-2 text-sm font-mono rounded-lg focus:outline-none focus:border-[#60a5fa]"
+          />
+        </div>
         <div className="w-full md:w-24">
           <label className="block text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] mb-1">Moneda</label>
           <select 
@@ -228,7 +207,7 @@ export default function PortfolioTab() {
         </div>
         <button 
           onClick={handleAdd}
-          disabled={submitting || !ticker || !cantidad || !precio}
+          disabled={submitting || !ticker || !cantidad || !precio || !purchaseDate}
           className="w-full md:w-auto bg-[#2563eb] hover:bg-[#1d4ed8] text-white px-6 py-2 text-sm font-bold font-mono transition-colors disabled:opacity-50"
         >
           {submitting ? 'AÑADIENDO...' : '+ AÑADIR'}
@@ -345,8 +324,10 @@ export default function PortfolioTab() {
         <table className="w-full text-left text-sm font-mono border-collapse">
           <thead className="bg-white dark:bg-[#18181b] text-zinc-600 dark:text-[#a1a1aa] text-[11px] uppercase border-b border-zinc-300 dark:border-[#3f3f46]">
             <tr>
+              <th className="py-2 px-4 font-semibold w-10"></th>
               <th className="py-2 px-4 font-semibold">Ticker</th>
               <th className="py-2 px-4 font-semibold text-right">Cant.</th>
+              <th className="py-2 px-4 font-semibold text-right">Fecha Compra</th>
               <th className="py-2 px-4 font-semibold text-right">Precio Compra</th>
               <th className="py-2 px-4 font-semibold text-right">Moneda</th>
               <th className="py-2 px-4 font-semibold text-right">Capital</th>
@@ -355,21 +336,34 @@ export default function PortfolioTab() {
           </thead>
           <tbody className="divide-y divide-zinc-200 dark:divide-[#27272a]">
             {items.map((row) => (
-              <tr key={row.id} className="hover:bg-white dark:bg-[#18181b] transition-colors">
-                <td className="py-2 px-4 font-bold text-zinc-900 dark:text-[#e4e4e7]">{row.ticker}</td>
-                <td className="py-2 px-4 text-right text-zinc-600 dark:text-[#a1a1aa]">{row.cantidad}</td>
-                <td className="py-2 px-4 text-right text-zinc-600 dark:text-[#a1a1aa]">${row.precio_compra.toFixed(2)}</td>
-                <td className="py-2 px-4 text-right text-zinc-500 dark:text-[#71717a]">{row.moneda}</td>
-                <td className="py-2 px-4 text-right font-bold text-zinc-900 dark:text-[#e4e4e7]">${(row.cantidad * row.precio_compra).toLocaleString()}</td>
-                <td className="py-2 px-4 text-center">
-                  <button onClick={() => handleDelete(row.id)} className="text-[#f87171] hover:text-[#b91c1c] text-xs font-bold border border-[#7f1d1d] px-2 py-1 rounded transition-colors">
-                    QUITAR
-                  </button>
-                </td>
-              </tr>
+              <React.Fragment key={row.id}>
+                <tr className="hover:bg-white dark:bg-[#18181b] transition-colors cursor-pointer" onClick={() => toggleRow(row.id)}>
+                  <td className="py-2 px-4 text-center">
+                    {expandedRows[row.id] ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
+                  </td>
+                  <td className="py-2 px-4 font-bold text-zinc-900 dark:text-[#e4e4e7]">{row.ticker}</td>
+                  <td className="py-2 px-4 text-right text-zinc-600 dark:text-[#a1a1aa]">{row.cantidad}</td>
+                  <td className="py-2 px-4 text-right text-zinc-500 dark:text-[#71717a]">{row.purchase_date || '-'}</td>
+                  <td className="py-2 px-4 text-right text-zinc-600 dark:text-[#a1a1aa]">${row.precio_compra.toFixed(2)}</td>
+                  <td className="py-2 px-4 text-right text-zinc-500 dark:text-[#71717a]">{row.moneda}</td>
+                  <td className="py-2 px-4 text-right font-bold text-zinc-900 dark:text-[#e4e4e7]">${(row.cantidad * row.precio_compra).toLocaleString()}</td>
+                  <td className="py-2 px-4 text-center">
+                    <button onClick={(e) => { e.stopPropagation(); handleDelete(row.id); }} className="text-[#f87171] hover:text-[#b91c1c] text-xs font-bold border border-[#7f1d1d] px-2 py-1 rounded transition-colors">
+                      QUITAR
+                    </button>
+                  </td>
+                </tr>
+                {expandedRows[row.id] && (
+                  <tr className="bg-zinc-100 dark:bg-[#111113]">
+                    <td colSpan={8} className="p-4 border-t border-zinc-200 dark:border-[#27272a]">
+                      <AssetSparkline ticker={row.ticker} purchaseDate={row.purchase_date} />
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
             ))}
             {items.length === 0 && (
-              <tr><td colSpan={6} className="py-8 text-center text-zinc-500 dark:text-[#71717a]">Portafolio vacío.</td></tr>
+              <tr><td colSpan={8} className="py-8 text-center text-zinc-500 dark:text-[#71717a]">Portafolio vacío.</td></tr>
             )}
           </tbody>
         </table>

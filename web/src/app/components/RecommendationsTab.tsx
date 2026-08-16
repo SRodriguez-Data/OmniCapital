@@ -3,6 +3,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { usePortfolio } from '../context/PortfolioContext';
 
 interface Recommendation {
   ticker: string;
@@ -18,11 +19,27 @@ interface AiData {
 }
 
 export default function RecommendationsTab() {
+  const { isDemo, items } = usePortfolio();
   const [data, setData] = useState<AiData | null>(null);
   const [loading, setLoading] = useState(true);
 
   async function fetchAI() {
     try {
+      if (isDemo) {
+        setData({
+          fecha: new Date().toISOString().split('T')[0],
+          diagnostico: "Análisis Cuantitativo (Modo Demo): El portafolio presenta una excelente diversificación tecnológica (AAPL, MSFT, NVDA) con coberturas defensivas (KHC, SCHD). La exposición a commodities (SQM) añade volatilidad, pero la estructura general es robusta para el ciclo macroeconómico actual.",
+          recomendaciones: items.map(item => ({
+            ticker: item.ticker,
+            accion: Math.random() > 0.5 ? '🟢 BUY' : '🟡 HOLD',
+            stop_loss: `$${(item.precio_compra * 0.85).toFixed(2)} (-15% SL)`,
+            analisis: `El modelo quant sugiere mantener o acumular posiciones en ${item.ticker} debido a su momentum positivo y fuerte soporte en la EMA200.`
+          }))
+        });
+        setLoading(false);
+        return;
+      }
+
       const { data: aiRes, error } = await supabase
         .from('analisis_ia')
         .select('*')

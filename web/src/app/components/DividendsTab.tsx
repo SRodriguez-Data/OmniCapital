@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell } from 'recharts';
 import { DollarSign, Percent, TrendingUp } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { usePortfolio } from '../context/PortfolioContext';
 
 interface DividendItem {
   id: string;
@@ -18,11 +19,25 @@ interface DividendItem {
 const COLORS = ['#60a5fa', '#34d399', '#f472b6', '#fbbf24', '#a78bfa', '#38bdf8', '#4ade80'];
 
 export default function DividendsTab() {
+  const { isDemo, items: contextItems } = usePortfolio();
   const [items, setItems] = useState<DividendItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   async function fetchDividends() {
     try {
+      if (isDemo) {
+        setItems([
+          { id: 'demo-1', ticker: 'AAPL', cantidad: 15, moneda: 'USD', dividendYield: 0.005, dividendRate: 0.96, projectedAnnualIncome: 14.40 },
+          { id: 'demo-2', ticker: 'MSFT', cantidad: 10, moneda: 'USD', dividendYield: 0.008, dividendRate: 3.00, projectedAnnualIncome: 30.00 },
+          { id: 'demo-4', ticker: 'SQM-B.SN', cantidad: 100, moneda: 'CLP', dividendYield: 0.10, dividendRate: 3500, projectedAnnualIncome: 350000 },
+          { id: 'demo-6', ticker: 'VOO', cantidad: 25, moneda: 'USD', dividendYield: 0.015, dividendRate: 6.50, projectedAnnualIncome: 162.50 },
+          { id: 'demo-7', ticker: 'SCHD', cantidad: 40, moneda: 'USD', dividendYield: 0.035, dividendRate: 2.60, projectedAnnualIncome: 104.00 },
+          { id: 'demo-8', ticker: 'KHC', cantidad: 50, moneda: 'USD', dividendYield: 0.045, dividendRate: 1.60, projectedAnnualIncome: 80.00 }
+        ]);
+        setLoading(false);
+        return;
+      }
+
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch('/api/dividends', {
         headers: { 'Authorization': `Bearer ${session?.access_token}` }
