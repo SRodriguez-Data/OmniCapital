@@ -22,8 +22,23 @@ export async function GET(request: Request) {
     const quotes: any[] = Array.isArray(results) ? results : [results];
 
     for (const quote of quotes) {
-      if (quote && quote.symbol && quote.regularMarketPrice) {
-        prices[quote.symbol] = quote.regularMarketPrice;
+      if (quote && quote.symbol) {
+        let price = quote.regularMarketPrice || quote.regularMarketPreviousClose || quote.postMarketPrice || quote.preMarketPrice;
+        
+        if (price) {
+          prices[quote.symbol] = price;
+        } else {
+          // Último recurso: Historial de 5 días
+          try {
+            const queryOptions = { period1: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) };
+            const hist = await yahooFinance.historical(quote.symbol, queryOptions);
+            if (hist && hist.length > 0) {
+              prices[quote.symbol] = hist[hist.length - 1].close;
+            }
+          } catch (e) {
+            console.error(`Historical fallback failed for ${quote.symbol}`);
+          }
+        }
       }
     }
 
