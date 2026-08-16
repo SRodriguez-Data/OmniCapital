@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     const results = await yahooFinance.quote(symbols);
     
     // results can be a single object or an array depending on how many symbols were found
-    const quotes = Array.isArray(results) ? results : [results];
+    const quotes: any[] = Array.isArray(results) ? results : [results];
 
     for (const quote of quotes) {
       if (quote && quote.symbol && quote.regularMarketPrice) {
