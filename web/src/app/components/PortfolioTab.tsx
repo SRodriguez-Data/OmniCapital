@@ -358,7 +358,7 @@ export default function PortfolioTab() {
               const invested = row.cantidad * row.precio_compra;
               const currentVal = currentPrice !== undefined ? row.cantidad * currentPrice : undefined;
               const pnlVal = currentVal !== undefined ? currentVal - invested : undefined;
-              const pnlPct = currentVal !== undefined && invested > 0 ? (pnlVal / invested) * 100 : undefined;
+              const pnlPct = pnlVal !== undefined && invested > 0 ? (pnlVal / invested) * 100 : undefined;
               const isWin = pnlVal !== undefined && pnlVal >= 0;
               
               return (
