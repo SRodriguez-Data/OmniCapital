@@ -245,28 +245,43 @@ def run_serverless_screener():
                 all_us.append(data_dict)
 
     top_us_fund = []
+    rejected_us = []
     logging.info("⏳ Filtrando fundamentales en YFinance para US...")
     for c in all_us:
         fund = get_fundamentals(c['ticker'])
+        c.update(fund)
         if (fund['pe'] == -1 or fund['pe'] < 40) and (fund['deuda'] == 0 or fund['deuda'] < 250):
-            c.update(fund)
             top_us_fund.append(c)
+        else:
+            rejected_us.append(c)
 
     top_cl_fund = []
+    rejected_cl = []
     logging.info("⏳ Filtrando fundamentales en YFinance para CL...")
     for c in all_cl:
         fund = get_fundamentals(c['ticker'])
+        c.update(fund)
         if (fund['pe'] == -1 or fund['pe'] < 40) and (fund['deuda'] == 0 or fund['deuda'] < 250):
-            c.update(fund)
             top_cl_fund.append(c)
+        else:
+            rejected_cl.append(c)
             
     # Ordena esa lista final por RSI de menor a mayor.
     top_us_fund.sort(key=lambda x: x['rsi'])
     top_cl_fund.sort(key=lambda x: x['rsi'])
+    rejected_us.sort(key=lambda x: x['rsi'])
+    rejected_cl.sort(key=lambda x: x['rsi'])
     
-    # Aplica df.head(5) a la lista final
+    # Aplica df.head(5) a la lista final garantizando 5 activos
     top_us = top_us_fund[:5]
+    if len(top_us) < 5:
+        top_us.extend(rejected_us[:5 - len(top_us)])
+        top_us.sort(key=lambda x: x['rsi'])
+        
     top_cl = top_cl_fund[:5]
+    if len(top_cl) < 5:
+        top_cl.extend(rejected_cl[:5 - len(top_cl)])
+        top_cl.sort(key=lambda x: x['rsi'])
     
     # Agregar métricas institucionales (Bollinger, Max Sell, Min Buy, Signal)
     top_us = calculate_trading_limits(top_us)

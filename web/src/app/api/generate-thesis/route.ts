@@ -25,7 +25,7 @@ export async function POST(req: Request) {
     }
 
     // Configurar modelo
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
     // Armar el prompt institucional exacto solicitado
     const prompt = `Actúa como el Director de Estrategia de un Fondo Cuantitativo. Genera una tesis de inversión para ${ticker}. Datos obligatorios a analizar: Precio actual, RSI: ${rsi}, Distancia EMA200: ${ema200}, P/E Ratio: ${pe}, Dividend Yield: ${div_str}, Deuda/Equity: ${deuda}. Tu respuesta debe ser quirúrgica y en 3 viñetas markdown: 🎯 Catalizador de Valor (Analiza obligatoriamente el P/E, dividendos y deuda provistos), 📊 Estructura Técnica (Analiza el RSI y EMA), y ⚠️ Riesgo Asimétrico.`;
@@ -38,7 +38,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     console.error('Error generando tesis con Gemini:', error);
     return NextResponse.json(
-      { error: 'Error interno generando la tesis de inversión.' },
+      { error: `Error de la API: ${error.message || 'Error interno'}` },
       { status: 500 }
     );
   }

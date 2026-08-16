@@ -50,19 +50,29 @@ export default function PortfolioTab() {
   // Calculamos KPIs
   let totalInvestedUSD = 0;
   let totalCurrentUSD = 0;
+  let investedForPnL = 0;
 
   items.forEach(item => {
     const isCLP = item.moneda === 'CLP';
     const invested = item.cantidad * item.precio_compra;
-    const currentPrice = livePrices[item.ticker] || item.precio_compra;
-    const currentVal = item.cantidad * currentPrice;
+    const invested_usd = isCLP ? (invested / USD_CLP) : invested;
+    totalInvestedUSD += invested_usd;
 
-    totalInvestedUSD += isCLP ? (invested / USD_CLP) : invested;
-    totalCurrentUSD += isCLP ? (currentVal / USD_CLP) : currentVal;
+    const currentPrice = livePrices[item.ticker];
+    if (currentPrice !== undefined) {
+      const currentVal = item.cantidad * currentPrice;
+      const currentVal_usd = isCLP ? (currentVal / USD_CLP) : currentVal;
+      totalCurrentUSD += currentVal_usd;
+      investedForPnL += invested_usd;
+    }
   });
 
-  const totalPnL_USD = totalCurrentUSD - totalInvestedUSD;
-  const totalPnL_Percent = totalInvestedUSD > 0 ? (totalPnL_USD / totalInvestedUSD) * 100 : 0;
+  // Calculate strict P&L only from assets that have real live prices
+  const totalPnL_USD = totalCurrentUSD - investedForPnL;
+  const totalPnL_Percent = investedForPnL > 0 ? (totalPnL_USD / investedForPnL) * 100 : 0;
+  
+  // Para que el Valor Total no se desplome si falta un precio, le sumamos el capital invertido de los activos sin precio.
+  totalCurrentUSD += (totalInvestedUSD - investedForPnL);
   const pnlColor = totalPnL_USD >= 0 ? 'text-[#34d399]' : 'text-[#f87171]';
 
   const handleSelectTicker = (selectedTicker: string) => {
@@ -344,12 +354,12 @@ export default function PortfolioTab() {
           </thead>
           <tbody className="divide-y divide-zinc-200 dark:divide-[#27272a]">
             {items.map((row) => {
-              const livePrice = livePrices[row.ticker] || row.precio_compra;
+              const currentPrice = livePrices[row.ticker];
               const invested = row.cantidad * row.precio_compra;
-              const currentVal = row.cantidad * livePrice;
-              const pnlVal = currentVal - invested;
-              const pnlPct = invested > 0 ? (pnlVal / invested) * 100 : 0;
-              const isWin = pnlVal >= 0;
+              const currentVal = currentPrice !== undefined ? row.cantidad * currentPrice : undefined;
+              const pnlVal = currentVal !== undefined ? currentVal - invested : undefined;
+              const pnlPct = currentVal !== undefined && invested > 0 ? (pnlVal / invested) * 100 : undefined;
+              const isWin = pnlVal !== undefined && pnlVal >= 0;
               
               return (
                 <React.Fragment key={row.id}>
@@ -358,15 +368,19 @@ export default function PortfolioTab() {
                       {expandedRows[row.id] ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
                     </td>
                     <td className="py-2 px-4 font-bold text-zinc-900 dark:text-[#e4e4e7]">{row.ticker}</td>
-                    <td className="py-2 px-4 text-right text-zinc-600 dark:text-[#a1a1aa]">{row.cantidad}</td>
-                    <td className="py-2 px-4 text-right text-zinc-500 dark:text-[#71717a]">{row.purchase_date || '-'}</td>
-                    <td className="py-2 px-4 text-right text-zinc-600 dark:text-[#a1a1aa]">${row.precio_compra.toFixed(2)}</td>
-                    <td className="py-2 px-4 text-right text-zinc-900 dark:text-[#fafafa] font-bold">${livePrice.toFixed(2)}</td>
-                    <td className="py-2 px-4 text-right text-zinc-500 dark:text-[#71717a]">{row.moneda}</td>
-                    <td className="py-2 px-4 text-right text-zinc-600 dark:text-[#a1a1aa]">${invested.toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
-                    <td className="py-2 px-4 text-right font-bold text-zinc-900 dark:text-[#e4e4e7]">${currentVal.toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
-                    <td className={`py-2 px-4 text-right font-bold ${isWin ? 'text-[#34d399]' : 'text-[#f87171]'}`}>
-                      {isWin ? '+' : ''}{pnlPct.toFixed(2)}%
+                    <td className="py-2 px-4 text-right">{row.cantidad.toLocaleString('en-US', {maximumFractionDigits: 4})}</td>
+                    <td className="py-2 px-4 text-right">{row.purchase_date || '-'}</td>
+                    <td className="py-2 px-4 text-right">${row.precio_compra.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                    <td className="py-2 px-4 text-right">
+                      {currentPrice !== undefined ? `$${currentPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : <span className="text-zinc-500">N/A</span>}
+                    </td>
+                    <td className="py-2 px-4 text-right text-xs text-zinc-500">{row.moneda}</td>
+                    <td className="py-2 px-4 text-right">${invested.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                    <td className="py-2 px-4 text-right">
+                      {currentVal !== undefined ? `$${currentVal.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : <span className="text-zinc-500">N/A</span>}
+                    </td>
+                    <td className={`py-2 px-4 text-right font-bold ${currentVal !== undefined ? (isWin ? 'text-[#34d399]' : 'text-[#f87171]') : 'text-zinc-500'}`}>
+                      {pnlPct !== undefined ? `${isWin ? '+' : ''}${pnlPct.toFixed(2)}%` : 'N/A'}
                     </td>
                     <td className="py-2 px-4 text-center">
                       <button onClick={(e) => { e.stopPropagation(); handleDelete(row.id); }} className="text-[#f87171] hover:text-[#b91c1c] text-xs font-bold border border-[#7f1d1d] px-2 py-1 rounded transition-colors">
