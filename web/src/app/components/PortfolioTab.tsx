@@ -15,7 +15,6 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
 
 export default function PortfolioTab() {
   const { items, loading, isDemo, refreshPortfolio } = usePortfolio();
-  const [historyData, setHistoryData] = useState<any[]>([]);
   const [livePrices, setLivePrices] = useState<Record<string, number>>({});
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   
@@ -28,48 +27,6 @@ export default function PortfolioTab() {
   const [submitting, setSubmitting] = useState(false);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [range, setRange] = useState<'1W' | '1M' | '3M' | '6M' | 'YTD' | '1Y' | 'ALL'>('1M');
-
-  async function fetchHistory(selectedRange = range) {
-    try {
-      if (isDemo) {
-        const mockHistory = [];
-        let currentDate = new Date();
-        currentDate.setDate(currentDate.getDate() - 30);
-        let baseValue = 10000;
-        let basePnL = 500;
-        for(let i=0; i<30; i++) {
-          currentDate.setDate(currentDate.getDate() + 1);
-          baseValue += (Math.random() - 0.4) * 200; // Ligera tendencia alcista
-          basePnL += (Math.random() - 0.4) * 50;
-          mockHistory.push({
-            date: currentDate.toISOString().split('T')[0],
-            totalValue: baseValue,
-            profitLoss: basePnL
-          });
-        }
-        setHistoryData(mockHistory);
-        return;
-      }
-
-      const { data: { session } } = await supabase.auth.getSession();
-      const res = await fetch(`/api/portfolio/history?range=${selectedRange}`, {
-        headers: { 'Authorization': `Bearer ${session?.access_token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setHistoryData(data);
-      }
-    } catch (error) {
-      console.error("Error fetching history", error);
-    }
-  }
-
-  // useEffect(() => { fetchPortfolio(); }, []); // Eliminado porque se usa Context
-
-  useEffect(() => {
-    fetchHistory(range);
-  }, [range, isDemo]);
 
   useEffect(() => {
     async function fetchLivePrices() {
@@ -146,7 +103,6 @@ export default function PortfolioTab() {
       if (res.ok) {
         setTicker(''); setCantidad(''); setPrecio(''); setPurchaseDate('');
         await refreshPortfolio();
-        await fetchHistory(); // refresh history as well
       }
     } catch {
       console.error("Error al añadir");
@@ -169,7 +125,6 @@ export default function PortfolioTab() {
       });
       if (res.ok) {
         await refreshPortfolio();
-        await fetchHistory();
       }
     } catch {
       console.error("Error al eliminar");
@@ -259,33 +214,22 @@ export default function PortfolioTab() {
       />
 
       {/* HISTORICAL P&L CHART */}
-      {historyData.length > 0 && (
+      {items.length > 0 && (
         <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-sm dark:shadow-none p-6 h-96 flex flex-col">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-zinc-200 dark:border-[#27272a] pb-4 mb-6 gap-4">
             <div>
-              <h2 className="text-xs font-sans font-medium font-bold text-zinc-900 dark:text-[#e4e4e7] uppercase">Evolución P&L</h2>
-              <div className="flex gap-2 mt-2">
-                {['1W', '1M', '3M', '6M', 'YTD', '1Y', 'ALL'].map(r => (
-                  <button
-                    key={r}
-                    onClick={() => setRange(r as any)}
-                    className={`text-[10px] px-2 py-1 rounded font-mono font-bold transition-colors ${range === r ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300' : 'bg-zinc-100 dark:bg-[#27272a] text-zinc-500 dark:text-[#a1a1aa] hover:bg-zinc-200 dark:hover:bg-[#3f3f46]'}`}
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
+              <h2 className="text-xs font-sans font-medium font-bold text-zinc-900 dark:text-[#e4e4e7] uppercase">Evolución P&L (Real)</h2>
             </div>
             <div className="text-left sm:text-right">
-              <p className="text-[10px] text-zinc-500 dark:text-[#71717a] font-mono uppercase">P&L ({range})</p>
-              <p className={`text-lg font-bold font-mono ${historyData[historyData.length - 1].profitLoss >= 0 ? 'text-[#34d399]' : 'text-[#f87171]'}`}>
-                ${historyData[historyData.length - 1].profitLoss.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+              <p className="text-[10px] text-zinc-500 dark:text-[#71717a] font-mono uppercase">P&L Actual</p>
+              <p className={`text-lg font-bold font-mono ${pnlColor}`}>
+                {totalPnL_USD >= 0 ? '+' : ''}${totalPnL_USD.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
               </p>
             </div>
           </div>
           <div className="flex-1">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={historyData} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
+              <AreaChart data={[{ date: 'Compra Inicial', totalValue: totalInvestedUSD }, { date: 'Actual', totalValue: totalCurrentUSD }]} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#34d399" stopOpacity={0.3}/>
@@ -297,19 +241,19 @@ export default function PortfolioTab() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                <XAxis dataKey="date" stroke="#71717a" fontSize={10} tickFormatter={(tick) => tick.substring(5)} tickMargin={10} axisLine={false} tickLine={false} />
+                <XAxis dataKey="date" stroke="#71717a" fontSize={10} tickMargin={10} axisLine={false} tickLine={false} />
                 <YAxis stroke="#71717a" fontSize={10} tickFormatter={(val) => `$${val.toLocaleString()}`} axisLine={false} tickLine={false} width={80} domain={['auto', 'auto']} />
                 <RechartsTooltip 
                   contentStyle={{backgroundColor: '#09090b', borderColor: '#27272a', fontFamily: 'monospace'}} 
                   itemStyle={{color: '#e4e4e7'}} 
                   labelStyle={{color: '#71717a'}}
-                  formatter={(value: any, name: any) => [`$${Number(value).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`, name]}
+                  formatter={(value: any, name: any) => [`$${Number(value).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`, name]}
                 />
                 <Area 
                   type="monotone" 
                   dataKey="totalValue" 
-                  stroke={(historyData[historyData.length - 1]?.profitLoss >= 0) ? "#34d399" : "#f87171"} 
-                  fill={(historyData[historyData.length - 1]?.profitLoss >= 0) ? "url(#colorProfit)" : "url(#colorLoss)"} 
+                  stroke={totalPnL_USD >= 0 ? "#34d399" : "#f87171"} 
+                  fill={totalPnL_USD >= 0 ? "url(#colorProfit)" : "url(#colorLoss)"} 
                   strokeWidth={2} 
                   name="Valor Portafolio" 
                 />

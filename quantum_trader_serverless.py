@@ -230,7 +230,7 @@ def run_serverless_screener():
         elif not ticker.endswith(".SN") and volumen_nominal < 500_000:
             continue
             
-        if rsi < 70 and pvc_ema200 > -0.20:
+        if rsi < 50 and pvc_ema200 > -0.20:
             score = (50 - rsi) + (pvc_ema200 * 100)
             data_dict = {
                 'ticker': ticker,
@@ -244,27 +244,29 @@ def run_serverless_screener():
             else:
                 all_us.append(data_dict)
 
-    all_us.sort(key=lambda x: x['score'], reverse=True)
-    all_cl.sort(key=lambda x: x['score'], reverse=True)
-    
-    top_us = []
+    top_us_fund = []
     logging.info("⏳ Filtrando fundamentales en YFinance para US...")
     for c in all_us:
-        if len(top_us) >= 5: break
         fund = get_fundamentals(c['ticker'])
-        # Iron Filter Relaxed: P/E < 50 (or negative) and Debt/Eq < 300
-        if (fund['pe'] == -1 or fund['pe'] < 50) and (fund['deuda'] == 0 or fund['deuda'] < 300):
+        if (fund['pe'] == -1 or fund['pe'] < 40) and (fund['deuda'] == 0 or fund['deuda'] < 250):
             c.update(fund)
-            top_us.append(c)
+            top_us_fund.append(c)
 
-    top_cl = []
+    top_cl_fund = []
     logging.info("⏳ Filtrando fundamentales en YFinance para CL...")
     for c in all_cl:
-        if len(top_cl) >= 5: break
         fund = get_fundamentals(c['ticker'])
-        if (fund['pe'] == -1 or fund['pe'] < 50) and (fund['deuda'] == 0 or fund['deuda'] < 300):
+        if (fund['pe'] == -1 or fund['pe'] < 40) and (fund['deuda'] == 0 or fund['deuda'] < 250):
             c.update(fund)
-            top_cl.append(c)
+            top_cl_fund.append(c)
+            
+    # Ordena esa lista final por RSI de menor a mayor.
+    top_us_fund.sort(key=lambda x: x['rsi'])
+    top_cl_fund.sort(key=lambda x: x['rsi'])
+    
+    # Aplica df.head(5) a la lista final
+    top_us = top_us_fund[:5]
+    top_cl = top_cl_fund[:5]
     
     # Agregar métricas institucionales (Bollinger, Max Sell, Min Buy, Signal)
     top_us = calculate_trading_limits(top_us)
