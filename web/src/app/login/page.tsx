@@ -14,13 +14,25 @@ export default function LoginPage() {
   const router = useRouter();
 
   useEffect(() => {
-    // Si ya hay sesión, redirigir al home
+    // Si ya hay sesión o es modo demo, redirigir al home
+    if (typeof window !== 'undefined' && localStorage.getItem('isDemo') === 'true') {
+      router.push('/');
+      return;
+    }
+    
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         router.push('/');
       }
     });
   }, [router]);
+
+  const handleDemoLogin = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('isDemo', 'true');
+      router.push('/');
+    }
+  };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -129,6 +141,19 @@ export default function LoginPage() {
               {isSignUp ? '¿Ya tienes cuenta? Inicia Sesión' : '¿No tienes cuenta? Regístrate'}
             </button>
           </div>
+
+          <div className="relative flex items-center justify-center mt-6 mb-2">
+            <div className="border-t border-zinc-200 dark:border-[#27272a] absolute w-full"></div>
+            <span className="bg-white dark:bg-[#18181b] px-3 text-xs text-zinc-400 dark:text-[#52525b] relative z-10 font-mono">O</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleDemoLogin}
+            className="w-full flex items-center justify-center gap-2 bg-zinc-900 dark:bg-white hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 p-3 rounded-lg text-sm font-bold font-mono transition-colors"
+          >
+            🚀 ENTRAR COMO JURADO (DEMO)
+          </button>
         </form>
       </div>
     </main>

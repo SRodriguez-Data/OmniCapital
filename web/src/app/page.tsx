@@ -10,17 +10,24 @@ import DividendsTab from './components/DividendsTab';
 import MacroPanel from './components/MacroPanel';
 import NotificationBell from './components/NotificationBell';
 import BacktestTab from './components/BacktestTab';
+import DataWarehouseTab from './components/DataWarehouseTab';
 import { ThemeToggle } from './components/ThemeToggle';
-import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History, LogOut } from 'lucide-react';
+import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History, LogOut, Database } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA' | 'TOP5' | 'DIVIDENDOS' | 'BACKTEST'>('PORTFOLIO');
+  const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA' | 'TOP5' | 'DIVIDENDOS' | 'BACKTEST' | 'DATA_WAREHOUSE'>('DATA_WAREHOUSE');
   const [session, setSession] = useState<any>(null);
   const router = useRouter();
 
   useEffect(() => {
+    // Verificar si es modo demo
+    if (typeof window !== 'undefined' && localStorage.getItem('isDemo') === 'true') {
+      setSession({ user: { id: 'demo', email: 'demo@jurado.com' } });
+      return;
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) {
         router.push('/login');
@@ -30,6 +37,8 @@ export default function Home() {
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (typeof window !== 'undefined' && localStorage.getItem('isDemo') === 'true') return;
+      
       if (!session) {
         router.push('/login');
       } else {
@@ -41,6 +50,11 @@ export default function Home() {
   }, [router]);
 
   const handleSignOut = async () => {
+    if (typeof window !== 'undefined' && localStorage.getItem('isDemo') === 'true') {
+      localStorage.removeItem('isDemo');
+      router.push('/login');
+      return;
+    }
     await supabase.auth.signOut();
     router.push('/login');
   };
@@ -76,6 +90,12 @@ export default function Home() {
       
       {/* TABS MENU */}
       <div className="flex overflow-x-auto whitespace-nowrap border-b border-zinc-200 dark:border-[#27272a] bg-white dark:bg-[#09090b] scrollbar-hide transition-colors duration-300 shadow-sm dark:shadow-none">
+        <button 
+          onClick={() => setActiveTab('DATA_WAREHOUSE')}
+          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors border-r border-zinc-200 dark:border-[#27272a] ${activeTab === 'DATA_WAREHOUSE' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-orange-500 text-orange-600 dark:text-orange-400' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
+        >
+          <Database className="w-4 h-4" /> [00] DATA WAREHOUSE
+        </button>
         <button 
           onClick={() => setActiveTab('PORTFOLIO')}
           className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors ${activeTab === 'PORTFOLIO' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-[#60a5fa] text-blue-600 dark:text-[#e4e4e7]' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
@@ -121,6 +141,7 @@ export default function Home() {
       </div>
 
       <div className="p-4 md:p-6 max-w-[1600px] mx-auto">
+        {activeTab === 'DATA_WAREHOUSE' && <DataWarehouseTab />}
         {activeTab === 'PORTFOLIO' && <PortfolioTab />}
         {activeTab === 'RECOMENDACIONES' && <RecommendationsTab />}
         {activeTab === 'TOP5' && <TopOportunidadesTab />}
