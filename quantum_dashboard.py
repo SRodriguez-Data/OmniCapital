@@ -199,19 +199,50 @@ with tab_scanner:
                 # Aplicar los filtros institucionales
                 if (0.005 <= div_yield <= 0.10) and (pe < 30) and (payout < 0.85) and (debt_eq < 250):
                     results.append({
-                        "Activo (Ticker)": ticker,
-                        "Fecha Dato": row['date'][:10], # Solo AAAA-MM-DD
-                        "RSI (Técnico)": f"{row['rsi']:.2f} 📉",
-                        "Div Yield": f"{div_yield * 100:.2f}% 💰",
-                        "P/E Ratio": f"{pe:.2f} ⚖️",
-                        "Payout Ratio": f"{payout:.2f} 🛡️",
-                        "Debt/Equity": f"{debt_eq:.2f} 🏢"
+                        "ticker": ticker,
+                        "date": row['date'],
+                        "rsi": row['rsi'],
+                        "div_yield": div_yield,
+                        "pe": pe,
+                        "payout": payout,
+                        "debt_eq": debt_eq
                     })
             except Exception:
                 continue
                 
         bar.empty() # Limpiar la barra al terminar
-        return pd.DataFrame(results)
+        
+        df_inicial = df_rsi
+        df_filtradas = pd.DataFrame(results) if results else pd.DataFrame(columns=["ticker", "date", "rsi", "div_yield", "pe", "payout", "debt_eq"])
+
+        if len(df_filtradas) >= 5:
+            top_5 = df_filtradas.sort_values('rsi').head(5)
+        else:
+            faltantes = 5 - len(df_filtradas)
+            # Buscar las empresas del df_inicial que NO están en df_filtradas
+            extras = df_inicial[~df_inicial['ticker'].isin(df_filtradas['ticker'])].copy()
+            # Añadir las columnas faltantes para que el concat funcione bien
+            extras['div_yield'] = 0
+            extras['pe'] = 999
+            extras['payout'] = 1.0
+            extras['debt_eq'] = 999
+            extras = extras.sort_values('rsi').head(faltantes)
+            top_5 = pd.concat([df_filtradas, extras]) if not df_filtradas.empty else extras.head(5)
+
+        # Formatear para presentación en pantalla
+        final_results = []
+        for _, r in top_5.iterrows():
+            final_results.append({
+                "Activo (Ticker)": r['ticker'],
+                "Fecha Dato": str(r['date'])[:10],
+                "RSI (Técnico)": f"{r['rsi']:.2f} 📉",
+                "Div Yield": f"{r.get('div_yield', 0) * 100:.2f}% 💰",
+                "P/E Ratio": f"{r.get('pe', 0):.2f} ⚖️",
+                "Payout Ratio": f"{r.get('payout', 0):.2f} 🛡️",
+                "Debt/Equity": f"{r.get('debt_eq', 0):.2f} 🏢"
+            })
+            
+        return pd.DataFrame(final_results)
 
     if st.button("🚀 Iniciar Escáner", use_container_width=True):
         with st.spinner("Ejecutando algoritmos cuantitativos..."):
@@ -264,13 +295,16 @@ with tab_robo:
                 genai.configure(api_key=api_key)
                 
                 # BÚSQUEDA AUTOMÁTICA DEL MODELO CORRECTO
-                modelo_valido = 'gemini-1.5-flash' # Valor por defecto
+                model_name = None
                 for m in genai.list_models():
                     if 'generateContent' in m.supported_generation_methods:
-                        modelo_valido = m.name
-                        break # Tomamos el primero que funcione con tu API Key
-                
-                model = genai.GenerativeModel(modelo_valido)
+                        model_name = m.name
+                        break # Toma el primero válido y soportado
+
+                if not model_name:
+                    model_name = 'models/gemini-1.5-flash' # Fallback
+
+                model = genai.GenerativeModel(model_name)
                 
                 # Contexto del Sistema
                 portfolio_str = ", ".join(st.session_state.portfolio)

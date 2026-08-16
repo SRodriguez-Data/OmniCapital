@@ -34,7 +34,10 @@ export default function TopOportunidadesTab() {
         if (isDemo) {
           setOportunidades([
             { ticker: 'AMZN', precio_entrada_ideal: '$130.00', target_price: '$160.00', riesgo: 'MODERADO', price: 135.00, rsi: 35, distancia_ema200: -5, score: 85, pe: 45, div_str: '0%', deuda: 0.5 },
-            { ticker: 'GOOGL', precio_entrada_ideal: '$120.00', target_price: '$145.00', riesgo: 'BAJO', price: 125.00, rsi: 40, distancia_ema200: -2, score: 80, pe: 25, div_str: '0%', deuda: 0.1 }
+            { ticker: 'GOOGL', precio_entrada_ideal: '$120.00', target_price: '$145.00', riesgo: 'BAJO', price: 125.00, rsi: 40, distancia_ema200: -2, score: 80, pe: 25, div_str: '0%', deuda: 0.1 },
+            { ticker: 'AAPL', precio_entrada_ideal: '$165.00', target_price: '$190.00', riesgo: 'BAJO', price: 170.00, rsi: 42, distancia_ema200: 1, score: 75, pe: 28, div_str: '0.5%', deuda: 1.1 },
+            { ticker: 'TSLA', precio_entrada_ideal: '$180.00', target_price: '$250.00', riesgo: 'ALTO', price: 195.00, rsi: 30, distancia_ema200: -15, score: 90, pe: 65, div_str: '0%', deuda: 0.8 },
+            { ticker: 'SQM-B.SN', precio_entrada_ideal: '$38000', target_price: '$50000', riesgo: 'ALTO', price: 40000, rsi: 28, distancia_ema200: -20, score: 95, pe: 8, div_str: '10%', deuda: 0.3 }
           ]);
           setFecha(new Date().toISOString().split('T')[0]);
           setLoading(false);
