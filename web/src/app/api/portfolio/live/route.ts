@@ -31,7 +31,7 @@ export async function GET(request: Request) {
           // Último recurso: Historial de 5 días
           try {
             const queryOptions = { period1: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) };
-            const hist = await yahooFinance.historical(quote.symbol, queryOptions);
+            const hist = (await yahooFinance.historical(quote.symbol, queryOptions)) as any[];
             if (hist && hist.length > 0) {
               prices[quote.symbol] = hist[hist.length - 1].close;
             }
