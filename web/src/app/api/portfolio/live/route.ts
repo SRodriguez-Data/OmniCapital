@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import yahooFinance from 'yahoo-finance2';
+import { supabase } from '@/lib/supabase';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -37,6 +38,27 @@ export async function GET(request: Request) {
             }
           } catch (e) {
             console.error(`Historical fallback failed for ${quote.symbol}`);
+          }
+        }
+      }
+    }
+
+    // Ultimate Fallback: if any symbol is still missing, fetch from Supabase
+    const missingSymbols = symbols.filter(s => !prices[s]);
+    if (missingSymbols.length > 0) {
+      const { data } = await supabase
+        .from('precios_historicos')
+        .select('ticker, close')
+        .in('ticker', missingSymbols)
+        .order('date', { ascending: false });
+        
+      if (data) {
+        // Since it returns multiple dates, we just take the first one found per ticker
+        const found = new Set();
+        for (const row of data) {
+          if (!found.has(row.ticker)) {
+            prices[row.ticker] = row.close;
+            found.add(row.ticker);
           }
         }
       }
