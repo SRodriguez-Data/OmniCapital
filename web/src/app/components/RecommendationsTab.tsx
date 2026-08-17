@@ -50,27 +50,22 @@ export default function RecommendationsTab() {
         const report = aiRes[0];
         
         let parsedRecs: Recommendation[] = [];
-        if (report.candidatos_json) {
-          if (report.candidatos_json.recomendaciones_portafolio && report.candidatos_json.recomendaciones_portafolio.length > 0) {
-            parsedRecs.push(...report.candidatos_json.recomendaciones_portafolio.map((c: any) => ({
-              ticker: c.ticker,
-              accion: c.accion || '🟡 HOLD',
-              stop_loss: c.stop_loss || 'Ajustar según riesgo',
-              analisis: `[EN PORTAFOLIO] ${c.analisis || c.razon || 'Mantenimiento sugerido.'}`
-            })));
-          }
-          
-          const combined = [...(report.candidatos_json.us || []), ...(report.candidatos_json.cl || [])];
-          const portfolioTickers = new Set(parsedRecs.map(r => r.ticker));
-          
-          const newOpps = combined.filter(c => !portfolioTickers.has(c.ticker)).slice(0, 8).map(c => ({
+        if (report.candidatos_json && report.candidatos_json.recomendaciones_portafolio && report.candidatos_json.recomendaciones_portafolio.length > 0) {
+          parsedRecs = report.candidatos_json.recomendaciones_portafolio.map((c: any) => ({
             ticker: c.ticker,
-            accion: c.signal === 'BUY' ? '🟢 BUY (OPORTUNIDAD)' : '🟡 WATCHLIST',
-            stop_loss: 'Oportunidad Externa',
-            analisis: `[DESCUBRIMIENTO QUANT] Activo fuera del portafolio con alto potencial. Score técnico: ${c.score.toFixed(1)}. RSI: ${c.rsi?.toFixed(1)}. Distancia EMA200: ${(c.distancia_ema200*100).toFixed(1)}%.`
+            accion: c.accion || '🟡 HOLD',
+            stop_loss: c.stop_loss || 'Sin datos de stop loss de emergencia.',
+            analisis: c.analisis || c.razon || 'Sin análisis detallado.'
           }));
-          
-          parsedRecs.push(...newOpps);
+        } else if (report.candidatos_json) {
+          // Fallback to global top anomalies if no specific portfolio analysis exists yet
+          const combined = [...(report.candidatos_json.us || []), ...(report.candidatos_json.cl || [])];
+          parsedRecs = combined.map(c => ({
+            ticker: c.ticker,
+            accion: c.signal || (c.score > 50 ? '🟢 BUY' : '🟡 HOLD'),
+            stop_loss: 'No aplicable (Activo sugerido, no en portafolio)',
+            analisis: (report.insights_tickers && report.insights_tickers[c.ticker]) || `Oportunidad técnica detectada. Score: ${c.score.toFixed(1)}`
+          }));
         }
 
         setData({

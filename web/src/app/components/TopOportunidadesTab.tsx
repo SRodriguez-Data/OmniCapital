@@ -108,6 +108,8 @@ export default function TopOportunidadesTab() {
     setTheses(prev => ({ ...prev, [op.ticker]: { loading: true, content: '' } }));
 
     try {
+      const portfolioSummary = items.map(i => i.ticker).join(', ');
+      
       const res = await fetch('/api/generate-thesis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -119,7 +121,8 @@ export default function TopOportunidadesTab() {
           score: op.score,
           pe: op.pe,
           div_str: op.div_str,
-          deuda: op.deuda
+          deuda: op.deuda,
+          portfolio: portfolioSummary
         })
       });
 

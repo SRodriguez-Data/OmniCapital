@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { ticker, price, rsi, ema200, score, pe, div_str, deuda } = body;
+    const { ticker, price, rsi, ema200, score, pe, div_str, deuda, portfolio } = body;
 
     if (!ticker) {
       return NextResponse.json(
@@ -44,8 +44,18 @@ export async function POST(req: Request) {
     // Configurar modelo dinámico
     const model = genAI.getGenerativeModel({ model: modelName });
 
+    const portafolioContext = portfolio ? `El portafolio actual del usuario contiene: [${portfolio}].` : "El usuario no tiene activos en su portafolio aún.";
+
     // Armar el prompt institucional exacto solicitado
-    const prompt = `Actúa como el Director de Estrategia de un Fondo Cuantitativo. Genera una tesis de inversión para ${ticker}. Datos obligatorios a analizar: Precio actual, RSI: ${rsi}, Distancia EMA200: ${ema200}, P/E Ratio: ${pe}, Dividend Yield: ${div_str}, Deuda/Equity: ${deuda}. Tu respuesta debe ser quirúrgica y en 3 viñetas markdown: 🎯 Catalizador de Valor (Analiza obligatoriamente el P/E, dividendos y deuda provistos), 📊 Estructura Técnica (Analiza el RSI y EMA), y ⚠️ Riesgo Asimétrico.`;
+    const prompt = `Actúa como el Director de Estrategia de un Fondo Cuantitativo. Genera una tesis de inversión para la oportunidad detectada en ${ticker}.
+${portafolioContext}
+
+Datos obligatorios de ${ticker}: Precio actual: ${price}, RSI: ${rsi}, Distancia EMA200: ${ema200}, P/E Ratio: ${pe}, Dividend Yield: ${div_str}, Deuda/Equity: ${deuda}.
+
+Tu respuesta debe ser quirúrgica y estrictamente en 3 viñetas markdown:
+1. 🎯 Catalizador de Valor (Analiza P/E, dividendos y deuda).
+2. 📊 Estructura Técnica (Analiza el RSI y la EMA200).
+3. 🔗 Sinergia con Portafolio (Analiza OBLIGATORIAMENTE cómo este activo específico (${ticker}) beneficia o diversifica el portafolio actual del usuario. Si el usuario ya lo tiene, explica por qué acumular más es buena idea).`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
