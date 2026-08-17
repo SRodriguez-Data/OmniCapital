@@ -247,7 +247,7 @@ export default function PortfolioTab() {
             </div>
             <div className="text-left sm:text-right">
               <p className="text-[10px] text-zinc-500 dark:text-[#71717a] font-mono uppercase">P&L Actual</p>
-              <p className={`text-lg font-bold font-mono ${pnlColor}`}>
+              <p className={`text-lg font-bold font-mono ${pnlColorUSD}`}>
                 {totalPnL_USD >= 0 ? '+' : ''}${totalPnL_USD.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
               </p>
             </div>
