@@ -14,7 +14,13 @@ export async function GET(request: Request) {
 
   try {
     const prices: Record<string, number> = {};
-    const results = await yahooFinance.quote(symbols);
+    
+    // Ejecutar Yahoo Finance con un Timeout estricto de 4 segundos
+    const timeoutPromise = new Promise<any[]>((_, reject) => setTimeout(() => reject(new Error("Yahoo Timeout")), 4000));
+    const results = await Promise.race([
+      yahooFinance.quote(symbols),
+      timeoutPromise
+    ]);
     const quotes: any[] = Array.isArray(results) ? results : [results];
 
     for (const quote of quotes) {
