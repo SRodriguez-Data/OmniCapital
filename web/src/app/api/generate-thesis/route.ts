@@ -24,8 +24,25 @@ export async function POST(req: Request) {
       );
     }
 
-    // Configurar modelo
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+    // Búsqueda dinámica del modelo soportado por la API Key del usuario
+    let modelName = 'gemini-1.5-flash';
+    try {
+      const modelsRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+      if (modelsRes.ok) {
+        const data = await modelsRes.json();
+        const validModel = data.models?.find((m: any) => 
+          m.supportedGenerationMethods?.includes('generateContent') && m.name.includes('gemini')
+        );
+        if (validModel) {
+          modelName = validModel.name.replace('models/', '');
+        }
+      }
+    } catch (e) {
+      console.warn("Fallo al listar modelos, usando fallback");
+    }
+
+    // Configurar modelo dinámico
+    const model = genAI.getGenerativeModel({ model: modelName });
 
     // Armar el prompt institucional exacto solicitado
     const prompt = `Actúa como el Director de Estrategia de un Fondo Cuantitativo. Genera una tesis de inversión para ${ticker}. Datos obligatorios a analizar: Precio actual, RSI: ${rsi}, Distancia EMA200: ${ema200}, P/E Ratio: ${pe}, Dividend Yield: ${div_str}, Deuda/Equity: ${deuda}. Tu respuesta debe ser quirúrgica y en 3 viñetas markdown: 🎯 Catalizador de Valor (Analiza obligatoriamente el P/E, dividendos y deuda provistos), 📊 Estructura Técnica (Analiza el RSI y EMA), y ⚠️ Riesgo Asimétrico.`;

@@ -22,17 +22,17 @@ interface PortfolioContextType {
 const PortfolioContext = createContext<PortfolioContextType | undefined>(undefined);
 
 const MOCK_PORTFOLIO: PortfolioItem[] = [
-  { id: 'demo-1', ticker: 'AAPL', cantidad: 15, precio_compra: 175.50, moneda: 'USD', purchase_date: '2023-10-01' },
-  { id: 'demo-2', ticker: 'MSFT', cantidad: 10, precio_compra: 330.20, moneda: 'USD', purchase_date: '2023-08-15' },
-  { id: 'demo-3', ticker: 'TSLA', cantidad: 20, precio_compra: 210.00, moneda: 'USD', purchase_date: '2023-11-20' },
-  { id: 'demo-4', ticker: 'SQM-B.SN', cantidad: 100, precio_compra: 42000, moneda: 'CLP', purchase_date: '2023-09-05' },
-  { id: 'demo-5', ticker: 'NVDA', cantidad: 8, precio_compra: 450.00, moneda: 'USD', purchase_date: '2023-07-10' },
-  { id: 'demo-6', ticker: 'VOO', cantidad: 25, precio_compra: 405.00, moneda: 'USD', purchase_date: '2023-01-15' },
-  { id: 'demo-7', ticker: 'SCHD', cantidad: 40, precio_compra: 70.00, moneda: 'USD', purchase_date: '2023-02-20' },
-  { id: 'demo-8', ticker: 'KHC', cantidad: 50, precio_compra: 32.50, moneda: 'USD', purchase_date: '2023-05-10' },
-  { id: 'demo-9', ticker: 'BCHILE.SN', cantidad: 50000, precio_compra: 95.00, moneda: 'CLP', purchase_date: '2023-12-01' },
-  { id: 'demo-10', ticker: 'BSANTANDER.SN', cantidad: 80000, precio_compra: 42.00, moneda: 'CLP', purchase_date: '2023-11-15' },
-  { id: 'demo-11', ticker: 'ENELCHILE.SN', cantidad: 15000, precio_compra: 55.00, moneda: 'CLP', purchase_date: '2023-06-10' }
+  { id: 'demo-1', ticker: 'AAPL', cantidad: 15, precio_compra: 173.75, moneda: 'USD', purchase_date: '2023-10-02' },
+  { id: 'demo-2', ticker: 'MSFT', cantidad: 10, precio_compra: 321.86, moneda: 'USD', purchase_date: '2023-08-15' },
+  { id: 'demo-3', ticker: 'TSLA', cantidad: 20, precio_compra: 235.60, moneda: 'USD', purchase_date: '2023-11-20' },
+  { id: 'demo-4', ticker: 'SQM-B.SN', cantidad: 100, precio_compra: 51000, moneda: 'CLP', purchase_date: '2023-09-05' },
+  { id: 'demo-5', ticker: 'NVDA', cantidad: 80, precio_compra: 42.18, moneda: 'USD', purchase_date: '2023-07-10' },
+  { id: 'demo-6', ticker: 'VOO', cantidad: 25, precio_compra: 366.50, moneda: 'USD', purchase_date: '2023-01-17' },
+  { id: 'demo-7', ticker: 'SCHD', cantidad: 40, precio_compra: 75.40, moneda: 'USD', purchase_date: '2023-02-21' },
+  { id: 'demo-8', ticker: 'KHC', cantidad: 50, precio_compra: 40.50, moneda: 'USD', purchase_date: '2023-05-10' },
+  { id: 'demo-9', ticker: 'CHILE.SN', cantidad: 50000, precio_compra: 100.00, moneda: 'CLP', purchase_date: '2023-12-01' },
+  { id: 'demo-10', ticker: 'BSANTANDER.SN', cantidad: 80000, precio_compra: 40.50, moneda: 'CLP', purchase_date: '2023-11-15' },
+  { id: 'demo-11', ticker: 'ENELCHILE.SN', cantidad: 15000, precio_compra: 52.00, moneda: 'CLP', purchase_date: '2023-06-12' }
 ];
 
 export const PortfolioProvider = ({ children }: { children: React.ReactNode }) => {
