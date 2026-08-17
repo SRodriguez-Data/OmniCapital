@@ -21,7 +21,7 @@ interface TopOpportunity {
 }
 
 export default function TopOportunidadesTab() {
-  const { isDemo } = usePortfolio();
+  const { isDemo, items } = usePortfolio();
   const [oportunidades, setOportunidades] = useState<TopOpportunity[]>([]);
   const [fecha, setFecha] = useState<string>('');
   const [loading, setLoading] = useState(true);
