@@ -50,30 +50,45 @@ export default function PortfolioTab() {
   // Calculamos KPIs
   let totalInvestedUSD = 0;
   let totalCurrentUSD = 0;
-  let investedForPnL = 0;
+  let investedForPnL_USD = 0;
+
+  let totalInvestedCLP = 0;
+  let totalCurrentCLP = 0;
+  let investedForPnL_CLP = 0;
 
   items.forEach(item => {
     const isCLP = item.moneda === 'CLP';
     const invested = item.cantidad * item.precio_compra;
-    const invested_usd = isCLP ? (invested / USD_CLP) : invested;
-    totalInvestedUSD += invested_usd;
+    
+    if (isCLP) {
+      totalInvestedCLP += invested;
+    } else {
+      totalInvestedUSD += invested;
+    }
 
     const currentPrice = livePrices[item.ticker];
     if (currentPrice !== undefined) {
       const currentVal = item.cantidad * currentPrice;
-      const currentVal_usd = isCLP ? (currentVal / USD_CLP) : currentVal;
-      totalCurrentUSD += currentVal_usd;
-      investedForPnL += invested_usd;
+      if (isCLP) {
+        totalCurrentCLP += currentVal;
+        investedForPnL_CLP += invested;
+      } else {
+        totalCurrentUSD += currentVal;
+        investedForPnL_USD += invested;
+      }
     }
   });
 
-  // Calculate strict P&L only from assets that have real live prices
-  const totalPnL_USD = totalCurrentUSD - investedForPnL;
-  const totalPnL_Percent = investedForPnL > 0 ? (totalPnL_USD / investedForPnL) * 100 : 0;
-  
-  // Para que el Valor Total no se desplome si falta un precio, le sumamos el capital invertido de los activos sin precio.
-  totalCurrentUSD += (totalInvestedUSD - investedForPnL);
-  const pnlColor = totalPnL_USD >= 0 ? 'text-[#34d399]' : 'text-[#f87171]';
+  const totalPnL_USD = totalCurrentUSD - investedForPnL_USD;
+  const totalPnL_Percent_USD = investedForPnL_USD > 0 ? (totalPnL_USD / investedForPnL_USD) * 100 : 0;
+  totalCurrentUSD += (totalInvestedUSD - investedForPnL_USD);
+
+  const totalPnL_CLP = totalCurrentCLP - investedForPnL_CLP;
+  const totalPnL_Percent_CLP = investedForPnL_CLP > 0 ? (totalPnL_CLP / investedForPnL_CLP) * 100 : 0;
+  totalCurrentCLP += (totalInvestedCLP - investedForPnL_CLP);
+
+  const pnlColorUSD = totalPnL_USD >= 0 ? 'text-[#34d399]' : 'text-[#f87171]';
+  const pnlColorCLP = totalPnL_CLP >= 0 ? 'text-[#34d399]' : 'text-[#f87171]';
 
   const handleSelectTicker = (selectedTicker: string) => {
     setTicker(selectedTicker);
@@ -312,24 +327,50 @@ export default function PortfolioTab() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-zinc-50 dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-4 flex flex-col justify-center">
-          <span className="text-xs font-mono text-zinc-500 dark:text-[#a1a1aa] uppercase tracking-wider mb-1">Valor Total (Actual)</span>
-          <span className="text-2xl font-bold font-sans text-zinc-900 dark:text-[#fafafa]">${totalCurrentUSD.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} <span className="text-sm font-normal text-zinc-500">USD</span></span>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        {/* USD Metrics */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-zinc-50 dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-4 flex flex-col justify-center">
+            <span className="text-[10px] font-mono text-[#60a5fa] uppercase tracking-wider mb-1">Valor Total (USD)</span>
+            <span className="text-xl font-bold font-sans text-zinc-900 dark:text-[#fafafa]">${totalCurrentUSD.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+          </div>
+          <div className="bg-zinc-50 dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-4 flex flex-col justify-center">
+            <span className="text-[10px] font-mono text-zinc-500 dark:text-[#a1a1aa] uppercase tracking-wider mb-1">Invertido (USD)</span>
+            <span className="text-xl font-bold font-sans text-zinc-900 dark:text-[#fafafa]">${totalInvestedUSD.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+          </div>
+          <div className="bg-zinc-50 dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-4 flex flex-col justify-center">
+            <span className="text-[10px] font-mono text-zinc-500 dark:text-[#a1a1aa] uppercase tracking-wider mb-1">P&L (USD)</span>
+            <div className="flex items-baseline gap-2">
+              <span className={`text-xl font-bold font-sans ${pnlColorUSD}`}>
+                {totalPnL_USD >= 0 ? '+' : ''}{totalPnL_USD.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+              </span>
+              <span className={`text-xs font-bold font-mono ${pnlColorUSD} bg-opacity-10 px-1 py-0.5 rounded`}>
+                {totalPnL_Percent_USD >= 0 ? '+' : ''}{totalPnL_Percent_USD.toFixed(2)}%
+              </span>
+            </div>
+          </div>
         </div>
-        <div className="bg-zinc-50 dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-4 flex flex-col justify-center">
-          <span className="text-xs font-mono text-zinc-500 dark:text-[#a1a1aa] uppercase tracking-wider mb-1">Capital Invertido</span>
-          <span className="text-2xl font-bold font-sans text-zinc-900 dark:text-[#fafafa]">${totalInvestedUSD.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} <span className="text-sm font-normal text-zinc-500">USD</span></span>
-        </div>
-        <div className="bg-zinc-50 dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-4 flex flex-col justify-center">
-          <span className="text-xs font-mono text-zinc-500 dark:text-[#a1a1aa] uppercase tracking-wider mb-1">Retorno Total (P&L)</span>
-          <div className="flex items-baseline gap-2">
-            <span className={`text-2xl font-bold font-sans ${pnlColor}`}>
-              {totalPnL_USD >= 0 ? '+' : ''}{totalPnL_USD.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-            </span>
-            <span className={`text-sm font-bold font-mono ${pnlColor} bg-opacity-10 px-2 py-0.5 rounded`}>
-              {totalPnL_Percent >= 0 ? '+' : ''}{totalPnL_Percent.toFixed(2)}%
-            </span>
+
+        {/* CLP Metrics */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-zinc-50 dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-4 flex flex-col justify-center">
+            <span className="text-[10px] font-mono text-[#34d399] uppercase tracking-wider mb-1">Valor Total (CLP)</span>
+            <span className="text-xl font-bold font-sans text-zinc-900 dark:text-[#fafafa]">${totalCurrentCLP.toLocaleString('es-CL', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
+          </div>
+          <div className="bg-zinc-50 dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-4 flex flex-col justify-center">
+            <span className="text-[10px] font-mono text-zinc-500 dark:text-[#a1a1aa] uppercase tracking-wider mb-1">Invertido (CLP)</span>
+            <span className="text-xl font-bold font-sans text-zinc-900 dark:text-[#fafafa]">${totalInvestedCLP.toLocaleString('es-CL', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
+          </div>
+          <div className="bg-zinc-50 dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-4 flex flex-col justify-center">
+            <span className="text-[10px] font-mono text-zinc-500 dark:text-[#a1a1aa] uppercase tracking-wider mb-1">P&L (CLP)</span>
+            <div className="flex items-baseline gap-2">
+              <span className={`text-xl font-bold font-sans ${pnlColorCLP}`}>
+                {totalPnL_CLP >= 0 ? '+' : ''}{totalPnL_CLP.toLocaleString('es-CL', {minimumFractionDigits: 0, maximumFractionDigits: 0})}
+              </span>
+              <span className={`text-xs font-bold font-mono ${pnlColorCLP} bg-opacity-10 px-1 py-0.5 rounded`}>
+                {totalPnL_Percent_CLP >= 0 ? '+' : ''}{totalPnL_Percent_CLP.toFixed(2)}%
+              </span>
+            </div>
           </div>
         </div>
       </div>
