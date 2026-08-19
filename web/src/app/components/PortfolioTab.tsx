@@ -25,8 +25,8 @@ export default function PortfolioTab() {
   const [moneda, setMoneda] = useState<'USD'|'CLP'>('USD');
   const [purchaseDate, setPurchaseDate] = useState('');
   const [submitting, setSubmitting] = useState(false);
-
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [usdClpRate, setUsdClpRate] = useState<number>(930);
 
   useEffect(() => {
     async function fetchLivePrices() {
@@ -43,52 +43,61 @@ export default function PortfolioTab() {
       }
     }
     fetchLivePrices();
-  }, [items]);
 
-  const USD_CLP = 930;
+    // Fetch real USDCLP rate
+    fetch('https://mindicador.cl/api/dolar')
+      .then(res => res.json())
+      .then(data => {
+         if (data && data.serie && data.serie.length > 0) {
+           setUsdClpRate(data.serie[0].valor);
+         }
+      })
+      .catch(() => console.log('Failed to fetch USDCLP'));
+  }, [items]);
 
   // Calculamos KPIs
   let totalInvestedUSD = 0;
   let totalCurrentUSD = 0;
-  let investedForPnL_USD = 0;
 
   let totalInvestedCLP = 0;
   let totalCurrentCLP = 0;
-  let investedForPnL_CLP = 0;
+
+  let totalInvested_CombinedCLP = 0;
+  let totalCurrent_CombinedCLP = 0;
 
   items.forEach(item => {
     const isCLP = item.moneda === 'CLP';
     const invested = item.cantidad * item.precio_compra;
     
+    // Fallback to purchase price if live price is unavailable
+    const currentPrice = livePrices[item.ticker] !== undefined ? livePrices[item.ticker] : item.precio_compra;
+    const currentVal = item.cantidad * currentPrice;
+
     if (isCLP) {
       totalInvestedCLP += invested;
+      totalCurrentCLP += currentVal;
     } else {
       totalInvestedUSD += invested;
+      totalCurrentUSD += currentVal;
     }
 
-    const currentPrice = livePrices[item.ticker];
-    if (currentPrice !== undefined) {
-      const currentVal = item.cantidad * currentPrice;
-      if (isCLP) {
-        totalCurrentCLP += currentVal;
-        investedForPnL_CLP += invested;
-      } else {
-        totalCurrentUSD += currentVal;
-        investedForPnL_USD += invested;
-      }
-    }
+    const rate = isCLP ? 1 : usdClpRate;
+    totalInvested_CombinedCLP += (invested * rate);
+    totalCurrent_CombinedCLP += (currentVal * rate);
   });
 
-  const totalPnL_USD = totalCurrentUSD - investedForPnL_USD;
-  const totalPnL_Percent_USD = investedForPnL_USD > 0 ? (totalPnL_USD / investedForPnL_USD) * 100 : 0;
-  totalCurrentUSD += (totalInvestedUSD - investedForPnL_USD);
+  const totalPnL_USD = totalCurrentUSD - totalInvestedUSD;
+  const totalPnL_Percent_USD = totalInvestedUSD > 0 ? (totalPnL_USD / totalInvestedUSD) * 100 : 0;
 
-  const totalPnL_CLP = totalCurrentCLP - investedForPnL_CLP;
-  const totalPnL_Percent_CLP = investedForPnL_CLP > 0 ? (totalPnL_CLP / investedForPnL_CLP) * 100 : 0;
-  totalCurrentCLP += (totalInvestedCLP - investedForPnL_CLP);
+  const totalPnL_CLP = totalCurrentCLP - totalInvestedCLP;
+  const totalPnL_Percent_CLP = totalInvestedCLP > 0 ? (totalPnL_CLP / totalInvestedCLP) * 100 : 0;
+
+  const totalPnL_CombinedCLP = totalCurrent_CombinedCLP - totalInvested_CombinedCLP;
+  const totalPnL_Percent_CombinedCLP = totalInvested_CombinedCLP > 0 ? (totalPnL_CombinedCLP / totalInvested_CombinedCLP) * 100 : 0;
 
   const pnlColorUSD = totalPnL_USD >= 0 ? 'text-[#34d399]' : 'text-[#f87171]';
   const pnlColorCLP = totalPnL_CLP >= 0 ? 'text-[#34d399]' : 'text-[#f87171]';
+  const pnlColorCombined = totalPnL_CombinedCLP >= 0 ? 'text-[#34d399]' : 'text-[#f87171]';
 
   const handleSelectTicker = (selectedTicker: string) => {
     setTicker(selectedTicker);
@@ -243,18 +252,23 @@ export default function PortfolioTab() {
         <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-sm dark:shadow-none p-6 h-96 flex flex-col">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-zinc-200 dark:border-[#27272a] pb-4 mb-6 gap-4">
             <div>
-              <h2 className="text-xs font-sans font-medium font-bold text-zinc-900 dark:text-[#e4e4e7] uppercase">Evolución P&L (Real)</h2>
+              <h2 className="text-xs font-sans font-medium font-bold text-zinc-900 dark:text-[#e4e4e7] uppercase">Evolución P&L Global (Real)</h2>
             </div>
             <div className="text-left sm:text-right">
-              <p className="text-[10px] text-zinc-500 dark:text-[#71717a] font-mono uppercase">P&L Actual</p>
-              <p className={`text-lg font-bold font-mono ${pnlColorUSD}`}>
-                {totalPnL_USD >= 0 ? '+' : ''}${totalPnL_USD.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-              </p>
+              <p className="text-[10px] text-zinc-500 dark:text-[#71717a] font-mono uppercase">P&L Actual Consolidado (CLP)</p>
+              <div className="flex items-baseline justify-end gap-2">
+                <p className={`text-lg font-bold font-mono ${pnlColorCombined}`}>
+                  {totalPnL_CombinedCLP >= 0 ? '+' : ''}${totalPnL_CombinedCLP.toLocaleString('es-CL', {minimumFractionDigits: 0, maximumFractionDigits: 0})}
+                </p>
+                <p className={`text-xs font-bold font-mono ${pnlColorCombined} bg-opacity-10 px-1 py-0.5 rounded`}>
+                  {totalPnL_Percent_CombinedCLP >= 0 ? '+' : ''}{totalPnL_Percent_CombinedCLP.toFixed(2)}%
+                </p>
+              </div>
             </div>
           </div>
           <div className="flex-1">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={[{ date: 'Compra Inicial', totalValue: totalInvestedUSD }, { date: 'Actual', totalValue: totalCurrentUSD }]} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
+              <AreaChart data={[{ date: 'Compra Inicial', totalValue: totalInvested_CombinedCLP }, { date: 'Actual', totalValue: totalCurrent_CombinedCLP }]} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#34d399" stopOpacity={0.3}/>
@@ -267,18 +281,18 @@ export default function PortfolioTab() {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
                 <XAxis dataKey="date" stroke="#71717a" fontSize={10} tickMargin={10} axisLine={false} tickLine={false} />
-                <YAxis stroke="#71717a" fontSize={10} tickFormatter={(val) => `$${val.toLocaleString()}`} axisLine={false} tickLine={false} width={80} domain={['auto', 'auto']} />
+                <YAxis stroke="#71717a" fontSize={10} tickFormatter={(val) => `$${val.toLocaleString('es-CL')}`} axisLine={false} tickLine={false} width={80} domain={['auto', 'auto']} />
                 <RechartsTooltip 
                   contentStyle={{backgroundColor: '#09090b', borderColor: '#27272a', fontFamily: 'monospace'}} 
                   itemStyle={{color: '#e4e4e7'}} 
                   labelStyle={{color: '#71717a'}}
-                  formatter={(value: any, name: any) => [`$${Number(value).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`, name]}
+                  formatter={(value: any, name: any) => [`$${Number(value).toLocaleString('es-CL', {minimumFractionDigits: 0, maximumFractionDigits: 0})}`, name]}
                 />
                 <Area 
                   type="monotone" 
                   dataKey="totalValue" 
-                  stroke={totalPnL_USD >= 0 ? "#34d399" : "#f87171"} 
-                  fill={totalPnL_USD >= 0 ? "url(#colorProfit)" : "url(#colorLoss)"} 
+                  stroke={totalPnL_CombinedCLP >= 0 ? "#34d399" : "#f87171"} 
+                  fill={totalPnL_CombinedCLP >= 0 ? "url(#colorProfit)" : "url(#colorLoss)"} 
                   strokeWidth={2} 
                   name="Valor Portafolio" 
                 />
