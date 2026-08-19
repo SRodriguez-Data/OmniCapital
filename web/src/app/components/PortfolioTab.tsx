@@ -68,22 +68,35 @@ export default function PortfolioTab() {
   items.forEach(item => {
     const isCLP = item.moneda === 'CLP';
     const invested = item.cantidad * item.precio_compra;
+    const currentPrice = livePrices[item.ticker];
     
-    // Fallback to purchase price if live price is unavailable
-    const currentPrice = livePrices[item.ticker] !== undefined ? livePrices[item.ticker] : item.precio_compra;
-    const currentVal = item.cantidad * currentPrice;
-
     if (isCLP) {
       totalInvestedCLP += invested;
-      totalCurrentCLP += currentVal;
     } else {
       totalInvestedUSD += invested;
-      totalCurrentUSD += currentVal;
     }
 
     const rate = isCLP ? 1 : usdClpRate;
     totalInvested_CombinedCLP += (invested * rate);
-    totalCurrent_CombinedCLP += (currentVal * rate);
+
+    if (currentPrice !== undefined) {
+      const currentVal = item.cantidad * currentPrice;
+      if (isCLP) {
+        totalCurrentCLP += currentVal;
+      } else {
+        totalCurrentUSD += currentVal;
+      }
+      totalCurrent_CombinedCLP += (currentVal * rate);
+    } else {
+      // If live price is missing, we add the invested amount to the current value 
+      // so the global P&L is 0 for this missing asset, rather than artificially tanking the portfolio value.
+      if (isCLP) {
+        totalCurrentCLP += invested;
+      } else {
+        totalCurrentUSD += invested;
+      }
+      totalCurrent_CombinedCLP += (invested * rate);
+    }
   });
 
   const totalPnL_USD = totalCurrentUSD - totalInvestedUSD;

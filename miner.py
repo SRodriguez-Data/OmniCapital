@@ -68,7 +68,7 @@ def obtener_universo_masivo() -> list[str]:
         "NVO", "SAP", "SHEL", "UL", "SNY", "BP", "DEO", "BTI", "GSK", "SAN", 
         "BBVA", "ING", "ASML", "CRH", "FLUT", "RELX", "HEINY", "RACE",
         "MELI", "PBR", "VALE", "NU", "ITUB", "AMX", "BBD", "BSBR", "FMX", "BAK", 
-        "VOO", "SCHD", "HDV", "QQQ", "VT", "EEM", "VEA", "VUG", "VTV", "VNQ", "IYR"
+        "VOO", "SCHD", "HDV", "QQQ", "VT", "EEM", "VEA", "VUG", "VTV", "VNQ", "IYR", "FTEC"
     ]
     tickers_finales.extend(activos_fijos)
     logging.info(f"✅ Activos fijos cargados ({len(activos_fijos)} activos).")
