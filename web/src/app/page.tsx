@@ -23,10 +23,14 @@ export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    // Verificar si es modo demo
-    if (typeof window !== 'undefined' && localStorage.getItem('isDemo') === 'true') {
-      setSession({ user: { id: 'demo', email: 'demo@jurado.com' } });
-      return;
+    // Si estamos en modo demo o modo cartola, no exigir sesión real
+    if (typeof window !== 'undefined') {
+      const demoMode = localStorage.getItem('isDemo') === 'true';
+      const cartolaMode = localStorage.getItem('isCartolaMode') === 'true';
+      if (demoMode || cartolaMode) {
+        setSession({ user: { id: demoMode ? 'demo' : 'cartola', email: 'user@jurado.com' } });
+        return; 
+      }
     }
 
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -38,7 +42,7 @@ export default function Home() {
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (typeof window !== 'undefined' && localStorage.getItem('isDemo') === 'true') return;
+      if (typeof window !== 'undefined' && (localStorage.getItem('isDemo') === 'true' || localStorage.getItem('isCartolaMode') === 'true')) return;
       
       if (!session) {
         router.push('/login');
@@ -51,10 +55,13 @@ export default function Home() {
   }, [router]);
 
   const handleSignOut = async () => {
-    if (typeof window !== 'undefined' && localStorage.getItem('isDemo') === 'true') {
-      localStorage.removeItem('isDemo');
-      router.push('/login');
-      return;
+    if (typeof window !== 'undefined') {
+      if (localStorage.getItem('isDemo') === 'true' || localStorage.getItem('isCartolaMode') === 'true') {
+        localStorage.removeItem('isDemo');
+        localStorage.removeItem('isCartolaMode');
+        router.push('/login');
+        return;
+      }
     }
     await supabase.auth.signOut();
     router.push('/login');

@@ -14,10 +14,11 @@ export default function LoginPage() {
   const router = useRouter();
 
   useEffect(() => {
-    // Si ya hay sesión o es modo demo, redirigir al home
-    if (typeof window !== 'undefined' && localStorage.getItem('isDemo') === 'true') {
-      router.push('/');
-      return;
+    if (typeof window !== 'undefined') {
+      if (localStorage.getItem('isDemo') === 'true' || localStorage.getItem('isCartolaMode') === 'true') {
+        router.push('/');
+        return;
+      }
     }
     
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -29,6 +30,7 @@ export default function LoginPage() {
 
   const handleDemoLogin = () => {
     if (typeof window !== 'undefined') {
+      localStorage.removeItem('isCartolaMode');
       localStorage.setItem('isDemo', 'true');
       router.push('/');
     }
@@ -159,6 +161,7 @@ export default function LoginPage() {
             type="button"
             onClick={() => {
               if (typeof window !== 'undefined') {
+                localStorage.removeItem('isDemo');
                 localStorage.setItem('isCartolaMode', 'true');
                 router.push('/');
               }
