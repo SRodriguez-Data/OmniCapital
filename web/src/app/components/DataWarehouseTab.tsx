@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { UploadCloud, FileText, CheckCircle, AlertCircle, Database } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
+import { parsePdfToCartola } from '@/lib/CartolaParser';
 
 export default function DataWarehouseTab() {
   const [files, setFiles] = useState<File[]>([]);
@@ -22,29 +23,20 @@ export default function DataWarehouseTab() {
     setError(null);
     setResults([]);
 
-    const formData = new FormData();
-    files.forEach((file) => {
-      formData.append('files', file);
-    });
-
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const response = await fetch(`${apiUrl}/api/upload-cartolas`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error('Error al conectar con el backend local (Asegúrate de que backend.py esté corriendo en el puerto 8000)');
+      // PROCESAR 100% EN EL NAVEGADOR
+      const extractedResults = [];
+      for (const file of files) {
+        const res = await parsePdfToCartola(file);
+        if (res.data.length > 0) {
+           extractedResults.push(res);
+        }
       }
 
-      const data = await response.json();
-      
-      if (data.error) {
-        throw new Error(data.error);
+      if (extractedResults.length === 0) {
+        throw new Error('No se encontraron operaciones reconocidas en las cartolas subidas.');
       }
 
-      const extractedResults = data.results || [];
       setResults(extractedResults);
 
       // Si estamos en Modo Cartola, auto-poblar el portafolio con los resultados extraídos!
@@ -53,7 +45,6 @@ export default function DataWarehouseTab() {
         extractedResults.forEach((res: any) => {
           if (res.data && Array.isArray(res.data)) {
             res.data.forEach((row: any) => {
-              // Ajustar mapeo según las columnas que devuelve extractor_cartolas.py
               if (row.Tipo === 'COMPRA' || row.Tipo === 'Buy') {
                 newItems.push({
                   id: `cartola-${Math.random().toString(36).substr(2, 9)}`,
@@ -75,7 +66,7 @@ export default function DataWarehouseTab() {
 
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Error desconocido al subir archivos.');
+      setError(err.message || 'Error desconocido al procesar el PDF en el navegador.');
     } finally {
       setIsUploading(false);
     }
