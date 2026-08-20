@@ -1,6 +1,7 @@
-const PATRON_US_TRADE = /([A-Z]+)\s+.*?\s+(Buy|Sell)\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M\s+([\d\.,]+)\s+([\d\.,]+)\s+(\d{1,2}\/\d{1,2}\/\d{4})/gi;
+const PATRON_US_TRADE = /([A-Z]+)\s+.*?\s+(Buy|Sell)(?:\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M)?\s+([\d\.,]+)\s+([\d\.,]+)\s+(\d{1,2}\/\d{1,2}\/\d{4})/gi;
 const PATRON_US_DIVIDEND = /([A-Z]+)\s+.*?\s+(?:Cash Dividend|CDIV)\s+(\d{1,2}\/\d{1,2}\/\d{4})\s+([\d\.,]+)/gi;
-const PATRON_CL_TRADE = /(\d{2}-\d{2}-\d{4})\s+\d{2}-\d{2}-\d{4}\s+(?:(COMPRA|VENTA)\s+)?(?:ACCIONES|FONDOS)\s+(?:CB\s+)?([A-Z0-9\-]+)\s+(?:CLP|USD)\s+([\d\.,]+)\s*\$\s*([\d\.,]+)/gi;
+// Capturamos el tipo (opcional), luego ACCIONES/FONDOS (con palabras extra opcionales), luego el Ticker, luego CLP/USD, luego Cantidad y Precio.
+const PATRON_CL_TRADE = /(\d{2}-\d{2}-\d{4})\s+\d{2}-\d{2}-\d{4}\s+(?:(COMPRA|VENTA)\s+)?(?:ACCIONES|FONDOS)[A-Z\s]*(?:CB\s+)?([A-Z0-9\-]+)\s+(CLP|USD)\s+([\d\.,]+)\s*\$\s*([\d\.,]+)/gi;
 const PATRON_FINTUAL_COMPRA = /(\d{4}-\d{2}-\d{2})\s+(.*?)\s+([A-Z0-9\-]+)\s+(?:ETF|Acciones|Fondo).*?US\s+\$\s*([\d,]+)\s+([\d,]+)/gi;
 const PATRON_FINTUAL_DIVIDEND = /(\d{4}-\d{2}-\d{2})\s+(.*?)\s+([A-Z0-9\-]+)\s+(?:ETF|Acciones|Fondo).*?US\s+\$\s*([\d,]+)\s+US\s+\$\s*([\d,]+)\s+US\s+\$\s*([\d,]+)/gi;
 
@@ -29,7 +30,6 @@ function parseDate(val: string) {
 
 export async function parsePdfToCartola(file: File) {
   try {
-    // Dynamic import to prevent DOMMatrix SSR crash in Next.js
     const pdfjsLib = await import('pdfjs-dist');
     pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
@@ -41,7 +41,6 @@ export async function parsePdfToCartola(file: File) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
       const strings = content.items.map((item: any) => item.str);
-      // pdf.js items are just chunks, join them with space.
       text += strings.join(" ") + " ";
     }
 
@@ -62,7 +61,6 @@ export async function parsePdfToCartola(file: File) {
         data.push({ Fecha: parseDate(m[1]), Archivo: file.name, Ticker: m[3].toUpperCase(), Tipo: 'Compra', Precio: parseNumberFintual(m[4]), Cantidad: parseNumberFintual(m[5]), Moneda: 'USD' });
       }
     } else {
-      // Racional logic
       const matchesUs = Array.from(text.matchAll(PATRON_US_TRADE));
       for (const m of matchesUs) {
         data.push({ Fecha: parseDate(m[5]), Archivo: file.name, Ticker: m[1].toUpperCase(), Tipo: m[2].toUpperCase() === 'BUY' ? 'COMPRA' : 'VENTA', Precio: parseNumberRacional(m[3]), Cantidad: parseNumberRacional(m[4]), Moneda: 'USD' });
@@ -71,7 +69,15 @@ export async function parsePdfToCartola(file: File) {
       const matchesCl = Array.from(text.matchAll(PATRON_CL_TRADE));
       for (const m of matchesCl) {
         const tipoMatch = m[2] ? m[2].toUpperCase() : 'COMPRA';
-        data.push({ Fecha: parseDate(m[1]), Archivo: file.name, Ticker: m[3].toUpperCase(), Tipo: tipoMatch, Precio: parseNumberFintual(m[5]), Cantidad: parseNumberFintual(m[4]), Moneda: 'CLP' });
+        let ticker = m[3].toUpperCase();
+        const moneda = m[4].toUpperCase(); // CLP o USD
+        
+        // Agregar .SN solo si es CLP y no lo tiene ya.
+        if (moneda === 'CLP' && !ticker.endsWith('.SN')) {
+          ticker += '.SN';
+        }
+        
+        data.push({ Fecha: parseDate(m[1]), Archivo: file.name, Ticker: ticker, Tipo: tipoMatch, Precio: parseNumberFintual(m[6]), Cantidad: parseNumberFintual(m[5]), Moneda: moneda });
       }
     }
 
