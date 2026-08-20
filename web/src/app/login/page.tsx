@@ -150,12 +150,31 @@ export default function LoginPage() {
           <button
             type="button"
             onClick={handleDemoLogin}
-            className="w-full flex items-center justify-center gap-2 bg-zinc-900 dark:bg-white hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 p-3 rounded-lg text-sm font-bold font-mono transition-colors"
+            className="w-full flex items-center justify-center gap-2 bg-zinc-100 dark:bg-[#27272a] hover:bg-zinc-200 dark:hover:bg-[#3f3f46] text-zinc-900 dark:text-white p-3 rounded-lg text-sm font-bold font-mono transition-colors"
           >
-            🚀 ENTRAR COMO JURADO (DEMO)
+            ENTRAR COMO JURADO (DEMO)
           </button>
+          
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('isCartolaMode', 'true');
+                router.push('/');
+              }
+            }}
+            className="w-full flex items-center justify-center gap-2 bg-transparent border border-zinc-200 dark:border-[#27272a] hover:bg-zinc-50 dark:hover:bg-[#27272a] text-zinc-500 dark:text-zinc-400 py-2 rounded-lg text-xs font-bold font-mono transition-colors mt-2"
+          >
+            PRUEBA LECTOR DE CARTOLAS (MODO VIDEO)
+          </button>
+
         </form>
       </div>
+      
+      <p className="mt-8 text-xs text-zinc-400 dark:text-[#52525b] font-mono text-center max-w-sm">
+        Acceso restringido. Sistema de uso institucional.
+        Toda la actividad es monitoreada.
+      </p>
     </main>
   );
 }

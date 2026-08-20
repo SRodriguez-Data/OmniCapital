@@ -16,6 +16,8 @@ interface PortfolioContextType {
   items: PortfolioItem[];
   loading: boolean;
   isDemo: boolean;
+  isCartolaMode: boolean;
+  setItems: React.Dispatch<React.SetStateAction<PortfolioItem[]>>;
   refreshPortfolio: () => Promise<void>;
 }
 
@@ -39,15 +41,27 @@ export const PortfolioProvider = ({ children }: { children: React.ReactNode }) =
   const [items, setItems] = useState<PortfolioItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDemo, setIsDemo] = useState(false);
+  const [isCartolaMode, setIsCartolaMode] = useState(false);
 
   const fetchPortfolio = async () => {
     setLoading(true);
     try {
       const demoMode = typeof window !== 'undefined' && localStorage.getItem('isDemo') === 'true';
+      const cartolaMode = typeof window !== 'undefined' && localStorage.getItem('isCartolaMode') === 'true';
+      
       setIsDemo(demoMode);
+      setIsCartolaMode(cartolaMode);
 
       if (demoMode) {
         setItems(MOCK_PORTFOLIO);
+        setLoading(false);
+        return;
+      }
+
+      if (cartolaMode) {
+        // En modo cartola empezamos con un portafolio vacío hasta que el usuario suba la cartola.
+        // Solo no borramos los items si ya tienen algo.
+        setItems(prev => prev.length > 0 ? prev : []);
         setLoading(false);
         return;
       }
@@ -78,7 +92,7 @@ export const PortfolioProvider = ({ children }: { children: React.ReactNode }) =
   }, []);
 
   return (
-    <PortfolioContext.Provider value={{ items, loading, isDemo, refreshPortfolio: fetchPortfolio }}>
+    <PortfolioContext.Provider value={{ items, loading, isDemo, isCartolaMode, setItems, refreshPortfolio: fetchPortfolio }}>
       {children}
     </PortfolioContext.Provider>
   );

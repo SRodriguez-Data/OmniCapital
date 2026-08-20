@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { UploadCloud, FileText, CheckCircle, AlertCircle, Database } from 'lucide-react';
+import { usePortfolio } from '../context/PortfolioContext';
 
 export default function DataWarehouseTab() {
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [results, setResults] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const { isCartolaMode, setItems } = usePortfolio();
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -26,7 +28,6 @@ export default function DataWarehouseTab() {
     });
 
     try {
-      // Intentar conectarse al backend (Render o Local)
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
       const response = await fetch(`${apiUrl}/api/upload-cartolas`, {
         method: 'POST',
@@ -43,7 +44,35 @@ export default function DataWarehouseTab() {
         throw new Error(data.error);
       }
 
-      setResults(data.results || []);
+      const extractedResults = data.results || [];
+      setResults(extractedResults);
+
+      // Si estamos en Modo Cartola, auto-poblar el portafolio con los resultados extraídos!
+      if (isCartolaMode && extractedResults.length > 0) {
+        const newItems: any[] = [];
+        extractedResults.forEach((res: any) => {
+          if (res.data && Array.isArray(res.data)) {
+            res.data.forEach((row: any) => {
+              // Ajustar mapeo según las columnas que devuelve extractor_cartolas.py
+              if (row.Tipo === 'COMPRA' || row.Tipo === 'Buy') {
+                newItems.push({
+                  id: `cartola-${Math.random().toString(36).substr(2, 9)}`,
+                  ticker: row.Ticker || 'UNKNOWN',
+                  cantidad: Number(row.Cantidad) || 1,
+                  precio_compra: Number(row.Precio) || 0,
+                  moneda: row.Moneda || (row.Precio > 1000 ? 'CLP' : 'USD'),
+                  purchase_date: row.Fecha || new Date().toISOString().split('T')[0]
+                });
+              }
+            });
+          }
+        });
+        
+        if (newItems.length > 0) {
+          setItems(prev => [...prev, ...newItems]);
+        }
+      }
+
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Error desconocido al subir archivos.');
@@ -141,6 +170,17 @@ export default function DataWarehouseTab() {
             <CheckCircle className="w-5 h-5 text-emerald-500" /> Resultados de Extracción
           </h3>
           
+          {isCartolaMode && (
+            <div className="mb-6 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-900/50 p-4 rounded-lg flex flex-col items-center justify-center text-center">
+              <span className="text-emerald-600 dark:text-emerald-400 font-bold mb-2 font-sans">
+                ¡Operaciones importadas exitosamente!
+              </span>
+              <span className="text-xs text-emerald-700 dark:text-emerald-500 font-mono">
+                Ve a la pestaña [01] Mi Portafolio para ver tus activos y P&L en vivo.
+              </span>
+            </div>
+          )}
+
           <div className="space-y-8">
             {results.map((result, idx) => (
               <div key={idx} className="border border-zinc-200 dark:border-[#27272a] rounded-lg overflow-hidden">
