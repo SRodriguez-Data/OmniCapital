@@ -1,8 +1,3 @@
-import * as pdfjsLib from 'pdfjs-dist';
-
-// Configurar el worker de PDF.js usando CDN para no pelear con Webpack/Next.js
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
-
 const PATRON_US_TRADE = /^([A-Z]+)\s+.*?\s+(Buy|Sell)\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M\s+([\d\.,]+)\s+([\d\.,]+)\s+(\d{1,2}\/\d{1,2}\/\d{4})/i;
 const PATRON_US_DIVIDEND = /^([A-Z]+)\s+.*?\s+(?:Cash Dividend|CDIV)\s+(\d{1,2}\/\d{1,2}\/\d{4})\s+([\d\.,]+)/i;
 const PATRON_CL_TRADE = /^(\d{2}-\d{2}-\d{4})\s+\d{2}-\d{2}-\d{4}\s+(COMPRA|VENTA)\s+(?:ACCIONES|FONDOS)\s+CB\s+([A-Z0-9]+)\s+(?:CLP|USD)\s+([\d\.,]+)\s+\$\s+([\d\.,]+)/i;
@@ -34,6 +29,10 @@ function parseDate(val: string) {
 
 export async function parsePdfToCartola(file: File) {
   try {
+    // Dynamic import to prevent DOMMatrix SSR crash in Next.js
+    const pdfjsLib = await import('pdfjs-dist');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     
