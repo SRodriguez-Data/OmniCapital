@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { AreaChart, Area, ResponsiveContainer, YAxis, Tooltip } from 'recharts';
+import { AreaChart, Area, ResponsiveContainer, YAxis, XAxis, Tooltip } from 'recharts';
 import { usePortfolio } from '../context/PortfolioContext';
 
 export type TimePeriod = '1S' | '1M' | '3M' | '6M' | 'YTD' | '1A' | 'TOTAL';
@@ -90,6 +90,7 @@ export default function AssetSparkline({ ticker, purchaseDate, period = 'TOTAL' 
                 <stop offset="95%" stopColor={strokeColor} stopOpacity={0}/>
               </linearGradient>
             </defs>
+            <XAxis dataKey="date" stroke="#71717a" fontSize={10} tickMargin={10} axisLine={false} tickLine={false} />
             <YAxis domain={['auto', 'auto']} hide />
             <Tooltip 
               contentStyle={{backgroundColor: '#09090b', borderColor: '#27272a', fontFamily: 'monospace', fontSize: '10px'}} 
