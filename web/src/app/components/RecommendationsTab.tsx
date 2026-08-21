@@ -49,7 +49,8 @@ export default function RecommendationsTab() {
       if (!error && aiRes && aiRes.length > 0) {
         const report = aiRes[0];
         
-        let parsedRecs: Recommendation[] = [];
+          let parsedRecs: Recommendation[] = [];
+        let hasSpecificPortfolio = true;
         if (report.candidatos_json && report.candidatos_json.recomendaciones_portafolio && report.candidatos_json.recomendaciones_portafolio.length > 0) {
           parsedRecs = report.candidatos_json.recomendaciones_portafolio.map((c: any) => ({
             ticker: c.ticker,
@@ -58,20 +59,26 @@ export default function RecommendationsTab() {
             analisis: c.analisis || c.razon || 'Sin análisis detallado.'
           }));
         } else if (report.candidatos_json) {
+          hasSpecificPortfolio = false;
           // Fallback to global top anomalies if no specific portfolio analysis exists yet
           const combined = [...(report.candidatos_json.us || []), ...(report.candidatos_json.cl || [])];
           parsedRecs = combined.map(c => ({
             ticker: c.ticker,
             accion: c.signal || (c.score > 50 ? '🟢 BUY' : '🟡 HOLD'),
-            stop_loss: 'No aplicable (Activo sugerido, no en portafolio)',
+            stop_loss: 'Activo Sugerido (Fuera de tu portafolio)',
             analisis: (report.insights_tickers && report.insights_tickers[c.ticker]) || `Oportunidad técnica detectada. Score: ${c.score.toFixed(1)}`
           }));
         }
 
+        // Si estamos en modo cartola (no tenemos análisis en DB), sobreescribimos el título
+        const diagTexto = hasSpecificPortfolio 
+          ? ((report.candidatos_json && report.candidatos_json.diagnostico_portafolio) ? report.candidatos_json.diagnostico_portafolio : (report.vision_radar || "Sin diagnóstico."))
+          : "⚠️ Estás viendo el Radar de Mercado General porque tu portafolio es local (Modo Cartola) o aún no ha sido procesado por el algoritmo nocturno. Las siguientes son Oportunidades Globales, no un diagnóstico de tus tenencias actuales.";
+
         setData({
-          fecha: report.fecha,
-          diagnostico: (report.candidatos_json && report.candidatos_json.diagnostico_portafolio) ? report.candidatos_json.diagnostico_portafolio : (report.vision_radar || "Sin diagnóstico."),
-          recomendaciones: parsedRecs
+           fecha: report.fecha,
+           diagnostico: diagTexto,
+           recomendaciones: parsedRecs
         });
       }
     } catch (e) {
