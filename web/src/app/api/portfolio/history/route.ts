@@ -65,7 +65,8 @@ export async function POST(request: Request) {
       if (totalValueCLP > 0) {
         portfolioHistory.push({
           date,
-          totalValue: totalValueCLP
+          totalValue: totalValueCLP,
+          prices: { ...pricesByDate[date] }
         });
       }
     }

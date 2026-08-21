@@ -159,7 +159,21 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
 
   const chartHistoryData = globalHistory.length > 0 
     ? filteredGlobalHistory 
-    : [{ date: 'Compra Inicial', totalValue: totalInvestedCombinedCLP }, { date: 'Actual', totalValue: totalCurrentCombinedCLP }];
+    : [{ date: 'Compra Inicial', totalValue: totalInvestedCombinedCLP, prices: {} }, { date: 'Actual', totalValue: totalCurrentCombinedCLP, prices: {} }];
+
+  let dynamicInvestedCombinedCLP = totalInvestedCombinedCLP;
+  let dynamicCurrentCombinedCLP = totalCurrentCombinedCLP;
+  let startPrices: Record<string, number> = {};
+
+  if (globalHistory.length > 0) {
+    dynamicInvestedCombinedCLP = chartHistoryData[0].totalValue;
+    dynamicCurrentCombinedCLP = chartHistoryData[chartHistoryData.length - 1].totalValue;
+    startPrices = chartHistoryData[0].prices || {};
+  }
+
+  const dynamicPnL_CombinedCLP = dynamicCurrentCombinedCLP - dynamicInvestedCombinedCLP;
+  const dynamicPnL_Percent_CombinedCLP = dynamicInvestedCombinedCLP > 0 ? (dynamicPnL_CombinedCLP / dynamicInvestedCombinedCLP) * 100 : 0;
+  const dynamicPnlColorCombined = dynamicPnL_CombinedCLP >= 0 ? 'text-[#34d399]' : 'text-[#f87171]';
 
   const handleSelectTicker = (selectedTicker: string) => {
     setTicker(selectedTicker);
@@ -343,11 +357,11 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
             <div className="text-left sm:text-right">
               <p className="text-[10px] text-zinc-500 dark:text-[#71717a] font-mono uppercase">P&L Actual Consolidado (CLP)</p>
               <div className="flex items-baseline justify-end gap-2">
-                <p className={`text-lg font-bold font-mono ${pnlColorCombined}`}>
-                  {totalPnL_CombinedCLP >= 0 ? '+' : ''}${totalPnL_CombinedCLP.toLocaleString('es-CL', {minimumFractionDigits: 0, maximumFractionDigits: 0})}
+                <p className={`text-lg font-bold font-mono ${dynamicPnlColorCombined}`}>
+                  {dynamicPnL_CombinedCLP >= 0 ? '+' : ''}${dynamicPnL_CombinedCLP.toLocaleString('es-CL', {minimumFractionDigits: 0, maximumFractionDigits: 0})}
                 </p>
-                <p className={`text-xs font-bold font-mono ${pnlColorCombined} bg-opacity-10 px-1 py-0.5 rounded`}>
-                  {totalPnL_Percent_CombinedCLP >= 0 ? '+' : ''}{totalPnL_Percent_CombinedCLP.toFixed(2)}%
+                <p className={`text-xs font-bold font-mono ${dynamicPnlColorCombined} bg-opacity-10 px-1 py-0.5 rounded`}>
+                  {dynamicPnL_Percent_CombinedCLP >= 0 ? '+' : ''}{dynamicPnL_Percent_CombinedCLP.toFixed(2)}%
                 </p>
               </div>
             </div>
@@ -377,8 +391,8 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
                 <Area 
                   type="monotone" 
                   dataKey="totalValue" 
-                  stroke={totalPnL_CombinedCLP >= 0 ? "#34d399" : "#f87171"} 
-                  fill={totalPnL_CombinedCLP >= 0 ? "url(#colorProfit)" : "url(#colorLoss)"} 
+                  stroke={dynamicPnL_CombinedCLP >= 0 ? "#34d399" : "#f87171"} 
+                  fill={dynamicPnL_CombinedCLP >= 0 ? "url(#colorProfit)" : "url(#colorLoss)"} 
                   strokeWidth={2} 
                   name="Valor Portafolio" 
                 />
@@ -484,10 +498,10 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
               <th className="py-2 px-4 font-semibold">Ticker</th>
               <th className="py-2 px-4 font-semibold text-right">Cant.</th>
               <th className="py-2 px-4 font-semibold text-right">Fecha Compra</th>
-              <th className="py-2 px-4 font-semibold text-right">Precio Compra</th>
+              <th className="py-2 px-4 font-semibold text-right">{period === 'TOTAL' ? 'Precio Compra' : 'Precio Inicial'}</th>
               <th className="py-2 px-4 font-semibold text-right">Precio Actual</th>
               <th className="py-2 px-4 font-semibold text-right">Moneda</th>
-              <th className="py-2 px-4 font-semibold text-right">Invertido</th>
+              <th className="py-2 px-4 font-semibold text-right">{period === 'TOTAL' ? 'Invertido' : 'Valor Inicial'}</th>
               <th className="py-2 px-4 font-semibold text-right">Valor Actual</th>
               <th className="py-2 px-4 font-semibold text-right">P&L</th>
               <th className="py-2 px-4 font-semibold text-center">Acción</th>
@@ -496,7 +510,8 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
           <tbody className="divide-y divide-zinc-200 dark:divide-[#27272a]">
             {items.map((row) => {
               const currentPrice = livePrices[row.ticker];
-              const invested = row.cantidad * row.precio_compra;
+              const startPrice = period === 'TOTAL' ? row.precio_compra : (startPrices[row.ticker] || row.precio_compra);
+              const invested = row.cantidad * startPrice;
               const currentVal = currentPrice !== undefined ? row.cantidad * currentPrice : undefined;
               const pnlVal = currentVal !== undefined ? currentVal - invested : undefined;
               const pnlPct = pnlVal !== undefined && invested > 0 ? (pnlVal / invested) * 100 : undefined;
@@ -511,7 +526,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
                     <td className="py-2 px-4 font-bold text-zinc-900 dark:text-[#e4e4e7]">{row.ticker}</td>
                     <td className="py-2 px-4 text-right">{row.cantidad.toLocaleString('en-US', {maximumFractionDigits: 4})}</td>
                     <td className="py-2 px-4 text-right">{row.purchase_date || '-'}</td>
-                    <td className="py-2 px-4 text-right">${row.precio_compra.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                    <td className="py-2 px-4 text-right">${startPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                     <td className="py-2 px-4 text-right">
                       {currentPrice !== undefined ? `$${currentPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : <span className="text-zinc-500">N/A</span>}
                     </td>

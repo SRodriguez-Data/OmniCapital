@@ -59,9 +59,16 @@ export const PortfolioProvider = ({ children }: { children: React.ReactNode }) =
       }
 
       if (cartolaMode) {
-        // En modo cartola empezamos con un portafolio vacío hasta que el usuario suba la cartola.
-        // Solo no borramos los items si ya tienen algo.
-        setItems(prev => prev.length > 0 ? prev : []);
+        const savedCartola = localStorage.getItem('cartolaItems');
+        if (savedCartola) {
+          try {
+            setItems(JSON.parse(savedCartola));
+          } catch (e) {
+            setItems(prev => prev.length > 0 ? prev : []);
+          }
+        } else {
+          setItems(prev => prev.length > 0 ? prev : []);
+        }
         setLoading(false);
         return;
       }
@@ -90,6 +97,12 @@ export const PortfolioProvider = ({ children }: { children: React.ReactNode }) =
   useEffect(() => {
     fetchPortfolio();
   }, []);
+
+  useEffect(() => {
+    if (isCartolaMode && typeof window !== 'undefined') {
+      localStorage.setItem('cartolaItems', JSON.stringify(items));
+    }
+  }, [items, isCartolaMode]);
 
   return (
     <PortfolioContext.Provider value={{ items, loading, isDemo, isCartolaMode, setItems, refreshPortfolio: fetchPortfolio }}>

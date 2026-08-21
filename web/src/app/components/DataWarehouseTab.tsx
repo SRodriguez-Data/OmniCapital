@@ -3,7 +3,11 @@ import { UploadCloud, FileText, CheckCircle, AlertCircle, Database } from 'lucid
 import { usePortfolio } from '../context/PortfolioContext';
 import { parsePdfToCartola } from '@/lib/CartolaParser';
 
-export default function DataWarehouseTab() {
+interface DataWarehouseTabProps {
+  onPortfolioUpdate?: () => void;
+}
+
+export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTabProps) {
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [results, setResults] = useState<any[]>([]);
@@ -45,7 +49,7 @@ export default function DataWarehouseTab() {
         extractedResults.forEach((res: any) => {
           if (res.data && Array.isArray(res.data)) {
             res.data.forEach((row: any) => {
-              if (row.Tipo === 'COMPRA' || row.Tipo === 'Buy') {
+              if (row.Tipo?.toUpperCase() === 'COMPRA' || row.Tipo?.toUpperCase() === 'BUY') {
                 newItems.push({
                   id: `cartola-${Math.random().toString(36).substr(2, 9)}`,
                   ticker: row.Ticker || 'UNKNOWN',
@@ -60,7 +64,13 @@ export default function DataWarehouseTab() {
         });
         
         if (newItems.length > 0) {
-          setItems(prev => [...prev, ...newItems]);
+          setItems(prev => {
+            const updated = [...prev, ...newItems];
+            if (onPortfolioUpdate) {
+              setTimeout(() => onPortfolioUpdate(), 500);
+            }
+            return updated;
+          });
         }
       }
 

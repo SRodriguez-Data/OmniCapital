@@ -150,7 +150,7 @@ export default function Home() {
       </div>
 
       <div className="p-4 md:p-6 max-w-[1600px] mx-auto">
-        {activeTab === 'DATA_WAREHOUSE' && <DataWarehouseTab />}
+        {activeTab === 'DATA_WAREHOUSE' && <DataWarehouseTab onPortfolioUpdate={() => setActiveTab('PORTFOLIO')} />}
         {activeTab === 'PORTFOLIO' && <PortfolioTab />}
         {activeTab === 'RECOMENDACIONES' && <RecommendationsTab />}
         {activeTab === 'TOP5' && <TopOportunidadesTab />}

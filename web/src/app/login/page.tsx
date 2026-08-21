@@ -51,6 +51,11 @@ export default function LoginPage() {
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('isDemo');
+          localStorage.removeItem('isCartolaMode');
+          localStorage.removeItem('cartolaItems');
+        }
         router.push('/');
       }
     } catch (error: any) {
