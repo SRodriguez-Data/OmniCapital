@@ -13,47 +13,84 @@ import AssetSparkline from './AssetSparkline';
 const COLORS_USD = ['#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8', '#1e40af', '#1e3a8a'];
 const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064e3b'];
 
-export default function PortfolioTab() {
-  const { items, loading, isDemo, isCartolaMode, refreshPortfolio, setItems } = usePortfolio();
-  const [livePrices, setLivePrices] = useState<Record<string, number>>({});
-  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
-  
-  // Form state
-  const [ticker, setTicker] = useState('');
-  const [cantidad, setCantidad] = useState('');
-  const [precio, setPrecio] = useState('');
-  const [moneda, setMoneda] = useState<'USD'|'CLP'>('USD');
-  const [purchaseDate, setPurchaseDate] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [usdClpRate, setUsdClpRate] = useState<number>(930);
+  import type { TimePeriod } from './AssetSparkline';
 
-  useEffect(() => {
-    async function fetchLivePrices() {
-      if (items.length === 0) return;
-      const tickers = items.map(i => i.ticker).join(',');
-      try {
-        const res = await fetch(`/api/portfolio/live?symbols=${encodeURIComponent(tickers)}`);
-        if (res.ok) {
-          const data = await res.json();
-          setLivePrices(data);
+  export default function PortfolioTab() {
+    const { items, loading, isDemo, isCartolaMode, refreshPortfolio, setItems } = usePortfolio();
+    const [livePrices, setLivePrices] = useState<Record<string, number>>({});
+    const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+    
+    // Form state
+    const [ticker, setTicker] = useState('');
+    const [cantidad, setCantidad] = useState('');
+    const [precio, setPrecio] = useState('');
+    const [moneda, setMoneda] = useState<'USD'|'CLP'>('USD');
+    const [purchaseDate, setPurchaseDate] = useState('');
+    const [submitting, setSubmitting] = useState(false);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [usdClpRate, setUsdClpRate] = useState<number>(930);
+
+    const [period, setPeriod] = useState<TimePeriod>('TOTAL');
+    const [globalHistory, setGlobalHistory] = useState<any[]>([]);
+
+    useEffect(() => {
+      async function fetchLivePrices() {
+        if (items.length === 0) return;
+        const tickers = items.map(i => i.ticker).join(',');
+        try {
+          const res = await fetch(`/api/portfolio/live?symbols=${encodeURIComponent(tickers)}`);
+          if (res.ok) {
+            const data = await res.json();
+            setLivePrices(data);
+          }
+        } catch (err) {
+          console.error("Error fetching live prices", err);
         }
-      } catch (err) {
-        console.error("Error fetching live prices", err);
       }
-    }
-    fetchLivePrices();
+      fetchLivePrices();
 
-    // Fetch real USDCLP rate
-    fetch('https://mindicador.cl/api/dolar')
-      .then(res => res.json())
-      .then(data => {
-         if (data && data.serie && data.serie.length > 0) {
-           setUsdClpRate(data.serie[0].valor);
-         }
-      })
-      .catch(() => console.log('Failed to fetch USDCLP'));
-  }, [items]);
+      // Fetch real USDCLP rate
+      fetch('https://mindicador.cl/api/dolar')
+        .then(res => res.json())
+        .then(data => {
+           if (data && data.serie && data.serie.length > 0) {
+             setUsdClpRate(data.serie[0].valor);
+           }
+        })
+        .catch(() => console.log('Failed to fetch USDCLP'));
+    }, [items]);
+
+    useEffect(() => {
+      async function fetchHistory() {
+        if (items.length === 0) return;
+        if (isDemo) {
+          // Mock history
+          const mock = [];
+          let val = 1000000;
+          let d = new Date('2023-01-01');
+          for(let i=0; i<300; i++) {
+             mock.push({ date: d.toISOString().split('T')[0], totalValue: val });
+             val += (Math.random() - 0.45) * 50000;
+             d.setDate(d.getDate() + 1);
+          }
+          setGlobalHistory(mock);
+          return;
+        }
+        try {
+          const res = await fetch('/api/portfolio/history', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items, usdClpRate })
+          });
+          if (res.ok) {
+             setGlobalHistory(await res.json());
+          }
+        } catch (e) {
+           console.error("Error fetching global history", e);
+        }
+      }
+      fetchHistory();
+    }, [items, usdClpRate, isDemo]);
 
   // Calculamos KPIs
   let totalInvestedUSD = 0;
@@ -104,6 +141,25 @@ export default function PortfolioTab() {
   const pnlColorUSD = totalPnL_USD >= 0 ? 'text-[#34d399]' : 'text-[#f87171]';
   const pnlColorCLP = totalPnL_CLP >= 0 ? 'text-[#34d399]' : 'text-[#f87171]';
   const pnlColorCombined = totalPnL_CombinedCLP >= 0 ? 'text-[#34d399]' : 'text-[#f87171]';
+
+  let filteredGlobalHistory = globalHistory;
+  if (period !== 'TOTAL' && globalHistory.length > 0) {
+    const lastDate = new Date(globalHistory[globalHistory.length - 1].date);
+    let cutoff = new Date(lastDate);
+    if (period === '1S') cutoff.setDate(cutoff.getDate() - 7);
+    else if (period === '1M') cutoff.setMonth(cutoff.getMonth() - 1);
+    else if (period === '3M') cutoff.setMonth(cutoff.getMonth() - 3);
+    else if (period === '6M') cutoff.setMonth(cutoff.getMonth() - 6);
+    else if (period === 'YTD') cutoff = new Date(lastDate.getFullYear(), 0, 1);
+    else if (period === '1A') cutoff.setFullYear(cutoff.getFullYear() - 1);
+    
+    filteredGlobalHistory = globalHistory.filter(d => new Date(d.date) >= cutoff);
+    if (filteredGlobalHistory.length < 2) filteredGlobalHistory = globalHistory.slice(-2);
+  }
+
+  const chartHistoryData = globalHistory.length > 0 
+    ? filteredGlobalHistory 
+    : [{ date: 'Compra Inicial', totalValue: totalInvestedCombinedCLP }, { date: 'Actual', totalValue: totalCurrentCombinedCLP }];
 
   const handleSelectTicker = (selectedTicker: string) => {
     setTicker(selectedTicker);
@@ -270,8 +326,19 @@ export default function PortfolioTab() {
       {items.length > 0 && (
         <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-sm dark:shadow-none p-6 h-96 flex flex-col">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-zinc-200 dark:border-[#27272a] pb-4 mb-6 gap-4">
-            <div>
+            <div className="flex flex-col gap-2">
               <h2 className="text-xs font-sans font-medium font-bold text-zinc-900 dark:text-[#e4e4e7] uppercase">Evolución P&L Global (Real)</h2>
+              <div className="flex bg-zinc-100 dark:bg-[#09090b] rounded-lg p-1 w-fit border border-zinc-200 dark:border-[#27272a]">
+                {(['1S', '1M', '3M', '6M', 'YTD', '1A', 'TOTAL'] as TimePeriod[]).map(p => (
+                  <button
+                    key={p}
+                    onClick={() => setPeriod(p)}
+                    className={`px-3 py-1 text-xs font-mono rounded-md transition-colors ${period === p ? 'bg-white dark:bg-[#27272a] text-zinc-900 dark:text-[#f4f4f5] shadow-sm border border-zinc-200 dark:border-[#3f3f46]' : 'text-zinc-500 dark:text-[#a1a1aa] hover:text-zinc-700 dark:hover:text-[#e4e4e7]'}`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="text-left sm:text-right">
               <p className="text-[10px] text-zinc-500 dark:text-[#71717a] font-mono uppercase">P&L Actual Consolidado (CLP)</p>
@@ -287,7 +354,7 @@ export default function PortfolioTab() {
           </div>
           <div className="flex-1">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={[{ date: 'Compra Inicial', totalValue: totalInvestedCombinedCLP }, { date: 'Actual', totalValue: totalCurrentCombinedCLP }]} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
+              <AreaChart data={chartHistoryData} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#34d399" stopOpacity={0.3}/>
@@ -465,7 +532,7 @@ export default function PortfolioTab() {
                   {expandedRows[row.id] && (
                     <tr className="bg-zinc-100 dark:bg-[#111113]">
                       <td colSpan={11} className="p-4 border-t border-zinc-200 dark:border-[#27272a]">
-                        <AssetSparkline ticker={row.ticker} purchaseDate={row.purchase_date} />
+                        <AssetSparkline ticker={row.ticker} purchaseDate={row.purchase_date} period={period} />
                       </td>
                     </tr>
                   )}

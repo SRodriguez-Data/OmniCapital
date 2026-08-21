@@ -1,118 +1,78 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-
-export async function GET(request: Request) {
+export async function POST(request: Request) {
   try {
-    const authHeader = request.headers.get('Authorization');
-    const supabase = createClient(supabaseUrl || '', supabaseKey || '', {
-      global: { headers: { Authorization: authHeader || '' } }
-    });
-    const { searchParams } = new URL(request.url);
-    const range = searchParams.get('range') || '45D';
-
-    // 1. Obtener portafolio actual
-    const { data: portfolio, error: portError } = await supabase
-      .from('mi_portafolio')
-      .select('ticker, cantidad, precio_compra, moneda');
-
-    if (portError) throw portError;
-    if (!portfolio || portfolio.length === 0) {
+    const { items, usdClpRate } = await request.json();
+    
+    if (!items || items.length === 0) {
       return NextResponse.json([]);
     }
 
-    const tickers = portfolio.map(p => p.ticker);
-    const portfolioDict: Record<string, { cantidad: number, precio_compra: number, isCLP: boolean }> = {};
-    const USD_CLP = 940; // Fixed exchange rate proxy
+    const tickers = Array.from(new Set(items.map((i: any) => String(i.ticker)))) as string[];
     
-    portfolio.forEach(p => {
-      const isCLP = p.moneda === 'CLP' || p.ticker.endsWith('.SN');
-      portfolioDict[p.ticker] = { 
-        cantidad: p.cantidad, 
-        precio_compra: isCLP ? p.precio_compra / USD_CLP : p.precio_compra,
-        isCLP
-      };
-    });
-
-    // 2. Determinar la fecha límite según el rango
-    const dateLimit = new Date();
-    if (range === '1W') dateLimit.setDate(dateLimit.getDate() - 7);
-    else if (range === '1M') dateLimit.setMonth(dateLimit.getMonth() - 1);
-    else if (range === '3M') dateLimit.setMonth(dateLimit.getMonth() - 3);
-    else if (range === '6M') dateLimit.setMonth(dateLimit.getMonth() - 6);
-    else if (range === 'YTD') {
-      dateLimit.setMonth(0);
-      dateLimit.setDate(1);
-    }
-    else if (range === '1Y') dateLimit.setFullYear(dateLimit.getFullYear() - 1);
-    else if (range === 'ALL') dateLimit.setFullYear(dateLimit.getFullYear() - 10);
-    else dateLimit.setDate(dateLimit.getDate() - 45); // Default 45D
-
-    const dateStr = dateLimit.toISOString().split('T')[0];
-
-    const { data: history, error: histError } = await supabase
+    const { data: historyData, error } = await supabase
       .from('precios_historicos')
       .select('ticker, date, close')
       .in('ticker', tickers)
-      .gte('date', dateStr)
       .order('date', { ascending: true });
 
-    if (histError) throw histError;
+    if (error) {
+      console.error("Error fetching global history:", error);
+      return NextResponse.json([]);
+    }
 
-    // 3. Agrupar por fecha usando forward-fill para tickers sin operar un día (ej. feriados locales)
-    const datesSet = new Set<string>();
-    history.forEach(row => {
+    const pricesByDate: Record<string, Record<string, number>> = {};
+    const allDates = new Set<string>();
+
+    for (const row of historyData || []) {
       const d = row.date.split('T')[0];
-      datesSet.add(d);
-    });
+      allDates.add(d);
+      if (!pricesByDate[d]) pricesByDate[d] = {};
+      pricesByDate[d][row.ticker] = row.close;
+    }
 
-    const sortedDates = Array.from(datesSet).sort();
-    
-    const pricesByDateAndTicker: Record<string, Record<string, number>> = {};
-    history.forEach(row => {
-      const d = row.date.split('T')[0];
-      if (!pricesByDateAndTicker[d]) pricesByDateAndTicker[d] = {};
-      pricesByDateAndTicker[d][row.ticker] = row.close;
-    });
+    const sortedDates = Array.from(allDates).sort();
+    if (sortedDates.length === 0) {
+      return NextResponse.json([]);
+    }
 
-    const result = [];
-    const currentPrices: Record<string, number> = {};
-
-    for (const d of sortedDates) {
-      let dailyValue = 0;
-      let dailyCost = 0;
-      let validTickersCount = 0;
-
-      for (const t of tickers) {
-        if (pricesByDateAndTicker[d] && pricesByDateAndTicker[d][t] !== undefined) {
-          currentPrices[t] = pricesByDateAndTicker[d][t];
-        }
-
-        if (currentPrices[t] !== undefined) {
-          const priceUSD = portfolioDict[t].isCLP ? currentPrices[t] / USD_CLP : currentPrices[t];
-          dailyValue += priceUSD * portfolioDict[t].cantidad;
-          dailyCost += portfolioDict[t].precio_compra * portfolioDict[t].cantidad;
-          validTickersCount++;
+    const lastKnownPrice: Record<string, number> = {};
+    for (const date of sortedDates) {
+      for (const ticker of tickers) {
+        if (pricesByDate[date][ticker] !== undefined) {
+          lastKnownPrice[ticker] = pricesByDate[date][ticker];
+        } else if (lastKnownPrice[ticker] !== undefined) {
+          pricesByDate[date][ticker] = lastKnownPrice[ticker];
         }
       }
+    }
 
-      // Evita caídas al inicio si faltan muchos precios
-      if (validTickersCount > tickers.length * 0.5) {
-        result.push({
-          date: d,
-          totalValue: dailyValue,
-          totalCost: dailyCost,
-          profitLoss: dailyValue - dailyCost
+    const portfolioHistory = [];
+    for (const date of sortedDates) {
+      let totalValueCLP = 0;
+      
+      for (const item of items) {
+        if (item.purchase_date && item.purchase_date > date) {
+          continue;
+        }
+
+        const price = pricesByDate[date][item.ticker] || item.precio_compra;
+        const rate = item.moneda === 'CLP' ? 1 : (usdClpRate || 930);
+        totalValueCLP += item.cantidad * price * rate;
+      }
+
+      if (totalValueCLP > 0) {
+        portfolioHistory.push({
+          date,
+          totalValue: totalValueCLP
         });
       }
     }
 
-    return NextResponse.json(result);
-
-  } catch (error: any) {
-    console.error('Error fetching portfolio history:', error);
-    return NextResponse.json({ error: error.message || 'Error fetching history' }, { status: 500 });
+    return NextResponse.json(portfolioHistory);
+  } catch (error) {
+    console.error('Error in global history:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
