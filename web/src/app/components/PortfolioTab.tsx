@@ -155,10 +155,38 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
     
     filteredGlobalHistory = globalHistory.filter(d => new Date(d.date) >= cutoff);
     if (filteredGlobalHistory.length < 2) filteredGlobalHistory = globalHistory.slice(-2);
+  } else if (globalHistory.length > 0) {
+    // Si es TOTAL, filtramos para mostrar solo desde la compra más antigua
+    const minPurchaseDate = items.reduce((min, item) => {
+      if (!item.purchase_date) return min;
+      return item.purchase_date < min ? item.purchase_date : min;
+    }, new Date().toISOString().split('T')[0]);
+    filteredGlobalHistory = globalHistory.filter(d => d.date >= minPurchaseDate);
+    if (filteredGlobalHistory.length === 0) filteredGlobalHistory = globalHistory.slice(-2);
   }
 
+  // Recalcular el totalValue de cada día basado en el modo (Backtest vs Realidad)
   const chartHistoryData = globalHistory.length > 0 
-    ? filteredGlobalHistory 
+    ? filteredGlobalHistory.map(day => {
+        let dailyTotalCLP = 0;
+        let dailyTotalUSD = 0;
+        const currentUsdRate = 930; // Podrías guardar el historico de USDCLP, pero usaremos flat rate por simplicidad o sacarlo del día si estuviera.
+        
+        items.forEach(item => {
+          // En modo TOTAL, si la fecha del día es menor a la fecha de compra, el activo vale 0 (aún no se compraba)
+          if (period === 'TOTAL' && item.purchase_date && day.date < item.purchase_date) {
+            return;
+          }
+          const price = day.prices[item.ticker] || item.precio_compra;
+          if (item.moneda === 'CLP') dailyTotalCLP += item.cantidad * price;
+          else dailyTotalUSD += item.cantidad * price;
+        });
+        
+        return {
+          ...day,
+          totalValue: dailyTotalCLP + (dailyTotalUSD * currentUsdRate)
+        };
+      })
     : [{ date: 'Compra Inicial', totalValue: totalInvestedCombinedCLP, prices: {} }, { date: 'Actual', totalValue: totalCurrentCombinedCLP, prices: {} }];
 
   let dynamicInvestedCombinedCLP = totalInvestedCombinedCLP;
@@ -166,7 +194,11 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
   let startPrices: Record<string, number> = {};
 
   if (globalHistory.length > 0) {
-    dynamicInvestedCombinedCLP = chartHistoryData[0].totalValue;
+    if (period === 'TOTAL') {
+      dynamicInvestedCombinedCLP = totalInvestedCombinedCLP;
+    } else {
+      dynamicInvestedCombinedCLP = chartHistoryData[0].totalValue;
+    }
     dynamicCurrentCombinedCLP = chartHistoryData[chartHistoryData.length - 1].totalValue;
     startPrices = chartHistoryData[0].prices || {};
   }

@@ -19,7 +19,7 @@ interface AiData {
 }
 
 export default function RecommendationsTab() {
-  const { isDemo, items } = usePortfolio();
+  const { isDemo, isCartolaMode, items } = usePortfolio();
   const [data, setData] = useState<AiData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -93,6 +93,19 @@ export default function RecommendationsTab() {
   }, []);
 
   if (loading) return <div className="text-center p-12 font-mono text-zinc-600 dark:text-zinc-400">Cargando análisis de IA...</div>;
+
+  if (isCartolaMode) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-zinc-500 dark:text-zinc-400 font-mono border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 rounded">
+        <p className="text-lg mb-2">🔒 Análisis Privado (Modo Local)</p>
+        <p className="text-sm text-center max-w-lg">
+          El Diagnóstico IA procesa múltiples variables matemáticas complejas en nuestros servidores cada noche. 
+          Al estar usando el Modo Cartola Local (sin cuenta), tu portafolio vive únicamente en tu navegador por seguridad y la IA no tiene acceso a él.
+        </p>
+        <p className="text-xs mt-6 text-zinc-400">Crea una cuenta institucional para habilitar los diagnósticos personalizados.</p>
+      </div>
+    );
+  }
 
   if (!data || data.recomendaciones.length === 0) {
     return (
