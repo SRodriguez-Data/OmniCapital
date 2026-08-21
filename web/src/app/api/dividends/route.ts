@@ -9,19 +9,27 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUP
 
 const supabase = createClient(supabaseUrl || '', supabaseKey || '');
 
-export async function GET(req: Request) {
+export async function POST(req: Request) {
   try {
-    const authHeader = req.headers.get('authorization');
-    const supabaseClient = createClient(supabaseUrl || '', supabaseKey || '', {
-      global: { headers: { Authorization: authHeader || '' } }
-    });
+    let portfolio = [];
+    const bodyText = await req.text();
+    if (bodyText) {
+      const body = JSON.parse(bodyText);
+      if (body.items) portfolio = body.items;
+    }
 
-    const { data: portfolio, error } = await supabaseClient
-      .from('mi_portafolio')
-      .select('*');
+    if (portfolio.length === 0) {
+      const authHeader = req.headers.get('authorization');
+      const supabaseClient = createClient(supabaseUrl || '', supabaseKey || '', {
+        global: { headers: { Authorization: authHeader || '' } }
+      });
 
-    if (error) {
-      throw error;
+      const { data, error } = await supabaseClient
+        .from('mi_portafolio')
+        .select('*');
+
+      if (error) throw error;
+      portfolio = data || [];
     }
 
     if (!portfolio || portfolio.length === 0) {

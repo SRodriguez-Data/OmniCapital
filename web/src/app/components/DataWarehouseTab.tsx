@@ -66,10 +66,30 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
         if (newItems.length > 0) {
           setItems(prev => {
             const updated = [...prev, ...newItems];
+            
+            // Agrupar por ticker (promedio ponderado)
+            const map = new Map<string, any>();
+            for (const item of updated) {
+              if (map.has(item.ticker)) {
+                const exist = map.get(item.ticker);
+                const totalCant = exist.cantidad + item.cantidad;
+                const totalCost = (exist.cantidad * exist.precio_compra) + (item.cantidad * item.precio_compra);
+                exist.precio_compra = totalCant > 0 ? totalCost / totalCant : 0;
+                exist.cantidad = totalCant;
+                if (item.purchase_date && (!exist.purchase_date || item.purchase_date < exist.purchase_date)) {
+                  exist.purchase_date = item.purchase_date;
+                }
+              } else {
+                map.set(item.ticker, { ...item });
+              }
+            }
+            
+            const finalItems = Array.from(map.values());
+
             if (onPortfolioUpdate) {
               setTimeout(() => onPortfolioUpdate(), 500);
             }
-            return updated;
+            return finalItems;
           });
         }
       }

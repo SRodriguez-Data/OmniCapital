@@ -40,7 +40,12 @@ export default function DividendsTab() {
 
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch('/api/dividends', {
-        headers: { 'Authorization': `Bearer ${session?.access_token}` }
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${session?.access_token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ items: contextItems })
       });
       if (res.ok) {
         const data = await res.json();
@@ -55,7 +60,7 @@ export default function DividendsTab() {
 
   useEffect(() => {
     fetchDividends();
-  }, []);
+  }, [contextItems]);
 
   if (loading) return <div className="text-center p-12 font-mono text-zinc-600 dark:text-[#a1a1aa]">Calculando proyecciones de dividendos...</div>;
 
