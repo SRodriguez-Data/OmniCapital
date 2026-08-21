@@ -14,7 +14,7 @@ const COLORS_USD = ['#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8', '#1e40af', '#1e3
 const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064e3b'];
 
 export default function PortfolioTab() {
-  const { items, loading, isDemo, refreshPortfolio } = usePortfolio();
+  const { items, loading, isDemo, isCartolaMode, refreshPortfolio, setItems } = usePortfolio();
   const [livePrices, setLivePrices] = useState<Record<string, number>>({});
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   
@@ -58,44 +58,19 @@ export default function PortfolioTab() {
   // Calculamos KPIs
   let totalInvestedUSD = 0;
   let totalCurrentUSD = 0;
-
   let totalInvestedCLP = 0;
   let totalCurrentCLP = 0;
 
-  let totalInvested_CombinedCLP = 0;
-  let totalCurrent_CombinedCLP = 0;
-
   items.forEach(item => {
-    const isCLP = item.moneda === 'CLP';
-    const invested = item.cantidad * item.precio_compra;
-    const currentPrice = livePrices[item.ticker];
-    
-    if (isCLP) {
-      totalInvestedCLP += invested;
+    const cp = livePrices[item.ticker];
+    if (item.moneda === 'USD') {
+      totalInvestedUSD += item.cantidad * item.precio_compra;
+      if (cp !== undefined) totalCurrentUSD += item.cantidad * cp;
+      else totalCurrentUSD += item.cantidad * item.precio_compra;
     } else {
-      totalInvestedUSD += invested;
-    }
-
-    const rate = isCLP ? 1 : usdClpRate;
-    totalInvested_CombinedCLP += (invested * rate);
-
-    if (currentPrice !== undefined) {
-      const currentVal = item.cantidad * currentPrice;
-      if (isCLP) {
-        totalCurrentCLP += currentVal;
-      } else {
-        totalCurrentUSD += currentVal;
-      }
-      totalCurrent_CombinedCLP += (currentVal * rate);
-    } else {
-      // If live price is missing, we add the invested amount to the current value 
-      // so the global P&L is 0 for this missing asset, rather than artificially tanking the portfolio value.
-      if (isCLP) {
-        totalCurrentCLP += invested;
-      } else {
-        totalCurrentUSD += invested;
-      }
-      totalCurrent_CombinedCLP += (invested * rate);
+      totalInvestedCLP += item.cantidad * item.precio_compra;
+      if (cp !== undefined) totalCurrentCLP += item.cantidad * cp;
+      else totalCurrentCLP += item.cantidad * item.precio_compra;
     }
   });
 
@@ -105,8 +80,26 @@ export default function PortfolioTab() {
   const totalPnL_CLP = totalCurrentCLP - totalInvestedCLP;
   const totalPnL_Percent_CLP = totalInvestedCLP > 0 ? (totalPnL_CLP / totalInvestedCLP) * 100 : 0;
 
-  const totalPnL_CombinedCLP = totalCurrent_CombinedCLP - totalInvested_CombinedCLP;
-  const totalPnL_Percent_CombinedCLP = totalInvested_CombinedCLP > 0 ? (totalPnL_CombinedCLP / totalInvested_CombinedCLP) * 100 : 0;
+  const totalInvestedCombinedCLP = totalInvestedCLP + (totalInvestedUSD * usdClpRate);
+  const totalCurrentCombinedCLP = totalCurrentCLP + (totalCurrentUSD * usdClpRate);
+  const totalPnL_CombinedCLP = totalCurrentCombinedCLP - totalInvestedCombinedCLP;
+  const totalPnL_Percent_CombinedCLP = totalInvestedCombinedCLP > 0 ? (totalPnL_CombinedCLP / totalInvestedCombinedCLP) * 100 : 0;
+
+  const chartDataUSD = items.filter(i => i.moneda === 'USD').map((i, index) => ({
+    name: i.ticker,
+    value: livePrices[i.ticker] ? i.cantidad * livePrices[i.ticker] : i.cantidad * i.precio_compra,
+    fill: COLORS_USD[index % COLORS_USD.length]
+  }));
+
+  const chartDataCLP = items.filter(i => i.moneda === 'CLP').map((i, index) => ({
+    name: i.ticker,
+    value: livePrices[i.ticker] ? i.cantidad * livePrices[i.ticker] : i.cantidad * i.precio_compra,
+    fill: COLORS_CLP[index % COLORS_CLP.length]
+  }));
+
+  const toggleRow = (id: string) => {
+    setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
+  };
 
   const pnlColorUSD = totalPnL_USD >= 0 ? 'text-[#34d399]' : 'text-[#f87171]';
   const pnlColorCLP = totalPnL_CLP >= 0 ? 'text-[#34d399]' : 'text-[#f87171]';
@@ -124,8 +117,20 @@ export default function PortfolioTab() {
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isDemo) {
-      alert("⛔ Operación de escritura bloqueada. El modo Jurado (Demo) es de solo lectura y tus datos están aislados por seguridad.");
+    if (isDemo || isCartolaMode) {
+      if (isDemo) {
+        alert("⛔ Operación de escritura bloqueada. El modo Jurado (Demo) es de solo lectura y tus datos están aislados por seguridad.");
+      } else {
+        const newItem = {
+          id: `cartola-manual-${Math.random().toString(36).substr(2, 9)}`,
+          ticker: ticker.toUpperCase(),
+          cantidad: Number(cantidad),
+          precio_compra: Number(precio),
+          moneda,
+          purchase_date: purchaseDate || new Date().toISOString().split('T')[0]
+        };
+        setItems(prev => [...prev, newItem]);
+      }
       setTicker(''); setCantidad(''); setPrecio(''); setPurchaseDate('');
       return;
     }
@@ -159,8 +164,12 @@ export default function PortfolioTab() {
   };
 
   const handleDelete = async (id: string) => {
-    if (isDemo) {
-      alert("⛔ Operación de eliminación bloqueada. El modo Jurado (Demo) es de solo lectura.");
+    if (isDemo || isCartolaMode) {
+      if (isDemo) {
+        alert("⛔ Operación de eliminación bloqueada. El modo Jurado (Demo) es de solo lectura.");
+      } else {
+        setItems(prev => prev.filter(item => item.id !== id));
+      }
       return;
     }
 
@@ -178,9 +187,6 @@ export default function PortfolioTab() {
     }
   };
 
-  const toggleRow = (id: string) => {
-    setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
-  };
 
   const dataUSD = items.filter(i => i.moneda === 'USD').map(i => ({ name: i.ticker, value: i.cantidad * i.precio_compra }));
   const dataCLP = items.filter(i => i.moneda === 'CLP').map(i => ({ name: i.ticker, value: i.cantidad * i.precio_compra }));
@@ -281,7 +287,7 @@ export default function PortfolioTab() {
           </div>
           <div className="flex-1">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={[{ date: 'Compra Inicial', totalValue: totalInvested_CombinedCLP }, { date: 'Actual', totalValue: totalCurrent_CombinedCLP }]} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
+              <AreaChart data={[{ date: 'Compra Inicial', totalValue: totalInvestedCombinedCLP }, { date: 'Actual', totalValue: totalCurrentCombinedCLP }]} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#34d399" stopOpacity={0.3}/>

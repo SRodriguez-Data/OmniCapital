@@ -79,7 +79,17 @@ export async function parsePdfToCartola(file: File) {
         const tipoMatch = m[2] ? m[2].toUpperCase() : 'COMPRA';
         let ticker = m[3].toUpperCase();
         const moneda = m[4].toUpperCase(); // CLP o USD
-        
+        let precio = parseNumberFintual(m[6]);
+        let cantidad = parseNumberFintual(m[5]);
+
+        // Fusión CFMDIVO -> CFMITNIPSA (Ratio: 0.384122446)
+        if (ticker === 'CFMDIVO') {
+          ticker = 'CFMITNIPSA';
+          const ratio = 0.384122446;
+          cantidad = cantidad * ratio;
+          precio = precio / ratio;
+        }
+
         // Aplicar alias si el usuario usó otro nombre
         if (TICKER_ALIASES[ticker]) {
           ticker = TICKER_ALIASES[ticker];
@@ -90,7 +100,7 @@ export async function parsePdfToCartola(file: File) {
           ticker += '.SN';
         }
         
-        data.push({ Fecha: parseDate(m[1]), Archivo: file.name, Ticker: ticker, Tipo: tipoMatch, Precio: parseNumberFintual(m[6]), Cantidad: parseNumberFintual(m[5]), Moneda: moneda });
+        data.push({ Fecha: parseDate(m[1]), Archivo: file.name, Ticker: ticker, Tipo: tipoMatch, Precio: precio, Cantidad: cantidad, Moneda: moneda });
       }
     }
 
