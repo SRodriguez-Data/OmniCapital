@@ -11,7 +11,7 @@ const supabase = createClient(supabaseUrl || '', supabaseKey || '');
 
 export async function POST(req: Request) {
   try {
-    let portfolio = [];
+    let portfolio: any[] = [];
     const bodyText = await req.text();
     if (bodyText) {
       const body = JSON.parse(bodyText);
