@@ -1,9 +1,17 @@
-const PATRON_US_TRADE = /([A-Z]+)\s+.*?\s+(Buy|Sell)(?:\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M)?\s+([\d\.,]+)\s+([\d\.,]+)\s+(\d{1,2}\/\d{1,2}\/\d{4})/gi;
+const PATRON_US_TRADE = /([A-Z]+)\s+.*?\s+(Buy|Sell|Compra|Venta)(?:\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M)?\s+([\d\.,]+)\s+([\d\.,]+)\s+(\d{1,2}\/\d{1,2}\/\d{4})/gi;
 const PATRON_US_DIVIDEND = /([A-Z]+)\s+.*?\s+(?:Cash Dividend|CDIV)\s+(\d{1,2}\/\d{1,2}\/\d{4})\s+([\d\.,]+)/gi;
-// Capturamos el tipo (opcional), luego ACCIONES/FONDOS (con palabras extra opcionales), luego el Ticker, luego CLP/USD, luego Cantidad y Precio.
-const PATRON_CL_TRADE = /(\d{2}-\d{2}-\d{4})\s+\d{2}-\d{2}-\d{4}\s+(?:(COMPRA|VENTA)\s+)?(?:ACCIONES|FONDOS)[A-Z\s]*(?:CB\s+)?([A-Z0-9\-]+)\s+(CLP|USD)\s+([\d\.,]+)\s*\$\s*([\d\.,]+)/gi;
+// Fix: Use .*? to consume any extra words (like CB, EXTRANJERAS, etc) until it finds a valid Ticker right before CLP/USD
+const PATRON_CL_TRADE = /(\d{2}-\d{2}-\d{4})\s+\d{2}-\d{2}-\d{4}\s+(?:(COMPRA|VENTA)\s+)?(?:ACCIONES|FONDOS).*?\s+([A-Z0-9\-]+)\s+(CLP|USD)\s+([\d\.,]+)\s*\$\s*([\d\.,]+)/gi;
 const PATRON_FINTUAL_COMPRA = /(\d{4}-\d{2}-\d{2})\s+(.*?)\s+([A-Z0-9\-]+)\s+(?:ETF|Acciones|Fondo).*?US\s+\$\s*([\d,]+)\s+([\d,]+)/gi;
 const PATRON_FINTUAL_DIVIDEND = /(\d{4}-\d{2}-\d{2})\s+(.*?)\s+([A-Z0-9\-]+)\s+(?:ETF|Acciones|Fondo).*?US\s+\$\s*([\d,]+)\s+US\s+\$\s*([\d,]+)\s+US\s+\$\s*([\d,]+)/gi;
+
+const TICKER_ALIASES: Record<string, string> = {
+  'BCHILE': 'CHILE',
+  'SANTANDER': 'BSANTANDER',
+  'SQMB': 'SQM-B',
+  'ANDINAB': 'ANDINA-B',
+  'AGUASA': 'AGUAS-A'
+};
 
 function parseNumberFintual(val: string) {
   if (!val) return 0;
@@ -72,6 +80,11 @@ export async function parsePdfToCartola(file: File) {
         let ticker = m[3].toUpperCase();
         const moneda = m[4].toUpperCase(); // CLP o USD
         
+        // Aplicar alias si el usuario usó otro nombre
+        if (TICKER_ALIASES[ticker]) {
+          ticker = TICKER_ALIASES[ticker];
+        }
+
         // Agregar .SN solo si es CLP y no lo tiene ya.
         if (moneda === 'CLP' && !ticker.endsWith('.SN')) {
           ticker += '.SN';
