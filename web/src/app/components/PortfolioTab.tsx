@@ -69,7 +69,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
           let val = 1000000;
           let d = new Date('2023-01-01');
           for(let i=0; i<300; i++) {
-             mock.push({ date: d.toISOString().split('T')[0], totalValue: val });
+             mock.push({ date: d.toISOString().split('T')[0], totalValue: val, prices: {} });
              val += (Math.random() - 0.45) * 50000;
              d.setDate(d.getDate() + 1);
           }
@@ -177,7 +177,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
           if (period === 'TOTAL' && item.purchase_date && day.date < item.purchase_date) {
             return;
           }
-          const price = day.prices[item.ticker] || item.precio_compra;
+          const price = (day.prices && day.prices[item.ticker]) || item.precio_compra;
           if (item.moneda === 'CLP') dailyTotalCLP += item.cantidad * price;
           else dailyTotalUSD += item.cantidad * price;
         });
