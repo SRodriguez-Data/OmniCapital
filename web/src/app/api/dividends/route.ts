@@ -55,6 +55,23 @@ export async function POST(req: Request) {
             divYield = 0.10;
           }
 
+          let historicalReceived = 0;
+          if (item.purchase_date) {
+            try {
+              const hist = await yahooFinance.historical(item.ticker, {
+                period1: item.purchase_date,
+                events: 'dividends'
+              });
+              if (hist && hist.length > 0) {
+                historicalReceived = hist.reduce((sum: number, div: any) => {
+                  return sum + ((div.dividends || 0) * item.cantidad);
+                }, 0);
+              }
+            } catch (e) {
+              console.log(`No historical dividends found for ${item.ticker} since ${item.purchase_date}`);
+            }
+          }
+
           const income = divRate * item.cantidad;
           const personalYield = item.precio_compra > 0 ? (divRate / item.precio_compra) : divYield;
 
@@ -67,7 +84,8 @@ export async function POST(req: Request) {
             dividendYield: divYield,
             personalYield: personalYield, // Yield on Cost
             dividendRate: divRate,
-            projectedAnnualIncome: income
+            projectedAnnualIncome: income,
+            historicalReceived: historicalReceived
           };
         } catch (e) {
           console.error(`Error fetching dividend for ${item.ticker}:`, e);

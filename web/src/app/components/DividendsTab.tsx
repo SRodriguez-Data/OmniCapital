@@ -15,6 +15,7 @@ interface DividendItem {
   personalYield?: number;
   dividendRate: number;
   projectedAnnualIncome: number;
+  historicalReceived?: number;
 }
 
 const COLORS = ['#60a5fa', '#34d399', '#f472b6', '#fbbf24', '#a78bfa', '#38bdf8', '#4ade80'];
@@ -78,6 +79,8 @@ export default function DividendsTab() {
   // Calculate totals per currency
   const totalIncomeUSD = items.filter(i => i.moneda === 'USD').reduce((sum, i) => sum + i.projectedAnnualIncome, 0);
   const totalIncomeCLP = items.filter(i => i.moneda === 'CLP').reduce((sum, i) => sum + i.projectedAnnualIncome, 0);
+  const totalHistoricalUSD = items.filter(i => i.moneda === 'USD').reduce((sum, i) => sum + (i.historicalReceived || 0), 0);
+  const totalHistoricalCLP = items.filter(i => i.moneda === 'CLP').reduce((sum, i) => sum + (i.historicalReceived || 0), 0);
 
   // Calculate weighted average yield (rough estimate based on income proportion)
   const weightedYield = items.reduce((sum, i) => sum + (i.personalYield || i.dividendYield), 0) / items.length;
@@ -86,28 +89,21 @@ export default function DividendsTab() {
     <div className="max-w-5xl mx-auto space-y-6">
       
       {/* SUMMARY CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-6 rounded-sm relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-4 opacity-10">
-            <DollarSign className="w-16 h-16 text-[#34d399]" />
-          </div>
-          <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase tracking-widest mb-1">Ingreso Anual Estimado (USD)</p>
-          <h2 className="text-3xl font-bold font-mono text-[#34d399]">${totalIncomeUSD.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</h2>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-5 rounded-sm relative overflow-hidden">
+          <p className="text-[10px] font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase tracking-widest mb-1">Ingreso Anual Proyectado</p>
+          <h2 className="text-xl font-bold font-mono text-[#34d399]">${totalIncomeUSD.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} USD</h2>
+          <h2 className="text-xl font-bold font-mono text-[#60a5fa]">${totalIncomeCLP.toLocaleString(undefined, {maximumFractionDigits: 0})} CLP</h2>
         </div>
 
-        <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-6 rounded-sm relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-4 opacity-10">
-            <DollarSign className="w-16 h-16 text-[#60a5fa]" />
-          </div>
-          <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase tracking-widest mb-1">Ingreso Anual Estimado (CLP)</p>
-          <h2 className="text-3xl font-bold font-mono text-[#60a5fa]">${totalIncomeCLP.toLocaleString(undefined, {maximumFractionDigits: 0})}</h2>
+        <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-5 rounded-sm relative overflow-hidden">
+          <p className="text-[10px] font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase tracking-widest mb-1">Total Cobrado (Histórico)</p>
+          <h2 className="text-xl font-bold font-mono text-[#34d399]">${totalHistoricalUSD.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} USD</h2>
+          <h2 className="text-xl font-bold font-mono text-[#60a5fa]">${totalHistoricalCLP.toLocaleString(undefined, {maximumFractionDigits: 0})} CLP</h2>
         </div>
 
-        <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-6 rounded-sm relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-4 opacity-10">
-            <Percent className="w-16 h-16 text-[#f472b6]" />
-          </div>
-          <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase tracking-widest mb-1">Yield on Cost (Personal)</p>
+        <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-5 rounded-sm relative overflow-hidden md:col-span-2">
+          <p className="text-[10px] font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase tracking-widest mb-1">Yield on Cost Promedio</p>
           <h2 className="text-3xl font-bold font-mono text-[#f472b6]">{(weightedYield * 100).toFixed(2)}%</h2>
         </div>
       </div>
@@ -154,9 +150,10 @@ export default function DividendsTab() {
             <tr>
               <th className="py-3 px-4 font-semibold">Ticker</th>
               <th className="py-3 px-4 font-semibold text-right">Cantidad</th>
-              <th className="py-3 px-4 font-semibold text-right">Dividendo Anual (Acción)</th>
+              <th className="py-3 px-4 font-semibold text-right">Div. Anual (Acción)</th>
               <th className="py-3 px-4 font-semibold text-right">Yield Personal</th>
-              <th className="py-3 px-4 font-semibold text-right">Ingreso Anual Proyectado</th>
+              <th className="py-3 px-4 font-semibold text-right">Cobrado (Histórico)</th>
+              <th className="py-3 px-4 font-semibold text-right">Proyectado (Anual)</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-200 dark:divide-[#27272a]">
@@ -169,6 +166,9 @@ export default function DividendsTab() {
                 </td>
                 <td className="py-3 px-4 text-right font-bold text-[#f472b6]">
                   {((row.personalYield || row.dividendYield) * 100).toFixed(2)}%
+                </td>
+                <td className="py-3 px-4 text-right font-bold text-[#fbbf24]">
+                  ${(row.historicalReceived || 0).toLocaleString(undefined, {minimumFractionDigits: row.moneda === 'USD' ? 2 : 0, maximumFractionDigits: row.moneda === 'USD' ? 2 : 0})} {row.moneda}
                 </td>
                 <td className="py-3 px-4 text-right font-bold text-[#34d399]">
                   ${row.projectedAnnualIncome.toLocaleString(undefined, {minimumFractionDigits: row.moneda === 'USD' ? 2 : 0, maximumFractionDigits: row.moneda === 'USD' ? 2 : 0})} {row.moneda}
