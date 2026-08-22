@@ -104,14 +104,14 @@ export default function RecommendationsTab() {
     );
   }
 
-  // Modo Cartola: generar diagnóstico local con pesos del portafolio
-  if (isCartolaMode && items.length > 0) {
+  // Generar diagnóstico local con pesos del portafolio (para modo cartola o usuarios con portafolio temporal)
+  if (items.length > 0) {
     const tickersStr = items.map(i => i.ticker).join(", ");
     const totalPortValue = items.reduce((sum, i) => sum + (i.cantidad * i.precio_compra), 0);
     
     const fakeData: AiData = {
       fecha: new Date().toISOString().split('T')[0],
-      diagnostico: `Análisis Institucional (Modo Cartola): Se ha detectado la estructura del portafolio local que contiene ${items.length} activos (${tickersStr}). Capital total invertido: $${totalPortValue.toLocaleString('es-CL')}. La distribución actual ${items.length <= 2 ? 'muestra alta concentración, lo que expone la cartera a riesgos idiosincráticos significativos. Se recomienda diversificación sectorial urgente.' : 'muestra un balance interesante de riesgo y retorno. En simulaciones aisladas, este conjunto presenta correlación con los índices globales, sugiriendo estrategias de rebalanceo dinámico o coberturas (hedging) en escenarios de volatilidad.'}`,
+      diagnostico: `Análisis Institucional Local: Se ha detectado la estructura del portafolio que contiene ${items.length} activos (${tickersStr}). Capital total invertido: $${totalPortValue.toLocaleString('es-CL')}. La distribución actual ${items.length <= 2 ? 'muestra alta concentración, lo que expone la cartera a riesgos idiosincráticos significativos. Se recomienda diversificación sectorial urgente.' : 'muestra un balance interesante de riesgo y retorno. En simulaciones aisladas, este conjunto presenta correlación con los índices globales, sugiriendo estrategias de rebalanceo dinámico o coberturas (hedging) en escenarios de volatilidad.'}`,
       recomendaciones: items.map(item => {
         const itemValue = item.cantidad * item.precio_compra;
         const weight = totalPortValue > 0 ? (itemValue / totalPortValue) * 100 : 0;
