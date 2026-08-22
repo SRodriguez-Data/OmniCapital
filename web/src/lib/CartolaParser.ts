@@ -71,7 +71,22 @@ export async function parsePdfToCartola(file: File) {
     } else {
       const matchesUs = Array.from(text.matchAll(PATRON_US_TRADE));
       for (const m of matchesUs) {
-        data.push({ Fecha: parseDate(m[5]), Archivo: file.name, Ticker: m[1].toUpperCase(), Tipo: m[2].toUpperCase() === 'BUY' ? 'COMPRA' : 'VENTA', Precio: parseNumberRacional(m[4]), Cantidad: parseNumberRacional(m[3]), Moneda: 'USD' });
+        let ticker = m[1].toUpperCase();
+        let cantidad = parseNumberRacional(m[3]);
+        let precio = parseNumberRacional(m[4]);
+        const fecha = parseDate(m[5]);
+
+        // Ajuste por Stock Split de HDV (5:1) ocurrido el 29 de Abril de 2026
+        if (ticker === 'HDV') {
+          const splitDate = new Date('2026-04-29');
+          const tradeDate = new Date(fecha);
+          if (tradeDate < splitDate) {
+            cantidad = cantidad * 5;
+            precio = precio / 5;
+          }
+        }
+
+        data.push({ Fecha: fecha, Archivo: file.name, Ticker: ticker, Tipo: m[2].toUpperCase() === 'BUY' ? 'COMPRA' : 'VENTA', Precio: precio, Cantidad: cantidad, Moneda: 'USD' });
       }
 
       // 1. Intentar extraer la cartera completa de Racional local (Vector Capital)
