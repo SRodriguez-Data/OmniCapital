@@ -44,11 +44,17 @@ export default function RecommendationsTab() {
       if (items.length > 0) {
         try {
           const totalPortValue = items.reduce((sum, i) => sum + (i.cantidad * i.precio_compra), 0);
+          
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 8000);
+          
           const aiCall = await fetch('/api/portfolio/analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ items, totalValue: totalPortValue })
+            body: JSON.stringify({ items, totalValue: totalPortValue }),
+            signal: controller.signal
           });
+          clearTimeout(timeoutId);
           
           if (aiCall.ok) {
             const aiResponse = await aiCall.json();
@@ -122,7 +128,7 @@ export default function RecommendationsTab() {
 
   useEffect(() => {
     fetchAI();
-  }, []);
+  }, [items]);
 
   if (loading) return <div className="text-center p-12 font-mono text-zinc-600 dark:text-zinc-400">Cargando análisis de IA...</div>;
 
@@ -134,17 +140,6 @@ export default function RecommendationsTab() {
         <p className="text-sm text-center max-w-lg">
           Agrega acciones a tu portafolio (pestaña Mi Portafolio o sube una Cartola) para ver tu diagnóstico personalizado.
         </p>
-      </div>
-    );
-  }
-
-
-
-  if (!data || data.recomendaciones.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-zinc-500 dark:text-zinc-400 font-mono border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 rounded">
-        <p>No se encontraron recomendaciones de IA para tu portafolio.</p>
-        <p className="text-[10px] mt-2">Asegúrate de tener activos en el portafolio y ejecuta el bot de Python.</p>
       </div>
     );
   }
@@ -221,5 +216,24 @@ export default function RecommendationsTab() {
     );
   }
 
-  return renderAiData(data);
+  return (
+    <div className="space-y-6 max-w-5xl mx-auto">
+      <div className="flex justify-end">
+        <button 
+          onClick={() => { setLoading(true); fetchAI(); }}
+          className="bg-[#60a5fa] hover:bg-[#3b82f6] text-white px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-colors flex items-center gap-2"
+        >
+          🔄 Re-generar Diagnóstico
+        </button>
+      </div>
+      {(!data || data.recomendaciones.length === 0) ? (
+        <div className="flex flex-col items-center justify-center py-20 text-zinc-500 dark:text-zinc-400 font-mono border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 rounded">
+          <p className="text-lg mb-2">⚠️ Diagnóstico no disponible</p>
+          <p className="text-sm text-center max-w-lg">
+            No se pudo cargar el análisis para tu portafolio en este momento.
+          </p>
+        </div>
+      ) : renderAiData(data)}
+    </div>
+  );
 }

@@ -256,8 +256,20 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
         })
       });
       if (res.ok) {
+        const dbItemResponse = await res.json();
         setTicker(''); setCantidad(''); setPrecio(''); setPurchaseDate('');
-        await refreshPortfolio();
+        
+        // Si el usuario tiene una mezcla de items locales (cartola) y DB,
+        // no llamamos a refreshPortfolio() porque borraría los locales.
+        // Simplemente añadimos el nuevo item (o recargamos si no hay locales).
+        const hasLocalItems = items.some(i => i.id.startsWith('cartola-'));
+        if (hasLocalItems) {
+          // Add manually to state to preserve local cartola items
+          const newItem = Array.isArray(dbItemResponse) ? dbItemResponse[0] : dbItemResponse;
+          if (newItem) setItems(prev => [...prev, newItem]);
+        } else {
+          await refreshPortfolio();
+        }
       }
     } catch {
       console.error("Error al añadir");
@@ -267,7 +279,8 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
   };
 
   const handleDelete = async (id: string) => {
-    if (isDemo || isCartolaMode) {
+    // Si es un item generado localmente (por cartola), lo borramos del estado y listo
+    if (id.startsWith('cartola-') || isDemo || isCartolaMode) {
       if (isDemo) {
         alert("⛔ Operación de eliminación bloqueada. El modo Jurado (Demo) es de solo lectura.");
       } else {
@@ -283,7 +296,12 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
         headers: { 'Authorization': `Bearer ${session?.access_token}` }
       });
       if (res.ok) {
-        await refreshPortfolio();
+        const hasLocalItems = items.some(i => i.id.startsWith('cartola-'));
+        if (hasLocalItems) {
+          setItems(prev => prev.filter(item => item.id !== id));
+        } else {
+          await refreshPortfolio();
+        }
       }
     } catch {
       console.error("Error al eliminar");

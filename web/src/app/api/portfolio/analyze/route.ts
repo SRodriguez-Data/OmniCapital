@@ -37,7 +37,7 @@ export async function POST(req: Request) {
 
     const portSummary = items.map((i: any) => `- ${i.ticker}: ${i.cantidad} acciones (Costo prom: $${i.precio_compra})`).join('\n');
 
-    const prompt = `Eres un sistema quant institucional analizando un portafolio de inversiones recién subido por un usuario.
+    const prompt = `Eres un sistema quant institucional de élite analizando un portafolio de inversiones recién subido por un usuario.
 El valor total estimado es de $${totalValue.toLocaleString('es-CL')} CLP.
 
 Activos en el portafolio:
@@ -45,13 +45,13 @@ ${portSummary}
 
 Tu tarea es devolver un objeto JSON estricto con el siguiente formato:
 {
-  "diagnostico": "Párrafo de 3 a 5 líneas con un diagnóstico general del portafolio. Menciona los riesgos, diversificación, sectores predominantes de los tickers que ves, y recomendaciones macro.",
+  "diagnostico": "Un diagnóstico extenso, muy detallado y profesional del portafolio. Analiza la diversificación, riesgos sistémicos e idiosincráticos, exposición macroeconómica (tasas de interés, inflación), sectores predominantes, y sugiere estrategias complejas de rebalanceo o coberturas (hedging) de manera institucional.",
   "recomendaciones": [
     {
       "ticker": "TICKER_AQUI",
       "accion": "🟢 BUY", "🟡 HOLD", o "🔴 SELL",
       "stop_loss": "Precio sugerido como stop loss (ej: $100 (-10%))",
-      "analisis": "Párrafo corto de 2 líneas justificando la recomendación para este activo particular."
+      "analisis": "Análisis profundo y extenso justificando la recomendación técnica y fundamental para este activo particular. Menciona niveles técnicos, múltiplos teóricos, o proyecciones del sector."
     }
   ]
 }
