@@ -12,6 +12,7 @@ interface DividendItem {
   cantidad: number;
   moneda: 'USD' | 'CLP';
   dividendYield: number;
+  personalYield?: number;
   dividendRate: number;
   projectedAnnualIncome: number;
 }
