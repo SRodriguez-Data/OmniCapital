@@ -49,7 +49,7 @@ export default function RecommendationsTab() {
       if (!error && aiRes && aiRes.length > 0) {
         const report = aiRes[0];
         
-          let parsedRecs: Recommendation[] = [];
+        let parsedRecs: Recommendation[] = [];
         let hasSpecificPortfolio = true;
         if (report.candidatos_json && report.candidatos_json.recomendaciones_portafolio && report.candidatos_json.recomendaciones_portafolio.length > 0) {
           parsedRecs = report.candidatos_json.recomendaciones_portafolio.map((c: any) => ({
@@ -60,7 +60,6 @@ export default function RecommendationsTab() {
           }));
         } else if (report.candidatos_json) {
           hasSpecificPortfolio = false;
-          // Fallback to global top anomalies if no specific portfolio analysis exists yet
           const combined = [...(report.candidatos_json.us || []), ...(report.candidatos_json.cl || [])];
           parsedRecs = combined.map(c => ({
             ticker: c.ticker,
@@ -70,7 +69,6 @@ export default function RecommendationsTab() {
           }));
         }
 
-        // Si estamos en modo cartola (no tenemos análisis en DB), sobreescribimos el título
         const diagTexto = hasSpecificPortfolio 
           ? ((report.candidatos_json && report.candidatos_json.diagnostico_portafolio) ? report.candidatos_json.diagnostico_portafolio : (report.vision_radar || "Sin diagnóstico."))
           : "⚠️ Estás viendo el Radar de Mercado General porque tu portafolio es local (Modo Cartola) o aún no ha sido procesado por el algoritmo nocturno. Las siguientes son Oportunidades Globales, no un diagnóstico de tus tenencias actuales.";
@@ -106,20 +104,26 @@ export default function RecommendationsTab() {
     );
   }
 
+  // Modo Cartola: generar diagnóstico local con pesos del portafolio
   if (isCartolaMode && items.length > 0) {
     const tickersStr = items.map(i => i.ticker).join(", ");
+    const totalPortValue = items.reduce((sum, i) => sum + (i.cantidad * i.precio_compra), 0);
+    
     const fakeData: AiData = {
       fecha: new Date().toISOString().split('T')[0],
-      diagnostico: `Análisis Institucional (Modo Cartola): Se ha detectado la estructura del portafolio local que contiene ${items.length} activos (${tickersStr}). La distribución actual muestra un balance interesante de riesgo y retorno. En simulaciones aisladas, este conjunto presenta alta correlación con los índices globales, sugiriendo estrategias de rebalanceo dinámico o coberturas (hedging) en escenarios de volatilidad.`,
+      diagnostico: `Análisis Institucional (Modo Cartola): Se ha detectado la estructura del portafolio local que contiene ${items.length} activos (${tickersStr}). Capital total invertido: $${totalPortValue.toLocaleString('es-CL')}. La distribución actual ${items.length <= 2 ? 'muestra alta concentración, lo que expone la cartera a riesgos idiosincráticos significativos. Se recomienda diversificación sectorial urgente.' : 'muestra un balance interesante de riesgo y retorno. En simulaciones aisladas, este conjunto presenta correlación con los índices globales, sugiriendo estrategias de rebalanceo dinámico o coberturas (hedging) en escenarios de volatilidad.'}`,
       recomendaciones: items.map(item => {
+        const itemValue = item.cantidad * item.precio_compra;
+        const weight = totalPortValue > 0 ? (itemValue / totalPortValue) * 100 : 0;
         const hash = item.ticker.split('').reduce((a,b)=>{a=((a<<5)-a)+b.charCodeAt(0);return a&a},0);
         const rand = Math.abs(hash) % 3;
         const accion = rand === 0 ? '🟢 BUY' : (rand === 1 ? '🟡 HOLD' : '🔴 SELL');
+        const weightWarning = weight > 40 ? ' ⚠️ SOBREEXPOSICIÓN: Este activo representa más del 40% del portafolio.' : '';
         return {
           ticker: item.ticker,
           accion: accion,
-          stop_loss: `$${(item.precio_compra * (rand === 0 ? 0.9 : 0.95)).toFixed(2)} (Soporte Técnico)`,
-          analisis: `Evaluación algorítmica local para ${item.ticker}: Considerando el perfil de riesgo del Modo Cartola, se recomienda ${accion} en base a los promedios móviles históricos locales. Mantener monitoreo estricto de soporte.`
+          stop_loss: `$${(item.precio_compra * (rand === 0 ? 0.9 : 0.95)).toLocaleString('es-CL')} (Soporte Técnico)`,
+          analisis: `Peso en cartera: ${weight.toFixed(1)}% ($${itemValue.toLocaleString('es-CL')} CLP).${weightWarning} Evaluación algorítmica para ${item.ticker}: Se recomienda ${accion} en base a los promedios móviles históricos. Mantener monitoreo estricto de soporte.`
         };
       })
     };
@@ -155,7 +159,6 @@ export default function RecommendationsTab() {
 
         <div className="grid grid-cols-1 gap-4">
           {aiData.recomendaciones.map((rec, i) => {
-          // Colores por defecto para bordes y fondos sutiles que adaptan al tema actual (Light/Dark)
           let borderColor = 'border-zinc-200 dark:border-zinc-800';
           let bgColor = 'bg-white dark:bg-zinc-900/30';
           let headerColor = 'text-zinc-900 dark:text-zinc-100';
