@@ -72,9 +72,8 @@ export default function Home() {
   }
 
   return (
-    <PortfolioProvider>
-      <main className="min-h-screen bg-zinc-100 dark:bg-[#09090b] text-zinc-900 dark:text-[#fafafa] font-sans transition-colors duration-300">
-        <header className="border-b border-zinc-200 dark:border-[#27272a] bg-white dark:bg-[#18181b] px-6 py-4 flex flex-col md:flex-row items-center justify-between shadow-sm dark:shadow-none transition-colors duration-300">
+    <main className="min-h-screen bg-zinc-100 dark:bg-[#09090b] text-zinc-900 dark:text-[#fafafa] font-sans transition-colors duration-300">
+      <header className="border-b border-zinc-200 dark:border-[#27272a] bg-white dark:bg-[#18181b] px-6 py-4 flex flex-col md:flex-row items-center justify-between shadow-sm dark:shadow-none transition-colors duration-300">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-[#e4e4e7] font-sans">
             QUANTUM TRADER V2
@@ -160,6 +159,5 @@ export default function Home() {
         {activeTab === 'BACKTEST' && <BacktestTab />}
       </div>
     </main>
-    </PortfolioProvider>
   );
 }

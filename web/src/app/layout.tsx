@@ -13,6 +13,8 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+import { PortfolioProvider } from "./context/PortfolioContext";
+
 export const metadata: Metadata = {
   title: "Quantum Trader",
   description: "Institutional Financial Terminal",
@@ -36,7 +38,9 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          {children}
+          <PortfolioProvider>
+            {children}
+          </PortfolioProvider>
         </ThemeProvider>
       </body>
     </html>
