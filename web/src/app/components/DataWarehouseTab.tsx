@@ -43,8 +43,8 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
 
       setResults(extractedResults);
 
-      // Si estamos en Modo Cartola, auto-poblar el portafolio con los resultados extraídos!
-      if (isCartolaMode && extractedResults.length > 0) {
+      // Auto-poblar el portafolio con los resultados extraídos (siempre, no solo en modo cartola)
+      if (extractedResults.length > 0) {
         const newItems: any[] = [];
         extractedResults.forEach((res: any) => {
           if (res.data && Array.isArray(res.data)) {

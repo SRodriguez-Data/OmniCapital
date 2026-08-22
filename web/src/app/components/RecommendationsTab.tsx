@@ -94,6 +94,18 @@ export default function RecommendationsTab() {
 
   if (loading) return <div className="text-center p-12 font-mono text-zinc-600 dark:text-zinc-400">Cargando análisis de IA...</div>;
 
+  // Si no hay items en el portafolio, no mostrar diagnóstico fantasma
+  if (items.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-zinc-500 dark:text-zinc-400 font-mono border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 rounded">
+        <p className="text-lg mb-2">📊 Portafolio Vacío</p>
+        <p className="text-sm text-center max-w-lg">
+          Agrega acciones a tu portafolio (pestaña Mi Portafolio o sube una Cartola) para ver tu diagnóstico personalizado.
+        </p>
+      </div>
+    );
+  }
+
   if (isCartolaMode && items.length > 0) {
     const tickersStr = items.map(i => i.ticker).join(", ");
     const fakeData: AiData = {
