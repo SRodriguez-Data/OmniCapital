@@ -53,9 +53,11 @@ export async function POST(request: Request) {
       let totalValueCLP = 0;
       
       for (const item of items) {
-        // Ignoramos la fecha de compra para proyectar el portafolio actual hacia atrás en el tiempo.
-        // Esto permite al usuario ver el rendimiento (backtest) de su tenencia actual.
-
+        // Solo considerar el activo si la fecha actual en el gráfico es mayor o igual a la fecha de compra.
+        // Si el activo no tiene fecha de compra, asumimos que siempre estuvo (o se incluye por defecto).
+        if (item.purchase_date && date < item.purchase_date) {
+          continue; // Aún no se compraba en esta fecha
+        }
 
         const price = pricesByDate[date][item.ticker] || item.precio_compra;
         const rate = item.moneda === 'CLP' ? 1 : (usdClpRate || 930);
