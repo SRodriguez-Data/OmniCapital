@@ -40,44 +40,73 @@ export default function RecommendationsTab() {
         return;
       }
 
+      // First try to check the DB if there is a global or specific report
       const { data: aiRes, error } = await supabase
         .from('analisis_ia')
         .select('*')
         .order('fecha', { ascending: false })
         .limit(1);
 
+      let foundDbData = false;
       if (!error && aiRes && aiRes.length > 0) {
         const report = aiRes[0];
-        
-        let parsedRecs: Recommendation[] = [];
-        let hasSpecificPortfolio = true;
+        // If it has specific recommendations for this portfolio, we use it
         if (report.candidatos_json && report.candidatos_json.recomendaciones_portafolio && report.candidatos_json.recomendaciones_portafolio.length > 0) {
-          parsedRecs = report.candidatos_json.recomendaciones_portafolio.map((c: any) => ({
-            ticker: c.ticker,
-            accion: c.accion || '🟡 HOLD',
-            stop_loss: c.stop_loss || 'Sin datos de stop loss de emergencia.',
-            analisis: c.analisis || c.razon || 'Sin análisis detallado.'
-          }));
-        } else if (report.candidatos_json) {
-          hasSpecificPortfolio = false;
-          const combined = [...(report.candidatos_json.us || []), ...(report.candidatos_json.cl || [])];
-          parsedRecs = combined.map(c => ({
-            ticker: c.ticker,
-            accion: c.signal || (c.score > 50 ? '🟢 BUY' : '🟡 HOLD'),
-            stop_loss: 'Activo Sugerido (Fuera de tu portafolio)',
-            analisis: (report.insights_tickers && report.insights_tickers[c.ticker]) || `Oportunidad técnica detectada. Score: ${c.score.toFixed(1)}`
-          }));
+          foundDbData = true;
+          setData({
+             fecha: report.fecha,
+             diagnostico: report.candidatos_json.diagnostico_portafolio || report.vision_radar || "Sin diagnóstico.",
+             recomendaciones: report.candidatos_json.recomendaciones_portafolio.map((c: any) => ({
+               ticker: c.ticker,
+               accion: c.accion || '🟡 HOLD',
+               stop_loss: c.stop_loss || 'Sin datos de stop loss de emergencia.',
+               analisis: c.analisis || c.razon || 'Sin análisis detallado.'
+             }))
+          });
         }
+      }
 
-        const diagTexto = hasSpecificPortfolio 
-          ? ((report.candidatos_json && report.candidatos_json.diagnostico_portafolio) ? report.candidatos_json.diagnostico_portafolio : (report.vision_radar || "Sin diagnóstico."))
-          : "⚠️ Estás viendo el Radar de Mercado General porque tu portafolio es local (Modo Cartola) o aún no ha sido procesado por el algoritmo nocturno. Las siguientes son Oportunidades Globales, no un diagnóstico de tus tenencias actuales.";
+      // If no specific DB data was found, and the user HAS items, generate real-time AI analysis
+      if (!foundDbData && items.length > 0) {
+        try {
+          const totalPortValue = items.reduce((sum, i) => sum + (i.cantidad * i.precio_compra), 0);
+          const aiCall = await fetch('/api/portfolio/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items, totalValue: totalPortValue })
+          });
+          
+          if (aiCall.ok) {
+            const aiResponse = await aiCall.json();
+            setData({
+              fecha: new Date().toISOString(),
+              diagnostico: "🤖 [Análisis IA en Tiempo Real] " + aiResponse.diagnostico,
+              recomendaciones: aiResponse.recomendaciones
+            });
+            setLoading(false);
+            return;
+          }
+        } catch (e) {
+          console.error("Failed to generate live AI analysis", e);
+        }
+      }
 
-        setData({
-           fecha: report.fecha,
-           diagnostico: diagTexto,
-           recomendaciones: parsedRecs
-        });
+      // If live generation failed or user has NO items, we fallback to global radar (if it exists)
+      if (!foundDbData && aiRes && aiRes.length > 0 && items.length === 0) {
+        const report = aiRes[0];
+        if (report.candidatos_json) {
+          const combined = [...(report.candidatos_json.us || []), ...(report.candidatos_json.cl || [])];
+          setData({
+             fecha: report.fecha,
+             diagnostico: "⚠️ Estás viendo el Radar de Mercado General porque tu portafolio está vacío. Agrega activos para un diagnóstico personalizado.",
+             recomendaciones: combined.map(c => ({
+               ticker: c.ticker,
+               accion: c.signal || (c.score > 50 ? '🟢 BUY' : '🟡 HOLD'),
+               stop_loss: 'Activo Sugerido (Fuera de tu portafolio)',
+               analisis: (report.insights_tickers && report.insights_tickers[c.ticker]) || `Oportunidad técnica detectada. Score: ${c.score.toFixed(1)}`
+             }))
+          });
+        }
       }
     } catch (e) {
       console.error(e);
@@ -104,32 +133,7 @@ export default function RecommendationsTab() {
     );
   }
 
-  // Generar diagnóstico local con pesos del portafolio (para modo cartola o usuarios con portafolio temporal)
-  if (items.length > 0) {
-    const tickersStr = items.map(i => i.ticker).join(", ");
-    const totalPortValue = items.reduce((sum, i) => sum + (i.cantidad * i.precio_compra), 0);
-    
-    const fakeData: AiData = {
-      fecha: new Date().toISOString().split('T')[0],
-      diagnostico: `Análisis Institucional Local: Se ha detectado la estructura del portafolio que contiene ${items.length} activos (${tickersStr}). Capital total invertido: $${totalPortValue.toLocaleString('es-CL')}. La distribución actual ${items.length <= 2 ? 'muestra alta concentración, lo que expone la cartera a riesgos idiosincráticos significativos. Se recomienda diversificación sectorial urgente.' : 'muestra un balance interesante de riesgo y retorno. En simulaciones aisladas, este conjunto presenta correlación con los índices globales, sugiriendo estrategias de rebalanceo dinámico o coberturas (hedging) en escenarios de volatilidad.'}`,
-      recomendaciones: items.map(item => {
-        const itemValue = item.cantidad * item.precio_compra;
-        const weight = totalPortValue > 0 ? (itemValue / totalPortValue) * 100 : 0;
-        const hash = item.ticker.split('').reduce((a,b)=>{a=((a<<5)-a)+b.charCodeAt(0);return a&a},0);
-        const rand = Math.abs(hash) % 3;
-        const accion = rand === 0 ? '🟢 BUY' : (rand === 1 ? '🟡 HOLD' : '🔴 SELL');
-        const weightWarning = weight > 40 ? ' ⚠️ SOBREEXPOSICIÓN: Este activo representa más del 40% del portafolio.' : '';
-        return {
-          ticker: item.ticker,
-          accion: accion,
-          stop_loss: `$${(item.precio_compra * (rand === 0 ? 0.9 : 0.95)).toLocaleString('es-CL')} (Soporte Técnico)`,
-          analisis: `Peso en cartera: ${weight.toFixed(1)}% ($${itemValue.toLocaleString('es-CL')} CLP).${weightWarning} Evaluación algorítmica para ${item.ticker}: Se recomienda ${accion} en base a los promedios móviles históricos. Mantener monitoreo estricto de soporte.`
-        };
-      })
-    };
-    
-    return renderAiData(fakeData);
-  }
+
 
   if (!data || data.recomendaciones.length === 0) {
     return (

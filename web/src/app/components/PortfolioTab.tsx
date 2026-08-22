@@ -38,7 +38,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
         if (items.length === 0) return;
         const tickers = items.map(i => i.ticker).join(',');
         try {
-          const res = await fetch(`/api/portfolio/live?symbols=${encodeURIComponent(tickers)}`);
+          const res = await fetch(`/api/portfolio/live?symbols=${encodeURIComponent(tickers)}&t=${Date.now()}`);
           if (res.ok) {
             const data = await res.json();
             setLivePrices(data);
