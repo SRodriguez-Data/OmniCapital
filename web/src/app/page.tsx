@@ -76,7 +76,7 @@ export default function Home() {
       <header className="border-b border-zinc-200 dark:border-[#27272a] bg-white dark:bg-[#18181b] px-6 py-4 flex flex-col md:flex-row items-center justify-between shadow-sm dark:shadow-none transition-colors duration-300">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-[#e4e4e7] font-sans">
-            QUANTUM TRADER V2
+            QUANTUM TRADER V2.1
           </h1>
           <p className="text-zinc-500 dark:text-[#a1a1aa] text-xs font-mono uppercase tracking-widest mt-1">
             Terminal Institucional Interactiva
