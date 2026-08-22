@@ -28,46 +28,20 @@ export default function RecommendationsTab() {
       if (isDemo) {
         setData({
           fecha: new Date().toISOString().split('T')[0],
-          diagnostico: "Análisis Cuantitativo (Modo Demo): El portafolio actual presenta una diversificación estratégica robusta, con una marcada sobreponderación en mega-caps tecnológicas (AAPL, MSFT, NVDA) que capturan el momentum secular de la inteligencia artificial. Sin embargo, esta concentración expone a la cartera a riesgos de regresión a la media ante posibles recortes de tasas agresivos por parte de la Reserva Federal. Las coberturas defensivas en el sector consumo (KHC) y ETFs de dividendos aristócratas (SCHD) proveen un colchón de liquidez esencial frente a escenarios de alta volatilidad.\n\nDesde una perspectiva macroeconómica, la inclusión táctica de activos emergentes y materias primas (SQM-B.SN, ENELCHILE) añade un beta asimétrico atractivo, protegiendo el poder adquisitivo frente a shocks inflacionarios persistentes. El algoritmo recomienda mantener la liquidez actual y aplicar estrategias de rebalanceo dinámico si el VIX supera la barrera de los 25 puntos, priorizando la preservación de capital institucional.",
+          diagnostico: "Análisis Cuantitativo (Modo Demo): El portafolio actual presenta una diversificación estratégica robusta...",
           recomendaciones: items.map(item => ({
             ticker: item.ticker,
             accion: Math.random() > 0.5 ? '🟢 BUY' : '🟡 HOLD',
             stop_loss: `$${(item.precio_compra * 0.85).toFixed(2)} (-15% SL estricto)`,
-            analisis: `El modelo quant sugiere mantener o acumular posiciones en ${item.ticker} debido a su momentum positivo, fuerte soporte institucional en la EMA200 y una prima de riesgo justificada por sus sólidos fundamentales operativos.`
+            analisis: `El modelo quant sugiere mantener o acumular posiciones...`
           }))
         });
         setLoading(false);
         return;
       }
 
-      // First try to check the DB if there is a global or specific report
-      const { data: aiRes, error } = await supabase
-        .from('analisis_ia')
-        .select('*')
-        .order('fecha', { ascending: false })
-        .limit(1);
-
-      let foundDbData = false;
-      if (!error && aiRes && aiRes.length > 0) {
-        const report = aiRes[0];
-        // If it has specific recommendations for this portfolio, we use it
-        if (report.candidatos_json && report.candidatos_json.recomendaciones_portafolio && report.candidatos_json.recomendaciones_portafolio.length > 0) {
-          foundDbData = true;
-          setData({
-             fecha: report.fecha,
-             diagnostico: report.candidatos_json.diagnostico_portafolio || report.vision_radar || "Sin diagnóstico.",
-             recomendaciones: report.candidatos_json.recomendaciones_portafolio.map((c: any) => ({
-               ticker: c.ticker,
-               accion: c.accion || '🟡 HOLD',
-               stop_loss: c.stop_loss || 'Sin datos de stop loss de emergencia.',
-               analisis: c.analisis || c.razon || 'Sin análisis detallado.'
-             }))
-          });
-        }
-      }
-
-      // If no specific DB data was found, and the user HAS items, generate real-time AI analysis
-      if (!foundDbData && items.length > 0) {
+      // Si el usuario tiene items (ej: subió cartola o los tiene guardados), SIEMPRE generamos IA en tiempo real
+      if (items.length > 0) {
         try {
           const totalPortValue = items.reduce((sum, i) => sum + (i.cantidad * i.precio_compra), 0);
           const aiCall = await fetch('/api/portfolio/analyze', {
@@ -89,10 +63,41 @@ export default function RecommendationsTab() {
         } catch (e) {
           console.error("Failed to generate live AI analysis", e);
         }
+
+        // Si falló la IA o no hay API Key, usamos el fallback local
+        const tickersStr = items.map(i => i.ticker).join(", ");
+        const totalPortValue = items.reduce((sum, i) => sum + (i.cantidad * i.precio_compra), 0);
+        const fakeData: AiData = {
+          fecha: new Date().toISOString().split('T')[0],
+          diagnostico: `Análisis Cuantitativo (Fallback Local): Se ha detectado la estructura del portafolio que contiene ${items.length} activos (${tickersStr}). Capital total invertido: $${totalPortValue.toLocaleString('es-CL')}. La distribución actual ${items.length <= 2 ? 'muestra alta concentración, lo que expone la cartera a riesgos idiosincráticos significativos.' : 'muestra un balance interesante de riesgo y retorno. Sugerimos rebalanceo dinámico o coberturas.'} (Configura GEMINI_API_KEY para habilitar IA avanzada).`,
+          recomendaciones: items.map(item => {
+            const itemValue = item.cantidad * item.precio_compra;
+            const weight = totalPortValue > 0 ? (itemValue / totalPortValue) * 100 : 0;
+            const hash = item.ticker.split('').reduce((a,b)=>{a=((a<<5)-a)+b.charCodeAt(0);return a&a},0);
+            const rand = Math.abs(hash) % 3;
+            const accion = rand === 0 ? '🟢 BUY' : (rand === 1 ? '🟡 HOLD' : '🔴 SELL');
+            const weightWarning = weight > 40 ? ' ⚠️ SOBREEXPOSICIÓN: Este activo representa más del 40% del portafolio.' : '';
+            return {
+              ticker: item.ticker,
+              accion: accion,
+              stop_loss: `$${(item.precio_compra * (rand === 0 ? 0.9 : 0.95)).toLocaleString('es-CL')} (Soporte Técnico)`,
+              analisis: `Peso en cartera: ${weight.toFixed(1)}% ($${itemValue.toLocaleString('es-CL')} CLP).${weightWarning} (Análisis generado por reglas estáticas locales).`
+            };
+          })
+        };
+        setData(fakeData);
+        setLoading(false);
+        return;
       }
 
-      // If live generation failed or user has NO items, we fallback to global radar (if it exists)
-      if (!foundDbData && aiRes && aiRes.length > 0 && items.length === 0) {
+      // Fallback: Si no tiene items o falló la generación en tiempo real, mostramos el Radar Global de la DB
+      const { data: aiRes, error } = await supabase
+        .from('analisis_ia')
+        .select('*')
+        .order('fecha', { ascending: false })
+        .limit(1);
+
+      if (!error && aiRes && aiRes.length > 0 && items.length === 0) {
         const report = aiRes[0];
         if (report.candidatos_json) {
           const combined = [...(report.candidatos_json.us || []), ...(report.candidatos_json.cl || [])];

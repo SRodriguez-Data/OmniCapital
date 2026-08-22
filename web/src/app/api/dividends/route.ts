@@ -43,18 +43,16 @@ export async function POST(req: Request) {
           let divRate = quote.trailingAnnualDividendRate || 0;
           let divYield = quote.trailingAnnualDividendYield || 0;
           
-          // Fallbacks para mercado chileno donde Yahoo Finance no reporta los dividendos correctamente
-          if (divRate === 0) {
-            if (item.ticker === 'CFMITNIPSA' || item.ticker === 'CFMITNIPSA.SN') {
-              divRate = quote.regularMarketPrice * 0.055; // ~5.5% histórico
-              divYield = 0.055;
-            } else if (item.ticker === 'CHILE.SN' || item.ticker === 'CHILE') {
-              divRate = quote.regularMarketPrice * 0.065; // ~6.5% histórico
-              divYield = 0.065;
-            } else if (item.ticker === 'SQM-B.SN') {
-              divRate = quote.regularMarketPrice * 0.10; // ~10%
-              divYield = 0.10;
-            }
+          // Fallbacks para mercado chileno (sobreescribimos Yahoo Finance porque suele estar desactualizado)
+          if (item.ticker === 'CFMITNIPSA' || item.ticker === 'CFMITNIPSA.SN') {
+            divRate = quote.regularMarketPrice * 0.035; // ~3.5% histórico
+            divYield = 0.035;
+          } else if (item.ticker === 'CHILE.SN' || item.ticker === 'CHILE') {
+            divRate = quote.regularMarketPrice * 0.065; // ~6.5% histórico
+            divYield = 0.065;
+          } else if (item.ticker === 'SQM-B.SN') {
+            divRate = quote.regularMarketPrice * 0.10; // ~10%
+            divYield = 0.10;
           }
 
           const income = divRate * item.cantidad;
