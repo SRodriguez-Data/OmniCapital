@@ -193,15 +193,15 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
   let dynamicCurrentCombinedCLP = totalCurrentCombinedCLP;
   let startPrices: Record<string, number> = {};
 
-  if (globalHistory.length > 0) {
+  if (globalHistory.length > 0 && chartHistoryData.length > 0) {
     if (period === 'TOTAL') {
       dynamicInvestedCombinedCLP = totalInvestedCombinedCLP;
     } else {
-      dynamicInvestedCombinedCLP = chartHistoryData[0].totalValue;
+      dynamicInvestedCombinedCLP = chartHistoryData[0]?.totalValue || totalInvestedCombinedCLP;
     }
     // Usamos SIEMPRE el totalCurrentCombinedCLP real para no mostrar un P&L desactualizado de ayer
     dynamicCurrentCombinedCLP = totalCurrentCombinedCLP;
-    startPrices = chartHistoryData[0].prices || {};
+    startPrices = chartHistoryData[0]?.prices || {};
   }
 
   const dynamicPnL_CombinedCLP = dynamicCurrentCombinedCLP - dynamicInvestedCombinedCLP;
