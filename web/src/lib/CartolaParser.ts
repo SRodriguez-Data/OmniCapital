@@ -1,9 +1,9 @@
-const PATRON_US_TRADE = /([A-Z]+)\s+.*?\s+(Buy|Sell|Compra|Venta)(?:\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M)?\s+([\d\.,]+)\s+([\d\.,]+)\s+(\d{1,2}\/\d{1,2}\/\d{4})/gi;
-const PATRON_US_DIVIDEND = /([A-Z]+)\s+.*?\s+(?:Cash Dividend|CDIV)\s+(\d{1,2}\/\d{1,2}\/\d{4})\s+([\d\.,]+)/gi;
-// Fix: Use .*? to consume any extra words (like CB, EXTRANJERAS, etc) until it finds a valid Ticker right before CLP/USD
-const PATRON_CL_TRADE = /(\d{2}-\d{2}-\d{4})\s+\d{2}-\d{2}-\d{4}\s+(?:(COMPRA|VENTA)\s+)?(?:ACCIONES|FONDOS).*?\s+([A-Z0-9\-]+)\s+(CLP|USD)\s+([\d\.,]+)\s*\$\s*([\d\.,]+)/gi;
-const PATRON_FINTUAL_COMPRA = /(\d{4}-\d{2}-\d{2})\s+(.*?)\s+([A-Z0-9\-]+)\s+(?:ETF|Acciones|Fondo).*?US\s+\$\s*([\d,]+)\s+([\d,]+)/gi;
-const PATRON_FINTUAL_DIVIDEND = /(\d{4}-\d{2}-\d{2})\s+(.*?)\s+([A-Z0-9\-]+)\s+(?:ETF|Acciones|Fondo).*?US\s+\$\s*([\d,]+)\s+US\s+\$\s*([\d,]+)\s+US\s+\$\s*([\d,]+)/gi;
+const PATRON_US_TRADE = /\b([A-Z]{1,5})\b(?:(?!\b(?:Buy|BUY|buy|Sell|SELL|sell|Compra|COMPRA|compra|Venta|VENTA|venta)\b).){1,100}?\b(Buy|BUY|buy|Sell|SELL|sell|Compra|COMPRA|compra|Venta|VENTA|venta)\b(?:\s+\d{1,2}:\d{2}:\d{2}\s+[APMpm]{2})?\s+([\d\.,]+)\s+([\d\.,]+)\s+(\d{1,2}\/\d{1,2}\/\d{4})/g;
+const PATRON_US_DIVIDEND = /\b([A-Z]{1,5})\b(?:(?!\b(?:Cash Dividend|CDIV|CASH DIVIDEND)\b).){1,100}?\b(Cash Dividend|CDIV|CASH DIVIDEND)\b\s+(\d{1,2}\/\d{1,2}\/\d{4})\s+([\d\.,]+)/g;
+// Fix: Use non-greedy length limit to consume extra words until it finds a valid Ticker right before CLP/USD
+const PATRON_CL_TRADE = /(\d{2}-\d{2}-\d{4})\s+\d{2}-\d{2}-\d{4}\s+(?:(COMPRA|VENTA|Compra|Venta)\s+)?(?:ACCIONES|FONDOS|Acciones|Fondos)(?:(?!\b(?:CLP|USD)\b).){1,100}?\s+([A-Z0-9\-]{2,10})\s+(CLP|USD)\s+([\d\.,]+)\s*\$\s*([\d\.,]+)/g;
+const PATRON_FINTUAL_COMPRA = /(\d{4}-\d{2}-\d{2})\s+(.*?)\s+([A-Z0-9\-]{2,10})\s+(?:ETF|Acciones|Fondo)(?:(?!\bUS\s+\$\b).){1,100}?US\s+\$\s*([\d,]+)\s+([\d,]+)/g;
+const PATRON_FINTUAL_DIVIDEND = /(\d{4}-\d{2}-\d{2})\s+(.*?)\s+([A-Z0-9\-]{2,10})\s+(?:ETF|Acciones|Fondo)(?:(?!\bUS\s+\$\b).){1,100}?US\s+\$\s*([\d,]+)\s+US\s+\$\s*([\d,]+)\s+US\s+\$\s*([\d,]+)/g;
 
 const TICKER_ALIASES: Record<string, string> = {
   'BCHILE': 'CHILE',
