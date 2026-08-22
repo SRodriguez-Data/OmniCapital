@@ -56,13 +56,16 @@ export async function POST(req: Request) {
           }
 
           const income = divRate * item.cantidad;
+          const personalYield = item.precio_compra > 0 ? (divRate / item.precio_compra) : divYield;
 
           return {
             id: item.id,
             ticker: item.ticker,
             cantidad: item.cantidad,
+            precio_compra: item.precio_compra,
             moneda: item.moneda,
             dividendYield: divYield,
+            personalYield: personalYield, // Yield on Cost
             dividendRate: divRate,
             projectedAnnualIncome: income
           };

@@ -79,7 +79,7 @@ export default function DividendsTab() {
   const totalIncomeCLP = items.filter(i => i.moneda === 'CLP').reduce((sum, i) => sum + i.projectedAnnualIncome, 0);
 
   // Calculate weighted average yield (rough estimate based on income proportion)
-  const weightedYield = items.reduce((sum, i) => sum + i.dividendYield, 0) / items.length;
+  const weightedYield = items.reduce((sum, i) => sum + (i.personalYield || i.dividendYield), 0) / items.length;
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -106,7 +106,7 @@ export default function DividendsTab() {
           <div className="absolute top-0 right-0 p-4 opacity-10">
             <Percent className="w-16 h-16 text-[#f472b6]" />
           </div>
-          <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase tracking-widest mb-1">Yield Promedio de Pagadores</p>
+          <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase tracking-widest mb-1">Yield on Cost (Personal)</p>
           <h2 className="text-3xl font-bold font-mono text-[#f472b6]">{(weightedYield * 100).toFixed(2)}%</h2>
         </div>
       </div>
@@ -154,7 +154,7 @@ export default function DividendsTab() {
               <th className="py-3 px-4 font-semibold">Ticker</th>
               <th className="py-3 px-4 font-semibold text-right">Cantidad</th>
               <th className="py-3 px-4 font-semibold text-right">Dividendo Anual (Acción)</th>
-              <th className="py-3 px-4 font-semibold text-right">Dividend Yield</th>
+              <th className="py-3 px-4 font-semibold text-right">Yield Personal</th>
               <th className="py-3 px-4 font-semibold text-right">Ingreso Anual Proyectado</th>
             </tr>
           </thead>
@@ -167,7 +167,7 @@ export default function DividendsTab() {
                   ${row.dividendRate.toFixed(row.moneda === 'USD' ? 2 : 0)} {row.moneda}
                 </td>
                 <td className="py-3 px-4 text-right font-bold text-[#f472b6]">
-                  {(row.dividendYield * 100).toFixed(2)}%
+                  {((row.personalYield || row.dividendYield) * 100).toFixed(2)}%
                 </td>
                 <td className="py-3 px-4 text-right font-bold text-[#34d399]">
                   ${row.projectedAnnualIncome.toLocaleString(undefined, {minimumFractionDigits: row.moneda === 'USD' ? 2 : 0, maximumFractionDigits: row.moneda === 'USD' ? 2 : 0})} {row.moneda}
