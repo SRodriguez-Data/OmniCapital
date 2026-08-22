@@ -1,7 +1,7 @@
 const PATRON_US_TRADE = /\b([A-Z]{1,5})\b(?:(?!\b(?:Buy|BUY|buy|Sell|SELL|sell|Compra|COMPRA|compra|Venta|VENTA|venta)\b).){1,100}?\b(Buy|BUY|buy|Sell|SELL|sell|Compra|COMPRA|compra|Venta|VENTA|venta)\b(?:\s+\d{1,2}:\d{2}:\d{2}\s+[APMpm]{2})?\s+([\d\.,]+)\s+([\d\.,]+)\s+(\d{1,2}\/\d{1,2}\/\d{4})/g;
 const PATRON_US_DIVIDEND = /\b([A-Z]{1,5})\b(?:(?!\b(?:Cash Dividend|CDIV|CASH DIVIDEND)\b).){1,100}?\b(Cash Dividend|CDIV|CASH DIVIDEND)\b\s+(\d{1,2}\/\d{1,2}\/\d{4})\s+([\d\.,]+)/g;
-// Fix: Use non-greedy length limit to consume extra words until it finds a valid Ticker right before CLP/USD
 const PATRON_CL_TRADE = /(\d{2}-\d{2}-\d{4})\s+\d{2}-\d{2}-\d{4}\s+(?:(COMPRA|VENTA|Compra|Venta)\s+)?(?:ACCIONES|FONDOS|Acciones|Fondos)(?:(?!\b(?:CLP|USD)\b).){1,100}?\s+([A-Z0-9\-]{2,10})\s+(CLP|USD)\s+([\d\.,]+)\s*\$\s*([\d\.,]+)/g;
+const PATRON_VECTOR_CARTERA = /\b([A-Z0-9\-]{2,10})\s+(CLP|USD)\s+([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)\s+[\d\.,\-]+\s+[\d\.,\-]+/g;
 const PATRON_FINTUAL_COMPRA = /(\d{4}-\d{2}-\d{2})\s+(.*?)\s+([A-Z0-9\-]{2,10})\s+(?:ETF|Acciones|Fondo)(?:(?!\bUS\s+\$\b).){1,100}?US\s+\$\s*([\d,]+)\s+([\d,]+)/g;
 const PATRON_FINTUAL_DIVIDEND = /(\d{4}-\d{2}-\d{2})\s+(.*?)\s+([A-Z0-9\-]{2,10})\s+(?:ETF|Acciones|Fondo)(?:(?!\bUS\s+\$\b).){1,100}?US\s+\$\s*([\d,]+)\s+US\s+\$\s*([\d,]+)\s+US\s+\$\s*([\d,]+)/g;
 
@@ -71,10 +71,46 @@ export async function parsePdfToCartola(file: File) {
     } else {
       const matchesUs = Array.from(text.matchAll(PATRON_US_TRADE));
       for (const m of matchesUs) {
-        data.push({ Fecha: parseDate(m[5]), Archivo: file.name, Ticker: m[1].toUpperCase(), Tipo: m[2].toUpperCase() === 'BUY' ? 'COMPRA' : 'VENTA', Precio: parseNumberRacional(m[3]), Cantidad: parseNumberRacional(m[4]), Moneda: 'USD' });
+        data.push({ Fecha: parseDate(m[5]), Archivo: file.name, Ticker: m[1].toUpperCase(), Tipo: m[2].toUpperCase() === 'BUY' ? 'COMPRA' : 'VENTA', Precio: parseNumberRacional(m[4]), Cantidad: parseNumberRacional(m[3]), Moneda: 'USD' });
       }
 
-      const matchesCl = Array.from(text.matchAll(PATRON_CL_TRADE));
+      // 1. Intentar extraer la cartera completa de Racional local (Vector Capital)
+      const matchesCartera = Array.from(text.matchAll(PATRON_VECTOR_CARTERA));
+      let usedCartera = false;
+      if (matchesCartera.length > 0) {
+        usedCartera = true;
+        for (const m of matchesCartera) {
+          let ticker = m[1].toUpperCase();
+          const moneda = m[2].toUpperCase(); // CLP o USD
+          let precio = parseNumberFintual(m[3]); // Precio Compra Promedio
+          let cantidad = parseNumberFintual(m[5]); // Nominales
+
+          // Fusión CFMDIVO -> CFMITNIPSA
+          if (ticker === 'CFMDIVO') {
+            ticker = 'CFMITNIPSA';
+            const ratio = 0.384122446;
+            cantidad = cantidad * ratio;
+            precio = precio / ratio;
+          }
+
+          if (TICKER_ALIASES[ticker]) ticker = TICKER_ALIASES[ticker];
+          if (moneda === 'CLP' && !ticker.endsWith('.SN')) ticker += '.SN';
+
+          data.push({ 
+            Fecha: new Date().toISOString().split('T')[0], 
+            Archivo: file.name, 
+            Ticker: ticker, 
+            Tipo: 'COMPRA', 
+            Precio: precio, 
+            Cantidad: cantidad, 
+            Moneda: moneda 
+          });
+        }
+      }
+
+      // 2. Solo si no se encontró la cartera, intentar extraer operaciones individuales
+      if (!usedCartera) {
+        const matchesCl = Array.from(text.matchAll(PATRON_CL_TRADE));
       for (const m of matchesCl) {
         const tipoMatch = m[2] ? m[2].toUpperCase() : 'COMPRA';
         let ticker = m[3].toUpperCase();
@@ -102,7 +138,8 @@ export async function parsePdfToCartola(file: File) {
         
         data.push({ Fecha: parseDate(m[1]), Archivo: file.name, Ticker: ticker, Tipo: tipoMatch, Precio: precio, Cantidad: cantidad, Moneda: moneda });
       }
-    }
+      } // Closes if (!usedCartera)
+    } // Closes else
 
     return { broker, file_name: file.name, data };
   } catch (err) {
