@@ -19,6 +19,7 @@ interface PortfolioContextType {
   isCartolaMode: boolean;
   setItems: React.Dispatch<React.SetStateAction<PortfolioItem[]>>;
   refreshPortfolio: () => Promise<void>;
+  resetPortfolio: () => void;
 }
 
 const PortfolioContext = createContext<PortfolioContextType | undefined>(undefined);
@@ -94,6 +95,12 @@ export const PortfolioProvider = ({ children }: { children: React.ReactNode }) =
     }
   };
 
+  const resetPortfolio = () => {
+    setItems([]);
+    setIsDemo(false);
+    setIsCartolaMode(false);
+  };
+
   useEffect(() => {
     fetchPortfolio();
   }, []);
@@ -105,7 +112,7 @@ export const PortfolioProvider = ({ children }: { children: React.ReactNode }) =
   }, [items, isCartolaMode]);
 
   return (
-    <PortfolioContext.Provider value={{ items, loading, isDemo, isCartolaMode, setItems, refreshPortfolio: fetchPortfolio }}>
+    <PortfolioContext.Provider value={{ items, loading, isDemo, isCartolaMode, setItems, refreshPortfolio: fetchPortfolio, resetPortfolio }}>
       {children}
     </PortfolioContext.Provider>
   );

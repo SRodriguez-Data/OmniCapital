@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { Lock, Mail, ChevronRight, Activity } from 'lucide-react';
+import { usePortfolio } from '../context/PortfolioContext';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -12,6 +13,7 @@ export default function LoginPage() {
   const [errorMsg, setErrorMsg] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const router = useRouter();
+  const { refreshPortfolio, resetPortfolio } = usePortfolio();
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -28,10 +30,12 @@ export default function LoginPage() {
     });
   }, [router]);
 
-  const handleDemoLogin = () => {
+  const handleDemoLogin = async () => {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('isCartolaMode');
       localStorage.setItem('isDemo', 'true');
+      resetPortfolio();
+      await refreshPortfolio();
       router.push('/');
     }
   };
@@ -51,11 +55,16 @@ export default function LoginPage() {
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        
         if (typeof window !== 'undefined') {
           localStorage.removeItem('isDemo');
           localStorage.removeItem('isCartolaMode');
           localStorage.removeItem('cartolaItems');
         }
+        
+        resetPortfolio();
+        await refreshPortfolio(); // Carga el portafolio real del usuario de la DB
+        
         router.push('/');
       }
     } catch (error: any) {
