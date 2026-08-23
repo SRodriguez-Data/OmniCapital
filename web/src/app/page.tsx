@@ -13,7 +13,7 @@ import BacktestTab from './components/BacktestTab';
 import DataWarehouseTab from './components/DataWarehouseTab';
 import { ThemeToggle } from './components/ThemeToggle';
 import { PortfolioProvider } from './context/PortfolioContext';
-import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History, LogOut, Database } from 'lucide-react';
+import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History, LogOut, Database, Landmark } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 
@@ -74,13 +74,18 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-zinc-100 dark:bg-[#09090b] text-zinc-900 dark:text-[#fafafa] font-sans transition-colors duration-300">
       <header className="border-b border-zinc-200 dark:border-[#27272a] bg-white dark:bg-[#18181b] px-6 py-4 flex flex-col md:flex-row items-center justify-between shadow-sm dark:shadow-none transition-colors duration-300">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-[#e4e4e7] font-sans">
-            QUANTUM TRADER V3.1
-          </h1>
-          <p className="text-zinc-500 dark:text-[#a1a1aa] text-xs font-mono uppercase tracking-widest mt-1">
-            Terminal Institucional Interactiva
-          </p>
+        <div className="flex items-center gap-4">
+          <div className="w-10 h-10 bg-gradient-to-tr from-emerald-100 to-teal-100 dark:from-emerald-900/40 dark:to-teal-900/40 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center justify-center shadow-inner shadow-emerald-500/20">
+            <Landmark className="w-5 h-5" />
+          </div>
+          <div>
+            <h1 className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-500 dark:from-emerald-400 dark:to-teal-300 bg-clip-text text-transparent">
+              OmniCapital
+            </h1>
+            <p className="text-zinc-500 dark:text-[#a1a1aa] text-[10px] font-mono uppercase tracking-[0.15em] mt-0.5">
+              Wealth Management Platform V3.1
+            </p>
+          </div>
         </div>
         <div className="mt-4 md:mt-0 flex items-center gap-4">
           <ThemeToggle />

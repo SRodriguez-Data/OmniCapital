@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 import { PortfolioProvider } from "./context/PortfolioContext";
 
 export const metadata: Metadata = {
-  title: "Quantum Trader",
-  description: "Institutional Financial Terminal",
+  title: "OmniCapital | Wealth Management",
+  description: "Institutional Wealth Management Platform",
 };
 
 export default function RootLayout({

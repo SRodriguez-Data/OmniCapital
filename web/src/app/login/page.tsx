@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
-import { Lock, Mail, ChevronRight, Activity } from 'lucide-react';
+import { Lock, Mail, ChevronRight, Landmark } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 
 export default function LoginPage() {
@@ -75,19 +75,23 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="min-h-screen bg-zinc-100 dark:bg-[#09090b] flex flex-col items-center justify-center font-sans p-4">
-      <div className="w-full max-w-md bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-2xl shadow-sm overflow-hidden transition-colors duration-300">
+    <main className="min-h-screen bg-zinc-100 dark:bg-[#09090b] flex flex-col items-center justify-center font-sans p-4 relative overflow-hidden">
+      {/* Decorative background elements */}
+      <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+
+      <div className="w-full max-w-md bg-white/80 dark:bg-[#18181b]/80 backdrop-blur-md border border-zinc-200/50 dark:border-[#27272a]/50 rounded-3xl shadow-xl overflow-hidden transition-colors duration-300 z-10">
         
         {/* Header */}
-        <div className="p-8 text-center border-b border-zinc-100 dark:border-[#27272a]">
-          <div className="mx-auto w-12 h-12 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full flex items-center justify-center mb-4">
-            <Activity className="w-6 h-6" />
+        <div className="p-8 pb-6 text-center border-b border-zinc-100 dark:border-[#27272a]">
+          <div className="mx-auto w-14 h-14 bg-gradient-to-tr from-emerald-100 to-teal-100 dark:from-emerald-900/40 dark:to-teal-900/40 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mb-5 shadow-inner shadow-emerald-500/20">
+            <Landmark className="w-7 h-7" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-[#e4e4e7]">
-            QUANTUM TRADER
+          <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-500 dark:from-emerald-400 dark:to-teal-300 bg-clip-text text-transparent">
+            OmniCapital
           </h1>
-          <p className="text-zinc-500 dark:text-[#a1a1aa] text-xs font-mono uppercase tracking-widest mt-2">
-            Terminal Institucional
+          <p className="text-zinc-500 dark:text-[#a1a1aa] text-[10px] font-mono uppercase tracking-[0.2em] mt-3">
+            Wealth Management Platform
           </p>
         </div>
 
