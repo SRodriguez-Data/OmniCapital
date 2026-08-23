@@ -57,16 +57,27 @@ Tu tarea OBLIGATORIA es devolver un objeto JSON estricto con el siguiente format
 }
 
 REGLAS ESTRICTAS:
-1. Responde SOLO con el JSON válido.
-2. No incluyas markdown como \`\`\`json.
-3. Genera una recomendación para CADA activo listado arriba.
-4. Jamás dejes el campo diagnostico vacío ni corto.`;
+1. Genera una recomendación para CADA activo listado arriba.
+2. Jamás dejes el campo diagnostico vacío ni corto.`;
 
-    const result = await model.generateContent(prompt);
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+      }
+    });
+    
     let text = result.response.text();
+    // Limpieza de seguridad por si acaso
     text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
 
-    const parsed = JSON.parse(text);
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (parseError) {
+      console.error("Gemini JSON Parse Error:", text);
+      throw new Error("El modelo generó un JSON inválido.");
+    }
 
     return NextResponse.json(parsed);
   } catch (error: any) {
