@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+export const maxDuration = 60;
+
 const apiKey = process.env.GEMINI_API_KEY;
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
@@ -45,13 +47,13 @@ ${portSummary}
 
 Tu tarea OBLIGATORIA es devolver un objeto JSON estricto con el siguiente formato EXACTO:
 {
-  "diagnostico": "Escribe aquí un diagnóstico extenso, muy detallado y brutalmente honesto del portafolio. Analiza la diversificación, riesgos sistémicos, exposición a sectores saturados o prometedores, y sugiere estrategias de rebalanceo de manera institucional. ESTE CAMPO DEBE CONTENER AL MENOS 100 PALABRAS.",
+  "diagnostico": "Escribe aquí un diagnóstico técnico y macroeconómico muy directo del portafolio. Analiza concentración, liquidez y riesgo. (MÁXIMO 50 PALABRAS).",
   "recomendaciones": [
     {
       "ticker": "TICKER_AQUI",
       "accion": "🟢 BUY", 
       "stop_loss": "Precio de salida estricto (ej: $100 (-10%))",
-      "analisis": "Debes dar un análisis EXTREMADAMENTE DETALLADO Y TÉCNICO. Justifica por qué comprar, mantener o vender. Si se vende, di por qué (ej: sobreexposición, falta de futuro, métricas deterioradas, pérdida de momentum, cambios macroeconómicos). Menciona niveles de soporte/resistencia, fundamentales y catalizadores. MÍNIMO 60 PALABRAS POR ACTIVO."
+      "analisis": "Análisis rápido y directo. Justifica por qué comprar, mantener o vender basándote en macroeconomía, fundamentales de la empresa o momentum. MÁXIMO 30 PALABRAS."
     }
   ]
 }

@@ -173,6 +173,10 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
         const currentUsdRate = 930; // Podrías guardar el historico de USDCLP, pero usaremos flat rate por simplicidad o sacarlo del día si estuviera.
         
         items.forEach(item => {
+          // En modo TOTAL, si la fecha del día es menor a la fecha de compra, el activo vale 0 (aún no se compraba)
+          if (period === 'TOTAL' && item.purchase_date && day.date < item.purchase_date) {
+            return;
+          }
           const price = (day.prices && day.prices[item.ticker]) || item.precio_compra;
           if (item.moneda === 'CLP') dailyTotalCLP += item.cantidad * price;
           else dailyTotalUSD += item.cantidad * price;
