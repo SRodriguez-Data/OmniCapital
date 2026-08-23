@@ -32,13 +32,13 @@ ${portSummary}
 
 Tu tarea OBLIGATORIA es devolver un objeto JSON estricto con el siguiente formato EXACTO:
 {
-  "diagnostico": "Diagnóstico macroeconómico y técnico profundo del portafolio. Analiza riesgos sistémicos y sugiere rebalanceo. SÉ EXTREMADAMENTE BREVE Y AL PUNTO. MÁXIMO 40 PALABRAS.",
+  "diagnostico": "Diagnóstico macroeconómico y técnico PROFUNDO del portafolio. Analiza concentración sectorial, riesgos sistémicos (tasas, inflación), diversificación de divisas y sugiere estrategias institucionales de cobertura. EXPRÉSATE COMO UN ECONOMISTA JEFE. MÁXIMO 100 PALABRAS.",
   "recomendaciones": [
     {
       "ticker": "TICKER_AQUI",
       "accion": "🟢 BUY", 
       "stop_loss": "Precio de salida estricto (ej: $100 (-10%))",
-      "analisis": "Análisis técnico y macroeconómico QUIRÚRGICO. Justifica con indicadores clave (ej: RSI, MACD, leyes). SÉ EXTREMADAMENTE BREVE. MÁXIMO 20 PALABRAS POR ACTIVO."
+      "analisis": "Análisis técnico y macroeconómico QUIRÚRGICO Y EXTENSO. Justifica a fondo tu recomendación integrando impacto de nuevas leyes, regulaciones, cambios de tasas, y análisis técnico (soportes, resistencias, RSI, MACD). DEBE SER DETALLADO, mínimo 40 palabras, máximo 70 palabras."
     }
   ]
 }
