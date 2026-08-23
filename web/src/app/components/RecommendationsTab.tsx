@@ -25,28 +25,13 @@ export default function RecommendationsTab() {
 
   async function fetchAI() {
     try {
-      if (isDemo) {
-        setData({
-          fecha: new Date().toISOString().split('T')[0],
-          diagnostico: "Análisis Cuantitativo (Modo Demo): El portafolio actual presenta una diversificación estratégica robusta...",
-          recomendaciones: items.map(item => ({
-            ticker: item.ticker,
-            accion: Math.random() > 0.5 ? '🟢 BUY' : '🟡 HOLD',
-            stop_loss: `$${(item.precio_compra * 0.85).toFixed(2)} (-15% SL estricto)`,
-            analisis: `El modelo quant sugiere mantener o acumular posiciones...`
-          }))
-        });
-        setLoading(false);
-        return;
-      }
-
-      // Si el usuario tiene items (ej: subió cartola o los tiene guardados), SIEMPRE generamos IA en tiempo real
+      // Si el usuario tiene items (ej: subió cartola, los tiene guardados, o está en Demo), SIEMPRE generamos IA en tiempo real
       if (items.length > 0) {
         try {
           const totalPortValue = items.reduce((sum, i) => sum + (i.cantidad * i.precio_compra), 0);
           
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 8000);
+          const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 seconds timeout for deep analysis
           
           const aiCall = await fetch('/api/portfolio/analyze', {
             method: 'POST',
