@@ -24,24 +24,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // Búsqueda dinámica del modelo soportado por la API Key del usuario
-    let modelName = 'gemini-1.5-flash';
-    try {
-      const modelsRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-      if (modelsRes.ok) {
-        const data = await modelsRes.json();
-        const validModel = data.models?.find((m: any) => 
-          m.supportedGenerationMethods?.includes('generateContent') && m.name.includes('gemini')
-        );
-        if (validModel) {
-          modelName = validModel.name.replace('models/', '');
-        }
-      }
-    } catch (e) {
-      console.warn("Fallo al listar modelos, usando fallback");
-    }
-
-    // Configurar modelo dinámico
+    // Usar directamente gemini-3.5-flash
+    const modelName = 'gemini-3.5-flash';
     const model = genAI.getGenerativeModel({ model: modelName });
 
     const portafolioContext = portfolio ? `El portafolio actual del usuario contiene: [${portfolio}].` : "El usuario no tiene activos en su portafolio aún.";

@@ -90,7 +90,7 @@ export async function GET(request: Request) {
     
     if (genAI) {
       try {
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
         const prompt = `
 Eres un analista cuantitativo senior. Haz un resumen ejecutivo (máximo 4 líneas) en ESPAÑOL sobre el activo ${meta.symbol} (${meta.longName || ''}).
 Datos actuales:
