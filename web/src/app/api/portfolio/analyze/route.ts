@@ -18,8 +18,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Portafolio vacío.' }, { status: 400 });
     }
 
-    // Usar directamente gemini-3.5-flash porque los anteriores están deprecados y tiran 404
-    const modelName = 'gemini-3.5-flash';
+    // Usar el modelo LITE más rápido para evitar que tarde "100 años" en generar los 11 análisis profundos
+    const modelName = 'gemini-flash-lite-latest';
     const model = genAI.getGenerativeModel({ model: modelName });
 
     const portSummary = items.map((i: any) => `- ${i.ticker}: ${i.cantidad} acciones (Costo prom: $${i.precio_compra})`).join('\n');
