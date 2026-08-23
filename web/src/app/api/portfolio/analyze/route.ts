@@ -18,23 +18,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Portafolio vacío.' }, { status: 400 });
     }
 
-    // Determine model
-    let modelName = 'gemini-1.5-flash';
-    try {
-      const modelsRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-      if (modelsRes.ok) {
-        const data = await modelsRes.json();
-        const validModel = data.models?.find((m: any) => 
-          m.supportedGenerationMethods?.includes('generateContent') && m.name.includes('gemini')
-        );
-        if (validModel) {
-          modelName = validModel.name.replace('models/', '');
-        }
-      }
-    } catch (e) {
-      // fallback
-    }
-
+    // Usar directamente gemini-1.5-flash para tener el límite de 1500 requests por día (2.5-flash tiene límite de 20 por día en free tier)
+    const modelName = 'gemini-1.5-flash';
     const model = genAI.getGenerativeModel({ model: modelName });
 
     const portSummary = items.map((i: any) => `- ${i.ticker}: ${i.cantidad} acciones (Costo prom: $${i.precio_compra})`).join('\n');
