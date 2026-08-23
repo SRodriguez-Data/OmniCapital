@@ -3,8 +3,6 @@ import { createClient } from '@supabase/supabase-js';
 import YahooFinance from 'yahoo-finance2';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-export const runtime = 'edge';
-
 const yahooFinance = new YahooFinance();
 
 const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
