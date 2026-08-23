@@ -186,10 +186,13 @@ export default function LoginPage() {
           
           <button
             type="button"
-            onClick={() => {
+            onClick={async () => {
               if (typeof window !== 'undefined') {
                 localStorage.removeItem('isDemo');
+                localStorage.removeItem('cartolaItems');
                 localStorage.setItem('isCartolaMode', 'true');
+                resetPortfolio();
+                await refreshPortfolio();
                 router.push('/');
               }
             }}
