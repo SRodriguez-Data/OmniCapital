@@ -13,6 +13,7 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+import { LanguageProvider } from "./context/LanguageContext";
 import { PortfolioProvider } from "./context/PortfolioContext";
 
 export const metadata: Metadata = {
@@ -26,11 +27,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
+    <html lang="es" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-zinc-50 dark:bg-[#09090b] text-zinc-900 dark:text-[#e4e4e7] transition-colors duration-300">
         <ThemeProvider
           attribute="class"
@@ -38,9 +35,11 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <PortfolioProvider>
-            {children}
-          </PortfolioProvider>
+          <LanguageProvider>
+            <PortfolioProvider>
+              {children}
+            </PortfolioProvider>
+          </LanguageProvider>
         </ThemeProvider>
       </body>
     </html>

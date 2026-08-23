@@ -13,14 +13,16 @@ import BacktestTab from './components/BacktestTab';
 import DataWarehouseTab from './components/DataWarehouseTab';
 import { ThemeToggle } from './components/ThemeToggle';
 import { PortfolioProvider } from './context/PortfolioContext';
-import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History, LogOut, Database, Landmark } from 'lucide-react';
+import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History, LogOut, Database, Landmark, Globe } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
+import { useLanguage } from './context/LanguageContext';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA' | 'TOP5' | 'DIVIDENDOS' | 'BACKTEST' | 'DATA_WAREHOUSE'>('DATA_WAREHOUSE');
   const [session, setSession] = useState<any>(null);
   const router = useRouter();
+  const { t, language, toggleLanguage } = useLanguage();
 
   useEffect(() => {
     // Si estamos en modo demo o modo cartola, no exigir sesión real
@@ -68,7 +70,7 @@ export default function Home() {
   };
 
   if (!session) {
-    return <div className="min-h-screen bg-[#09090b] flex items-center justify-center font-mono text-zinc-500">Cargando Terminal...</div>;
+    return <div className="min-h-screen bg-[#09090b] flex items-center justify-center font-mono text-zinc-500">{t('app.loading')}</div>;
   }
 
   return (
@@ -80,21 +82,27 @@ export default function Home() {
           </div>
           <div>
             <h1 className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-500 dark:from-emerald-400 dark:to-teal-300 bg-clip-text text-transparent">
-              OmniCapital
+              {t('app.title')}
             </h1>
             <p className="text-zinc-500 dark:text-[#a1a1aa] text-[10px] font-mono uppercase tracking-[0.15em] mt-0.5">
-              Wealth Management Platform V3.1
+              {t('app.subtitle')}
             </p>
           </div>
         </div>
         <div className="mt-4 md:mt-0 flex items-center gap-4">
+          <button 
+            onClick={toggleLanguage}
+            className="flex items-center gap-2 px-2 py-1.5 text-xs font-mono font-bold text-zinc-500 hover:text-emerald-500 transition-colors border border-transparent hover:border-zinc-200 dark:hover:border-[#27272a] rounded"
+          >
+            <Globe className="w-4 h-4" /> {language.toUpperCase()}
+          </button>
           <ThemeToggle />
           <NotificationBell />
           <button 
             onClick={handleSignOut}
             className="flex items-center gap-2 px-3 py-1.5 text-xs font-mono font-bold text-zinc-500 hover:text-red-500 transition-colors border border-zinc-200 dark:border-[#27272a] hover:border-red-500 rounded"
           >
-            <LogOut className="w-4 h-4" /> SALIR
+            <LogOut className="w-4 h-4" /> {t('header.logout')}
           </button>
         </div>
       </header>
@@ -128,28 +136,39 @@ export default function Home() {
           <Target className="w-4 h-4" /> [03] Top 5 Oportunidades
         </button>
         <button 
-          onClick={() => setActiveTab('DIVIDENDOS')}
-          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors border-l border-zinc-200 dark:border-[#27272a] ${activeTab === 'DIVIDENDOS' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-emerald-500 text-emerald-600 dark:text-emerald-400' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
+          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors ${activeTab === 'RECOMENDACIONES' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-blue-500 text-blue-600 dark:text-blue-400' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
         >
-          <DollarSign className="w-4 h-4" /> [04] Ingresos Pasivos
+          <Activity className="w-4 h-4" /> {t('tab.recommendations')}
         </button>
         <button 
           onClick={() => setActiveTab('BUSCADOR')}
-          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors border-l border-zinc-200 dark:border-[#27272a] ${activeTab === 'BUSCADOR' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-cyan-500 text-cyan-600 dark:text-cyan-400' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
+          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors ${activeTab === 'BUSCADOR' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-blue-500 text-blue-600 dark:text-blue-400' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
         >
-          <Search className="w-4 h-4" /> [05] Buscador Límite
+          <Search className="w-4 h-4" /> {t('tab.screener')}
+        </button>
+        <button 
+          onClick={() => setActiveTab('TOP5')}
+          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors ${activeTab === 'TOP5' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-blue-500 text-blue-600 dark:text-blue-400' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
+        >
+          <Target className="w-4 h-4" /> {t('tab.top5')}
         </button>
         <button 
           onClick={() => setActiveTab('CALCULADORA')}
-          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors border-l border-zinc-200 dark:border-[#27272a] ${activeTab === 'CALCULADORA' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-amber-500 text-amber-600 dark:text-amber-400' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
+          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors ${activeTab === 'CALCULADORA' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-blue-500 text-blue-600 dark:text-blue-400' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
         >
-          <Calculator className="w-4 h-4" /> [06] Optimizador IA
+          <Calculator className="w-4 h-4" /> {t('tab.calculator')}
+        </button>
+        <button 
+          onClick={() => setActiveTab('DIVIDENDOS')}
+          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors ${activeTab === 'DIVIDENDOS' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-blue-500 text-blue-600 dark:text-blue-400' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
+        >
+          <DollarSign className="w-4 h-4" /> {t('tab.dividends')}
         </button>
         <button 
           onClick={() => setActiveTab('BACKTEST')}
-          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors border-l border-zinc-200 dark:border-[#27272a] ${activeTab === 'BACKTEST' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-rose-500 text-rose-600 dark:text-rose-400' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
+          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors ${activeTab === 'BACKTEST' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-blue-500 text-blue-600 dark:text-blue-400' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
         >
-          <History className="w-4 h-4" /> [07] Backtesting
+          <History className="w-4 h-4" /> {t('tab.backtest')}
         </button>
       </div>
 

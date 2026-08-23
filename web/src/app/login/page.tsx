@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { Lock, Mail, ChevronRight, Landmark } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
+import { useLanguage } from '../context/LanguageContext';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -14,6 +15,7 @@ export default function LoginPage() {
   const [isSignUp, setIsSignUp] = useState(false);
   const router = useRouter();
   const { refreshPortfolio, resetPortfolio } = usePortfolio();
+  const { t, language, toggleLanguage } = useLanguage();
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -49,8 +51,7 @@ export default function LoginPage() {
       if (isSignUp) {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-        // Si el registro es exitoso pero requiere confirmación de correo
-        setErrorMsg('Revisa tu correo para confirmar tu cuenta. Si no configuraste confirmación, ya puedes iniciar sesión.');
+        setErrorMsg(t('login.email_confirmation'));
         setIsSignUp(false);
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -63,12 +64,12 @@ export default function LoginPage() {
         }
         
         resetPortfolio();
-        await refreshPortfolio(); // Carga el portafolio real del usuario de la DB
+        await refreshPortfolio();
         
         router.push('/');
       }
     } catch (error: any) {
-      setErrorMsg(error.message || 'Error de autenticación');
+      setErrorMsg(error.message || t('login.error_auth'));
     } finally {
       setLoading(false);
     }
@@ -79,6 +80,14 @@ export default function LoginPage() {
       {/* Decorative background elements */}
       <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+
+      {/* Language Toggle in Login */}
+      <button 
+        onClick={toggleLanguage}
+        className="absolute top-6 right-6 flex items-center gap-2 px-3 py-1.5 text-xs font-mono font-bold text-zinc-500 hover:text-emerald-500 transition-colors border border-transparent hover:border-zinc-200 dark:hover:border-[#27272a] rounded z-20 bg-white/50 dark:bg-black/50 backdrop-blur-sm"
+      >
+        {language.toUpperCase()}
+      </button>
 
       <div className="w-full max-w-md bg-white/80 dark:bg-[#18181b]/80 backdrop-blur-md border border-zinc-200/50 dark:border-[#27272a]/50 rounded-3xl shadow-xl overflow-hidden transition-colors duration-300 z-10">
         
@@ -106,7 +115,7 @@ export default function LoginPage() {
           <div className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-zinc-500 dark:text-[#71717a] mb-1">
-                Correo Electrónico
+                {t('auth.email')}
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -117,15 +126,15 @@ export default function LoginPage() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="block w-full pl-10 bg-zinc-50 dark:bg-[#09090b] border border-zinc-300 dark:border-[#3f3f46] text-zinc-900 dark:text-[#e4e4e7] rounded-lg p-2.5 text-sm focus:ring-blue-500 focus:border-blue-500 dark:focus:border-[#60a5fa] outline-none transition-colors"
-                  placeholder="admin@ejemplo.com"
+                  className="block w-full pl-10 pr-3 py-2.5 bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-[#27272a] rounded-xl text-zinc-900 dark:text-[#e4e4e7] placeholder-zinc-400 dark:placeholder-[#71717a] focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 text-sm transition-all"
+                  placeholder="admin@omnicapital.com"
                 />
               </div>
             </div>
 
             <div>
               <label className="block text-xs font-medium text-zinc-500 dark:text-[#71717a] mb-1">
-                Contraseña
+                {t('auth.password')}
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -136,7 +145,7 @@ export default function LoginPage() {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="block w-full pl-10 bg-zinc-50 dark:bg-[#09090b] border border-zinc-300 dark:border-[#3f3f46] text-zinc-900 dark:text-[#e4e4e7] rounded-lg p-2.5 text-sm focus:ring-blue-500 focus:border-blue-500 dark:focus:border-[#60a5fa] outline-none transition-colors"
+                  className="block w-full pl-10 pr-3 py-2.5 bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-[#27272a] rounded-xl text-zinc-900 dark:text-[#e4e4e7] placeholder-zinc-400 dark:placeholder-[#71717a] focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 text-sm transition-all"
                   placeholder="••••••••"
                 />
               </div>
@@ -146,10 +155,10 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-lg text-sm font-bold font-mono transition-colors disabled:opacity-50"
+            className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-zinc-900 hover:bg-zinc-800 dark:bg-[#e4e4e7] dark:hover:bg-white text-white dark:text-zinc-900 rounded-xl text-sm font-semibold shadow-lg shadow-zinc-200 dark:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed group"
           >
-            {loading ? 'Procesando...' : isSignUp ? 'CREAR PERFIL' : 'ACCEDER'}
-            {!loading && <ChevronRight className="w-4 h-4" />}
+            {loading ? t('auth.logging_in') : isSignUp ? t('login.register_button') : t('login.button')}
+            {!loading && <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />}
           </button>
           
           <div className="text-center mt-4">
