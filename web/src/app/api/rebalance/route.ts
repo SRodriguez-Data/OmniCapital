@@ -12,7 +12,7 @@ const supabase = createClient(supabaseUrl || '', supabaseKey || '');
 
 export async function POST(request: Request) {
   try {
-    const { budget } = await request.json();
+    const { budget, items } = await request.json();
 
     if (!budget || isNaN(Number(budget)) || Number(budget) <= 0) {
       return NextResponse.json({ error: 'Monto de inversión inválido' }, { status: 400 });
@@ -22,10 +22,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Falta GEMINI_API_KEY para el optimizador de IA' }, { status: 500 });
     }
 
-    // 1. Obtener portafolio
-    const { data: portfolio, error } = await supabase.from('mi_portafolio').select('*');
-    if (error) throw error;
-    if (!portfolio || portfolio.length === 0) {
+    if (!items || items.length === 0) {
       return NextResponse.json({ error: 'El portafolio está vacío' }, { status: 400 });
     }
 
@@ -43,7 +40,7 @@ export async function POST(request: Request) {
 
     // 3. Obtener precios actuales del portafolio
     const portfolioWithPrices = await Promise.all(
-      portfolio.map(async (item) => {
+      items.map(async (item: any) => {
         try {
           const quote = await yahooFinance.quote(item.ticker) as any;
           return {

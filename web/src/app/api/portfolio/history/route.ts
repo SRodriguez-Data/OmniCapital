@@ -53,11 +53,9 @@ export async function POST(request: Request) {
       let totalValueCLP = 0;
       
       for (const item of items) {
-        // Solo considerar el activo si la fecha actual en el gráfico es mayor o igual a la fecha de compra.
-        // Si el activo no tiene fecha de compra, asumimos que siempre estuvo (o se incluye por defecto).
-        if (item.purchase_date && date < item.purchase_date) {
-          continue; // Aún no se compraba en esta fecha
-        }
+        // Al graficar, asumimos la tenencia actual a lo largo del tiempo para mostrar
+        // el rendimiento real de los activos (evitando saltos bruscos por depósitos)
+
 
         const price = pricesByDate[date][item.ticker] || item.precio_compra;
         const rate = item.moneda === 'CLP' ? 1 : (usdClpRate || 930);

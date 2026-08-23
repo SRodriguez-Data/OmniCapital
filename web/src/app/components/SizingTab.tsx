@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { Calculator, Sparkles, Loader2, TrendingUp } from 'lucide-react';
+import { usePortfolio } from '../context/PortfolioContext';
 
 interface RebalanceRecommendation {
   ticker: string;
@@ -11,6 +12,7 @@ interface RebalanceRecommendation {
 }
 
 export default function SizingTab() {
+  const { items } = usePortfolio();
   const [budget, setBudget] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -26,7 +28,7 @@ export default function SizingTab() {
       const res = await fetch('/api/rebalance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ budget: Number(budget) })
+        body: JSON.stringify({ budget: Number(budget), items })
       });
 
       const data = await res.json();

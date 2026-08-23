@@ -157,7 +157,7 @@ export default function ScreenerTab() {
                 <Sparkles className="w-4 h-4 text-[#d946ef]" />
                 <h4 className="text-xs font-sans font-medium font-bold text-[#d946ef] uppercase tracking-widest">Resumen Ejecutivo de IA</h4>
               </div>
-              <p className="text-sm font-sans text-[#d4d4d8] leading-relaxed">
+              <p className="text-sm font-sans text-zinc-900 dark:text-zinc-100 leading-relaxed font-medium">
                 {data.aiAnalysis}
               </p>
             </div>

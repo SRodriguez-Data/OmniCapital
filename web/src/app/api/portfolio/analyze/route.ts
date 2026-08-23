@@ -37,30 +37,34 @@ export async function POST(req: Request) {
 
     const portSummary = items.map((i: any) => `- ${i.ticker}: ${i.cantidad} acciones (Costo prom: $${i.precio_compra})`).join('\n');
 
-    const prompt = `Eres un sistema quant institucional de élite analizando un portafolio de inversiones recién subido por un usuario.
+    const prompt = `Eres un sistema quant institucional de élite analizando un portafolio de inversiones.
 El valor total estimado es de $${totalValue.toLocaleString('es-CL')} CLP.
 
 Activos en el portafolio:
 ${portSummary}
 
-Tu tarea es devolver un objeto JSON estricto con el siguiente formato:
+Tu tarea OBLIGATORIA es devolver un objeto JSON estricto con el siguiente formato EXACTO:
 {
-  "diagnostico": "Un diagnóstico extenso, muy detallado y profesional del portafolio. Analiza la diversificación, riesgos sistémicos e idiosincráticos, exposición macroeconómica (tasas de interés, inflación), sectores predominantes, y sugiere estrategias complejas de rebalanceo o coberturas (hedging) de manera institucional.",
+  "diagnostico": "Escribe aquí un diagnóstico extenso, muy detallado y profesional del portafolio. Analiza la diversificación, riesgos sistémicos e idiosincráticos, exposición macroeconómica, sectores predominantes, y sugiere estrategias complejas de rebalanceo de manera institucional. ESTE CAMPO DEBE CONTENER AL MENOS 100 PALABRAS.",
   "recomendaciones": [
     {
       "ticker": "TICKER_AQUI",
-      "accion": "🟢 BUY", "🟡 HOLD", o "🔴 SELL",
-      "stop_loss": "Precio sugerido como stop loss (ej: $100 (-10%))",
+      "accion": "🟢 BUY", 
+      "stop_loss": "Precio sugerido (ej: $100 (-10%))",
       "analisis": "Análisis profundo y extenso justificando la recomendación técnica y fundamental para este activo particular. Menciona niveles técnicos, múltiplos teóricos, o proyecciones del sector."
     }
   ]
 }
 
-Responde SOLO con el JSON válido. No incluyas markdown como \`\`\`json. Genera una recomendación para cada activo del portafolio.`;
+REGLAS ESTRICTAS:
+1. Responde SOLO con el JSON válido.
+2. No incluyas markdown como \`\`\`json.
+3. Genera una recomendación para CADA activo listado arriba.
+4. Jamás dejes el campo diagnostico vacío ni corto.`;
 
     const result = await model.generateContent(prompt);
     let text = result.response.text();
-    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
 
     const parsed = JSON.parse(text);
 
