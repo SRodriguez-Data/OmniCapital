@@ -31,7 +31,7 @@ export default function RecommendationsTab() {
           const totalPortValue = items.reduce((sum, i) => sum + (i.cantidad * i.precio_compra), 0);
           
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 seconds timeout for deep analysis
+          const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 seconds timeout for deep analysis
           
           const aiCall = await fetch('/api/portfolio/analyze', {
             method: 'POST',
