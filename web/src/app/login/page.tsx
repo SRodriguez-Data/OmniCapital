@@ -186,14 +186,15 @@ export default function LoginPage() {
           
           <button
             type="button"
-            onClick={async () => {
+            onClick={() => {
               if (typeof window !== 'undefined') {
                 localStorage.removeItem('isDemo');
                 localStorage.removeItem('cartolaItems');
                 localStorage.setItem('isCartolaMode', 'true');
                 resetPortfolio();
-                await refreshPortfolio();
-                router.push('/');
+                refreshPortfolio().then(() => {
+                  router.push('/');
+                });
               }
             }}
             className="w-full flex items-center justify-center gap-2 bg-transparent border border-zinc-200 dark:border-[#27272a] hover:bg-zinc-50 dark:hover:bg-[#27272a] text-zinc-500 dark:text-zinc-400 py-2 rounded-lg text-xs font-bold font-mono transition-colors mt-2"
