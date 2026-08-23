@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import YahooFinance from 'yahoo-finance2';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+export const runtime = 'edge';
+
 const yahooFinance = new YahooFinance();
 
 const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
@@ -83,15 +85,16 @@ ${JSON.stringify(externalOpportunities, null, 2)}
 
 Tengo un presupuesto extra de exactamente $${budget} para invertir HOY.
 Tu objetivo es sugerirme cuántas acciones (número ENTERO de "sharesToBuy") debo comprar. 
-Puedes elegir comprar activos de MI PORTAFOLIO ACTUAL (para rebalancear) O comprar activos de las OPORTUNIDADES EXTERNAS (para capturar alfa y diversificar), o una mezcla de ambos.
+DEBES ACTUAR COMO UN GESTOR AGRESIVO: Evalúa las OPORTUNIDADES EXTERNAS. Si detectas que a mi portafolio le falta exposición en ciertos sectores o países, PRIORIZA INYECTAR PARTE DEL PRESUPUESTO EN ESTAS NUEVAS OPORTUNIDADES EXTERNAS. No te limites a comprar más de lo que ya tengo.
+Explica en "rationale" por qué estás inyectando esta nueva acción (ej: 'Añadimos esta oportunidad top del mercado para diversificar exposición geográfica').
 
 REGLAS ESTRICTAS:
 1. "sharesToBuy" debe ser un número entero mayor o igual a 0.
 2. El costo total (sharesToBuy * precioActual) de todas las compras sumadas NO DEBE EXCEDER el presupuesto de $${budget}.
-3. PROHIBICIÓN ABSOLUTA: SOLO puedes recomendar tickers que existan en MI PORTAFOLIO ACTUAL o en las OPORTUNIDADES EXTERNAS provistas. NO inventes ni recomiendes ningún otro ticker.
-4. Si la moneda del activo no es USD, ignora el tipo de cambio y asume que el presupuesto está en la moneda principal de la cuenta, pero intenta distribuir matemáticamente.
-5. Explica detalladamente en "rationale" por qué elegiste este activo específico considerando su riesgo, tu modelo y la diversificación del portafolio.
-6. Para calcular los costos de oportunidades externas, usa el "precio_entrada_ideal" que viene en el JSON.
+3. PROHIBICIÓN ABSOLUTA: SOLO puedes recomendar tickers que existan en MI PORTAFOLIO ACTUAL o en las OPORTUNIDADES EXTERNAS provistas. NO inventes ningún otro ticker.
+4. Si la moneda del activo no es USD, asume que el presupuesto está en la moneda principal y distribuye matemáticamente.
+5. Explica detalladamente en "rationale" por qué elegiste este activo. Si es una oportunidad externa, explica por qué es mejor añadirla que comprar más de lo que ya tengo.
+6. Para calcular los costos de oportunidades externas, usa el "precio_entrada_ideal".
 
 Responde ÚNICAMENTE con un JSON Array válido con esta estructura estricta, sin markdown ni texto adicional:
 [
