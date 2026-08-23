@@ -47,13 +47,13 @@ ${portSummary}
 
 Tu tarea OBLIGATORIA es devolver un objeto JSON estricto con el siguiente formato EXACTO:
 {
-  "diagnostico": "Escribe aquí un diagnóstico técnico y macroeconómico muy directo del portafolio. Analiza concentración, liquidez y riesgo. (MÁXIMO 50 PALABRAS).",
+  "diagnostico": "Escribe aquí un diagnóstico macroeconómico y técnico extenso, profundo y brutalmente honesto del portafolio. Analiza la diversificación estructural, exposición sectorial (ej. sobreexposición a tecnología o mercados emergentes), riesgos sistémicos (tasas de interés, inflación, leyes), y sugiere estrategias institucionales de rebalanceo. DEBE SER UN PÁRRAFO COMPLETO DE AL MENOS 100 PALABRAS.",
   "recomendaciones": [
     {
       "ticker": "TICKER_AQUI",
       "accion": "🟢 BUY", 
       "stop_loss": "Precio de salida estricto (ej: $100 (-10%))",
-      "analisis": "Análisis rápido y directo. Justifica por qué comprar, mantener o vender basándote en macroeconomía, fundamentales de la empresa o momentum. MÁXIMO 30 PALABRAS."
+      "analisis": "Análisis QUIRÚRGICO EXTREMADAMENTE DETALLADO Y PROFESIONAL. Justifica a fondo por qué comprar, mantener o vender. Debes integrar variables macroeconómicas, cambios regulatorios o legales que afecten a la industria, fundamentales de la empresa, y análisis técnico (soportes, resistencias, momentum). Por ejemplo: 'Vender ya que la nueva ley de impuestos afecta sus márgenes, sumado a una divergencia bajista en el MACD'. DEBE CONTENER AL MENOS 60 PALABRAS POR ACTIVO, sin excusas."
     }
   ]
 }
