@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-export const maxDuration = 60;
-
 const apiKey = process.env.GEMINI_API_KEY;
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
@@ -47,13 +45,13 @@ ${portSummary}
 
 Tu tarea OBLIGATORIA es devolver un objeto JSON estricto con el siguiente formato EXACTO:
 {
-  "diagnostico": "Escribe aquí un diagnóstico macroeconómico y técnico extenso, profundo y brutalmente honesto del portafolio. Analiza la diversificación estructural, exposición sectorial (ej. sobreexposición a tecnología o mercados emergentes), riesgos sistémicos (tasas de interés, inflación, leyes), y sugiere estrategias institucionales de rebalanceo. DEBE SER UN PÁRRAFO COMPLETO DE AL MENOS 100 PALABRAS.",
+  "diagnostico": "Diagnóstico macroeconómico y técnico profundo del portafolio. Analiza concentración sectorial, riesgos sistémicos, y sugiere rebalanceo institucional. MÁXIMO 80 PALABRAS.",
   "recomendaciones": [
     {
       "ticker": "TICKER_AQUI",
       "accion": "🟢 BUY", 
       "stop_loss": "Precio de salida estricto (ej: $100 (-10%))",
-      "analisis": "Análisis QUIRÚRGICO EXTREMADAMENTE DETALLADO Y PROFESIONAL. Justifica a fondo por qué comprar, mantener o vender. Debes integrar variables macroeconómicas, cambios regulatorios o legales que afecten a la industria, fundamentales de la empresa, y análisis técnico (soportes, resistencias, momentum). Por ejemplo: 'Vender ya que la nueva ley de impuestos afecta sus márgenes, sumado a una divergencia bajista en el MACD'. DEBE CONTENER AL MENOS 60 PALABRAS POR ACTIVO, sin excusas."
+      "analisis": "Análisis técnico y macroeconómico QUIRÚRGICO. Justifica a fondo integrando leyes, regulaciones, MACD, etc. Ejemplo: 'Vender por riesgo regulatorio y divergencia bajista MACD'. SÉ EXTREMADAMENTE PROFESIONAL PERO CONCISO. MÁXIMO 40 PALABRAS POR ACTIVO."
     }
   ]
 }

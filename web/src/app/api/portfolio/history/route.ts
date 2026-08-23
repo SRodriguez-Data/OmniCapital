@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import yahooFinance from 'yahoo-finance2';
+import YahooFinance from 'yahoo-finance2';
+
+const yahooFinance = new YahooFinance();
 
 // Cache simple en memoria para evitar saturar Yahoo Finance
 const historyCache = new Map<string, { timestamp: number, data: any[] }>();
@@ -32,12 +34,14 @@ export async function POST(request: Request) {
         if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
           historical = cached.data;
         } else {
-          historical = await yahooFinance.historical(ticker, { period1, interval: '1d' });
+          const res = await yahooFinance.chart(ticker, { period1, interval: '1d' });
+          historical = res.quotes;
           historyCache.set(cacheKey, { timestamp: Date.now(), data: historical });
         }
 
         historical.forEach((row: any) => {
-          const d = row.date.toISOString().split('T')[0];
+          if (!row.date || row.close === null || row.close === undefined) return;
+          const d = new Date(row.date).toISOString().split('T')[0];
           allDates.add(d);
           if (!pricesByDate[d]) pricesByDate[d] = {};
           pricesByDate[d][ticker] = row.close;
