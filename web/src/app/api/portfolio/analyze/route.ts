@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+export const runtime = 'edge';
+
 const apiKey = process.env.GEMINI_API_KEY;
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
@@ -45,13 +47,13 @@ ${portSummary}
 
 Tu tarea OBLIGATORIA es devolver un objeto JSON estricto con el siguiente formato EXACTO:
 {
-  "diagnostico": "Diagnóstico macroeconómico y técnico profundo del portafolio. Analiza concentración sectorial, riesgos sistémicos, y sugiere rebalanceo institucional. MÁXIMO 80 PALABRAS.",
+  "diagnostico": "Diagnóstico macroeconómico y técnico profundo del portafolio. Analiza riesgos sistémicos y sugiere rebalanceo. SÉ EXTREMADAMENTE BREVE Y AL PUNTO. MÁXIMO 40 PALABRAS.",
   "recomendaciones": [
     {
       "ticker": "TICKER_AQUI",
       "accion": "🟢 BUY", 
       "stop_loss": "Precio de salida estricto (ej: $100 (-10%))",
-      "analisis": "Análisis técnico y macroeconómico QUIRÚRGICO. Justifica a fondo integrando leyes, regulaciones, MACD, etc. Ejemplo: 'Vender por riesgo regulatorio y divergencia bajista MACD'. SÉ EXTREMADAMENTE PROFESIONAL PERO CONCISO. MÁXIMO 40 PALABRAS POR ACTIVO."
+      "analisis": "Análisis técnico y macroeconómico QUIRÚRGICO. Justifica con indicadores clave (ej: RSI, MACD, leyes). SÉ EXTREMADAMENTE BREVE. MÁXIMO 20 PALABRAS POR ACTIVO."
     }
   ]
 }
