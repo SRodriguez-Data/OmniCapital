@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import YahooFinance from 'yahoo-finance2';
+import yahooFinance from 'yahoo-finance2';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
+yahooFinance.suppressNotices(['yahooSurvey']);
 const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -123,6 +123,6 @@ Responde ÚNICAMENTE con un JSON Array válido con esta estructura estricta, sin
 
   } catch (err: any) {
     console.error('API Rebalance Error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err.message || 'Error desconocido' }, { status: 500 });
   }
 }
