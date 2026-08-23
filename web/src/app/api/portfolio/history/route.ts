@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import yahooFinance from 'yahoo-finance2';
+
+// Cache simple en memoria para evitar saturar Yahoo Finance
+const historyCache = new Map<string, { timestamp: number, data: any[] }>();
+const CACHE_TTL = 1000 * 60 * 60; // 1 hora
 
 export async function POST(request: Request) {
   try {
@@ -11,26 +15,37 @@ export async function POST(request: Request) {
 
     const tickers = Array.from(new Set(items.map((i: any) => String(i.ticker)))) as string[];
     
-    const { data: historyData, error } = await supabase
-      .from('precios_historicos')
-      .select('ticker, date, close')
-      .in('ticker', tickers)
-      .order('date', { ascending: true });
-
-    if (error) {
-      console.error("Error fetching global history:", error);
-      return NextResponse.json([]);
-    }
+    // Obtener fecha de inicio (1 año atrás) para el histórico
+    const startDate = new Date();
+    startDate.setFullYear(startDate.getFullYear() - 2);
+    const period1 = startDate.toISOString().split('T')[0];
 
     const pricesByDate: Record<string, Record<string, number>> = {};
     const allDates = new Set<string>();
 
-    for (const row of historyData || []) {
-      const d = row.date.split('T')[0];
-      allDates.add(d);
-      if (!pricesByDate[d]) pricesByDate[d] = {};
-      pricesByDate[d][row.ticker] = row.close;
-    }
+    await Promise.all(tickers.map(async (ticker) => {
+      try {
+        const cacheKey = `${ticker}-${period1}`;
+        let historical: any[] = [];
+        
+        const cached = historyCache.get(cacheKey);
+        if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+          historical = cached.data;
+        } else {
+          historical = await yahooFinance.historical(ticker, { period1, interval: '1d' });
+          historyCache.set(cacheKey, { timestamp: Date.now(), data: historical });
+        }
+
+        historical.forEach((row: any) => {
+          const d = row.date.toISOString().split('T')[0];
+          allDates.add(d);
+          if (!pricesByDate[d]) pricesByDate[d] = {};
+          pricesByDate[d][ticker] = row.close;
+        });
+      } catch (err) {
+        console.error(`Error fetching history for ${ticker}:`, err);
+      }
+    }));
 
     const sortedDates = Array.from(allDates).sort();
     if (sortedDates.length === 0) {
@@ -53,10 +68,7 @@ export async function POST(request: Request) {
       let totalValueCLP = 0;
       
       for (const item of items) {
-        // Al graficar, asumimos la tenencia actual a lo largo del tiempo para mostrar
-        // el rendimiento real de los activos (evitando saltos bruscos por depósitos)
-
-
+        // Al graficar, asumimos la tenencia actual a lo largo del tiempo
         const price = pricesByDate[date][item.ticker] || item.precio_compra;
         const rate = item.moneda === 'CLP' ? 1 : (usdClpRate || 930);
         totalValueCLP += item.cantidad * price * rate;

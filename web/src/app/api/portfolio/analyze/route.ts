@@ -45,13 +45,13 @@ ${portSummary}
 
 Tu tarea OBLIGATORIA es devolver un objeto JSON estricto con el siguiente formato EXACTO:
 {
-  "diagnostico": "Escribe aquí un diagnóstico extenso, muy detallado y profesional del portafolio. Analiza la diversificación, riesgos sistémicos e idiosincráticos, exposición macroeconómica, sectores predominantes, y sugiere estrategias complejas de rebalanceo de manera institucional. ESTE CAMPO DEBE CONTENER AL MENOS 100 PALABRAS.",
+  "diagnostico": "Escribe aquí un diagnóstico extenso, muy detallado y brutalmente honesto del portafolio. Analiza la diversificación, riesgos sistémicos, exposición a sectores saturados o prometedores, y sugiere estrategias de rebalanceo de manera institucional. ESTE CAMPO DEBE CONTENER AL MENOS 100 PALABRAS.",
   "recomendaciones": [
     {
       "ticker": "TICKER_AQUI",
       "accion": "🟢 BUY", 
-      "stop_loss": "Precio sugerido (ej: $100 (-10%))",
-      "analisis": "Análisis profundo y extenso justificando la recomendación técnica y fundamental para este activo particular. Menciona niveles técnicos, múltiplos teóricos, o proyecciones del sector."
+      "stop_loss": "Precio de salida estricto (ej: $100 (-10%))",
+      "analisis": "Debes dar un análisis EXTREMADAMENTE DETALLADO Y TÉCNICO. Justifica por qué comprar, mantener o vender. Si se vende, di por qué (ej: sobreexposición, falta de futuro, métricas deterioradas, pérdida de momentum, cambios macroeconómicos). Menciona niveles de soporte/resistencia, fundamentales y catalizadores. MÍNIMO 60 PALABRAS POR ACTIVO."
     }
   ]
 }
