@@ -1,6 +1,7 @@
 // Lector de cartolas de brokers (100% en el navegador).
 // - Racional US (DriveWealth): confirmaciones por operación (Buy/Sell; las ventas traen cantidad negativa).
 // - Racional Chile (Vector Capital): ledger mensual con foto de la cartera + detalle de transacciones.
+// - BTG Pactual Chile: estado de cuenta mensual con detalle de inversiones (foto) + movimientos de custodia.
 // - Fintual: compras y dividendos.
 
 const PATRON_US_TRADE = /\b([A-Z]{1,5})\b(?:(?!\b(?:Buy|BUY|buy|Sell|SELL|sell|Compra|COMPRA|compra|Venta|VENTA|venta)\b).){1,100}?\b(Buy|BUY|buy|Sell|SELL|sell|Compra|COMPRA|compra|Venta|VENTA|venta)\b(?:\s+\d{1,2}:\d{2}:\d{2}\s+[APMpm]{2})?\s+(-?[\d\.,]+)\s+([\d\.,]+)\s+(\d{1,2}\/\d{1,2}\/\d{4})/g;
@@ -10,6 +11,22 @@ const PATRON_CL_TRADE = /(\d{2}-\d{2}-\d{4})\s+\d{2}-\d{2}-\d{4}\s+(?:(COMPRA|VE
 // Fila de "Cartera de Inversiones": nemotécnico, moneda, precio compra, valor compra, nominales, precio actual, valor actual, variación, % var
 const PATRON_CL_POSICION = /\b([A-Z][A-Z0-9\-]{1,14})\s+(CLP|USD)\s+([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)\s+(-?[\d\.,]+)\s+(-?[\d\.,]+)/g;
 const PATRON_CL_FECHA_CORTE = /Estado de Cuenta al\s+[A-ZÁÉÍÓÚÑ]+,\s+(\d{1,2}) DE ([A-ZÁÉÍÓÚÑ]+) DE (\d{4})/i;
+// BTG: "Estado de cuenta actualizado al 20 de Julio de 2026"
+const PATRON_BTG_FECHA_CORTE = /actualizado al\s+(\d{1,2}) de ([A-Za-zÁÉÍÓÚáéíóú]+) de (\d{4})/i;
+// BTG acciones: nemotécnico, nro. acciones, $ precio compra, $ precio actual
+const PATRON_BTG_ACCION = /\b([A-Z][A-Z0-9\-]{1,14})\s+([\d\.,]+)\s+\$\s*([\d\.,]+)\s+\$\s*([\d\.,]+)/g;
+// BTG fondos: nombre, serie, nro. cuotas, $ precio compra, $ precio actual, % var
+const PATRON_BTG_FONDO = /([A-Za-zÁÉÍÓÚáéíóúÑñ&\.\- ]+?)\s{2,}(\S+)\s+([\d\.,]+)\s+\$\s*([\d\.,]+)\s+\$\s*([\d\.,]+)\s+-?[\d,]+\s*%/g;
+// BTG anexo de custodia: nombre, nemotécnico, custodio, concepto, nominales, precio, moneda, valorización
+const PATRON_BTG_CUSTODIA = /([A-Za-zÁÉÍÓÚáéíóúÑñ&\.\- ]+?)\s{2,}([A-Z][A-Z0-9\-]{1,14})\s+([A-Z]{2,10})\s+([A-Za-z]+)\s+([\d\.]+)\s+([\d\.,]+)\s+(CLP|USD)\s+([\d\.]+)/g;
+// BTG movimientos de custodia: fecha, fecha, movimiento, instrumento, unidades, nro. movimiento, precio
+const PATRON_BTG_MOVIMIENTO = /(\d{2}-\d{2}-\d{4})\s+\d{2}-\d{2}-\d{4}\s+(Compra|Venta)\s+(.+?)\s+([\d\.,]+)\s+(\d{6,})\s+([\d\.,]+)/g;
+
+// Fondos de BTG cuyo nombre no trae nemotécnico en todos los estados de cuenta
+const FONDOS_BTG: Record<string, string> = {
+  'FM ITAU ETF IT NOW S&P IPSA': 'CFMITNIPSA',
+};
+
 const PATRON_FINTUAL_COMPRA = /(\d{4}-\d{2}-\d{2})\s+(.*?)\s+([A-Z0-9\-]{2,10})\s+(?:ETF|Acciones|Fondo)(?:(?!\bUS\s+\$\b).){1,100}?US\s+\$\s*([\d,]+)\s+([\d,]+)/g;
 const PATRON_FINTUAL_DIVIDEND = /(\d{4}-\d{2}-\d{2})\s+(.*?)\s+([A-Z0-9\-]{2,10})\s+(?:ETF|Acciones|Fondo)(?:(?!\bUS\s+\$\b).){1,100}?US\s+\$\s*([\d,]+)\s+US\s+\$\s*([\d,]+)\s+US\s+\$\s*([\d,]+)/g;
 
@@ -64,7 +81,7 @@ function normalizarTickerCL(raw: string, moneda: 'USD' | 'CLP', cantidad: number
   return { ticker, cantidad, precio };
 }
 
-export type Fuente = 'DRIVEWEALTH' | 'VECTOR' | 'FINTUAL';
+export type Fuente = 'DRIVEWEALTH' | 'VECTOR' | 'BTG' | 'FINTUAL';
 
 export interface Operacion {
   Fecha: string;
@@ -90,6 +107,7 @@ export interface ResultadoCartola {
   data: Operacion[];
   foto?: FotoCartera;
   sinTexto?: boolean; // PDF escaneado (imagen): no se puede leer sin OCR
+  avisos?: string[]; // instrumentos que no se pudieron interpretar
 }
 
 export async function parsePdfToCartola(file: File): Promise<ResultadoCartola> {
@@ -124,6 +142,7 @@ export function parseCartolaText(text: string, fileName: string): ResultadoCarto
 
   let broker = "Desconocido";
   if (lower.includes('fintual')) broker = "Fintual";
+  else if (lower.includes('btg pactual') || lower.includes('btgpactual')) return parseBTG(text, fileName);
   else if (lower.includes('drivewealth') || lower.includes('alpaca') || lower.includes('racional') || lower.includes('vector capital')) broker = "Racional";
 
   const data: Operacion[] = [];
@@ -192,6 +211,83 @@ export function parseCartolaText(text: string, fileName: string): ResultadoCarto
   return { broker, file_name: fileName, data, foto };
 }
 
+// Último tramo de un texto separado por 2+ espacios (las columnas del PDF vienen así)
+const ultimoSegmento = (s: string) => (s.split(/\s{2,}/).pop() ?? '').trim();
+
+// Tramos de texto entre cada aparición de `inicio` y el siguiente `fin`, sin superponerse
+// (ojo: "Total Inversiones En Fondos..." contiene "Inversiones En Fondos...")
+function secciones(text: string, inicio: string, fin: string): string[] {
+  const out: string[] = [];
+  let i = text.indexOf(inicio);
+  while (i >= 0) {
+    const desde = i + inicio.length;
+    const f = text.indexOf(fin, desde);
+    const hasta = f >= 0 ? f : text.length;
+    out.push(text.slice(desde, hasta));
+    i = text.indexOf(inicio, hasta);
+  }
+  return out;
+}
+
+// Estado de cuenta BTG Pactual Chile. La foto de la cartera sale de las tablas "Detalle Inversiones"
+// (cantidad y precio promedio de compra); el anexo de custodia, cuando viene, traduce el nombre
+// de cada fondo a su nemotécnico. Los movimientos de custodia dan las fechas de compra.
+function parseBTG(text: string, fileName: string): ResultadoCartola {
+  const avisos: string[] = [];
+
+  const nemoPorNombre: Record<string, string> = { ...FONDOS_BTG };
+  for (const anexo of secciones(text, 'Anexo Inventario de Custodia', 'Informaciones Adicionales')) {
+    for (const m of anexo.matchAll(PATRON_BTG_CUSTODIA)) {
+      const nombre = ultimoSegmento(m[1]).toUpperCase();
+      if (nombre) nemoPorNombre[nombre] = m[2];
+    }
+  }
+  const resolverNemo = (instrumento: string): string | undefined => {
+    const nombre = instrumento.trim().toUpperCase();
+    if (/^[A-Z][A-Z0-9\-]{1,14}$/.test(nombre)) return nombre; // ya es un nemotécnico
+    const conocido = Object.keys(nemoPorNombre).find(k => nombre === k || nombre.startsWith(`${k} `));
+    return conocido ? nemoPorNombre[conocido] : undefined;
+  };
+
+  const posiciones: FotoCartera['posiciones'] = [];
+  for (const seccion of secciones(text, 'Inversiones En Acciones Locales En CLP', 'Total Inversiones En Acciones Locales')) {
+    for (const m of seccion.matchAll(PATRON_BTG_ACCION)) {
+      const { ticker, cantidad, precio } = normalizarTickerCL(m[1], 'CLP', parseNumberFintual(m[2]), parseNumberFintual(m[3]));
+      if (cantidad > 0) posiciones.push({ ticker, cantidad, precio_compra: precio, moneda: 'CLP' });
+    }
+  }
+  // En el PDF la fila del fondo aparece después del total (el texto viene desordenado): se corta en el pie de página
+  for (const seccion of secciones(text, 'Inversiones En Fondos Mutuos Locales En CLP', 'Nombre Cuenta')) {
+    for (const m of seccion.matchAll(PATRON_BTG_FONDO)) {
+      const nombre = ultimoSegmento(m[1]);
+      const nemo = resolverNemo(nombre);
+      if (!nemo) {
+        avisos.push(`Fondo "${nombre}" sin nemotécnico conocido: se omitió.`);
+        continue;
+      }
+      const { ticker, cantidad, precio } = normalizarTickerCL(nemo, 'CLP', parseNumberFintual(m[3]), parseNumberFintual(m[4]));
+      if (cantidad > 0) posiciones.push({ ticker, cantidad, precio_compra: precio, moneda: 'CLP' });
+    }
+  }
+
+  const data: Operacion[] = [];
+  for (const m of text.matchAll(PATRON_BTG_MOVIMIENTO)) {
+    const nemo = resolverNemo(m[3]);
+    if (!nemo) continue;
+    const { ticker, cantidad, precio } = normalizarTickerCL(nemo, 'CLP', parseNumberFintual(m[4]), parseNumberFintual(m[6]));
+    data.push({ Fecha: parseDate(m[1]), Archivo: fileName, Ticker: ticker, Tipo: m[2] === 'Venta' ? 'VENTA' : 'COMPRA', Precio: precio, Cantidad: cantidad, Moneda: 'CLP', Fuente: 'BTG' });
+  }
+
+  // Sin fecha de corte no hay foto confiable (una foto vacía borraría las posiciones de BTG)
+  const fechaMatch = text.match(PATRON_BTG_FECHA_CORTE);
+  const mes = fechaMatch ? MESES[fechaMatch[2].toUpperCase()] : undefined;
+  const foto: FotoCartera | undefined = fechaMatch && mes && text.includes('Resumen Inversiones')
+    ? { fuente: 'BTG', fecha: `${fechaMatch[3]}-${mes}-${fechaMatch[1].padStart(2, '0')}`, posiciones }
+    : undefined;
+
+  return { broker: 'BTG Pactual', file_name: fileName, data, foto, avisos };
+}
+
 export interface PosicionConsolidada {
   ticker: string;
   cantidad: number;
@@ -239,7 +335,16 @@ export function consolidarCartolas(resultados: ResultadoCartola[]): { posiciones
   const pos = new Map<string, { cantidad: number; costo: number; moneda: 'USD' | 'CLP'; fecha: string }>();
   for (const foto of fotos.values()) {
     for (const p of foto.posiciones) {
-      pos.set(p.ticker, { cantidad: p.cantidad, costo: p.cantidad * p.precio_compra, moneda: p.moneda, fecha: primeraCompra.get(p.ticker) ?? foto.fecha });
+      // El mismo activo puede estar en dos brokers (ej. CFMITNIPSA en Vector y en BTG): se suman
+      const fecha = primeraCompra.get(p.ticker) ?? foto.fecha;
+      const previa = pos.get(p.ticker);
+      if (previa) {
+        previa.cantidad += p.cantidad;
+        previa.costo += p.cantidad * p.precio_compra;
+        if (fecha < previa.fecha) previa.fecha = fecha;
+      } else {
+        pos.set(p.ticker, { cantidad: p.cantidad, costo: p.cantidad * p.precio_compra, moneda: p.moneda, fecha });
+      }
     }
   }
 

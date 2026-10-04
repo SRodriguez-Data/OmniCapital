@@ -111,6 +111,7 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
 
   const ilegibles = results.filter(r => r.sinTexto);
   const desconocidos = results.filter(r => !r.sinTexto && r.broker === 'Desconocido');
+  const avisos = results.flatMap(r => (r.avisos ?? []).map(a => `${r.file_name}: ${a}`));
   const tickersExistentes = new Set(items.map(i => i.ticker));
   const reemplazos = posiciones.filter(p => tickersExistentes.has(p.ticker)).map(p => p.ticker);
 
@@ -131,7 +132,7 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
             </h2>
           </div>
           <p className="text-sm font-mono text-zinc-500 dark:text-[#a1a1aa] uppercase tracking-wider">
-            Racional (EE.UU. y Chile) · Fintual
+            Racional (EE.UU. y Chile) · BTG Pactual · Fintual
           </p>
         </div>
       </div>
@@ -195,10 +196,11 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
           </div>
         )}
 
-        {(ilegibles.length > 0 || desconocidos.length > 0 || duplicadas > 0) && (
+        {(ilegibles.length > 0 || desconocidos.length > 0 || avisos.length > 0 || duplicadas > 0) && (
           <div className="mt-6 bg-amber-50 dark:bg-amber-900/10 text-amber-800 dark:text-amber-300 p-4 rounded-lg text-xs font-mono border border-amber-200 dark:border-amber-900/50 space-y-1">
             {ilegibles.map(r => <p key={r.file_name}>⚠️ {r.file_name}: el PDF no tiene texto (parece escaneado), no se pudo leer.</p>)}
             {desconocidos.map(r => <p key={r.file_name}>⚠️ {r.file_name}: broker no soportado todavía, se omitió.</p>)}
+            {avisos.map(a => <p key={a}>⚠️ {a}</p>)}
             {duplicadas > 0 && <p>ℹ️ Se ignoraron {duplicadas} operaciones repetidas en archivos duplicados.</p>}
           </div>
         )}
@@ -211,7 +213,7 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
             <CheckCircle className="w-5 h-5 text-emerald-500" /> Posiciones Consolidadas ({posiciones.length})
           </h3>
           <p className="text-xs font-mono text-zinc-500 dark:text-[#a1a1aa] mb-4">
-            Compras menos ventas con costo promedio ponderado. En Racional Chile se usa la foto de cartera del estado de cuenta más reciente.
+            Compras menos ventas con costo promedio ponderado. En Racional Chile y BTG Pactual se usa la foto de cartera del estado de cuenta más reciente; un mismo activo en varios brokers se suma.
           </p>
 
           <div className="overflow-x-auto border border-zinc-200 dark:border-[#27272a] rounded-lg">
