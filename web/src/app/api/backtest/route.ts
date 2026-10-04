@@ -8,23 +8,25 @@ async function fetchHistoricalData(ticker: string, years: number, interval: '1d'
   const period1 = new Date();
   period1.setFullYear(period2.getFullYear() - years);
 
-  const result: any = await yahooFinance.chart(ticker, {
+  const result = await yahooFinance.chart(ticker, {
     period1: period1,
     period2: period2,
     interval: interval
   });
 
   if (!result || !result.quotes || result.quotes.length === 0) {
-    throw new Error(`No data available for ${ticker}`);
+    throw new Error(`No hay datos disponibles para ${ticker}`);
   }
 
   const cleanData = [];
   for (const quote of result.quotes) {
-    if (quote.close !== null && quote.close !== undefined) {
+    // adjclose incorpora dividendos y splits: el backtest mide retorno total, no solo precio
+    const price = quote.adjclose ?? quote.close;
+    if (price !== null && price !== undefined) {
       cleanData.push({
         date: quote.date.toISOString().split('T')[0],
         timestamp: quote.date.getTime() / 1000,
-        price: quote.close
+        price
       });
     }
   }
@@ -32,20 +34,31 @@ async function fetchHistoricalData(ticker: string, years: number, interval: '1d'
   return cleanData;
 }
 
+// S&P 500 Total Return: incluye dividendos reinvertidos, comparable con adjclose del activo
+const BENCHMARK = '^SP500TR';
+
 export async function POST(request: Request) {
   try {
-    const { ticker, capital, years } = await request.json();
+    const body = await request.json();
+    const ticker = typeof body.ticker === 'string' ? body.ticker.trim().toUpperCase() : '';
+    const capital = Number(body.capital);
+    const years = Number(body.years);
 
-    if (!ticker || !capital || !years) {
-      return NextResponse.json({ error: 'Faltan parámetros (ticker, capital, years)' }, { status: 400 });
+    if (!ticker || !/^[A-Z0-9.^=\-]{1,20}$/.test(ticker)) {
+      return NextResponse.json({ error: 'Ticker inválido' }, { status: 400 });
+    }
+    if (!Number.isFinite(capital) || capital <= 0) {
+      return NextResponse.json({ error: 'El capital debe ser un número mayor a 0' }, { status: 400 });
+    }
+    if (!Number.isInteger(years) || years < 1 || years > 30) {
+      return NextResponse.json({ error: 'Los años deben estar entre 1 y 30' }, { status: 400 });
     }
 
     const interval = years > 2 ? '1wk' : '1d';
 
-    // Fetch data for target ticker and S&P 500 benchmark
     const [targetData, benchmarkData] = await Promise.all([
       fetchHistoricalData(ticker, years, interval),
-      fetchHistoricalData('^GSPC', years, interval)
+      fetchHistoricalData(BENCHMARK, years, interval)
     ]);
 
     if (targetData.length === 0 || benchmarkData.length === 0) {
@@ -79,8 +92,6 @@ export async function POST(request: Request) {
     // Benchmark shares bought at day 0
     const benchmarkShares = capital / initialBenchmarkPrice;
 
-    let targetMax = capital;
-    let targetMin = capital;
     let maxDrawdown = 0;
     let peak = capital;
 
@@ -127,8 +138,8 @@ export async function POST(request: Request) {
       }
     });
 
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('API Backtest Error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Error interno' }, { status: 500 });
   }
 }

@@ -22,8 +22,9 @@ export default function BacktestTab() {
 
   const isCLP = ticker.toUpperCase().endsWith('.SN');
   
-  const formatCurrency = (val: number, isTooltip: boolean = false, forceUSD: boolean = false) => {
-    if (isCLP && !forceUSD) {
+  // El benchmark se simula con el mismo capital y en la misma moneda que el activo (sin efecto cambiario)
+  const formatCurrency = (val: number, isTooltip: boolean = false) => {
+    if (isCLP) {
       return `CLP$ ${val.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
     }
     return `$${val.toLocaleString(undefined, { minimumFractionDigits: isTooltip ? 2 : 0, maximumFractionDigits: isTooltip ? 2 : 0 })}`;
@@ -62,16 +63,13 @@ export default function BacktestTab() {
       return (
         <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-3 rounded shadow-lg">
           <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans font-medium mb-2">{label}</p>
-          {payload.map((entry: any, index: number) => {
-            const isBench = entry.name === "S&P 500";
-            return (
-              <div key={index} className="flex items-center gap-2 text-sm font-mono rounded-lg">
-                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
-                <span className="text-zinc-900 dark:text-[#e4e4e7]">{entry.name}:</span>
-                <span className="font-bold text-white">{formatCurrency(entry.value, true, isBench)}</span>
-              </div>
-            );
-          })}
+          {payload.map((entry: any, index: number) => (
+            <div key={index} className="flex items-center gap-2 text-sm font-mono rounded-lg">
+              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+              <span className="text-zinc-900 dark:text-[#e4e4e7]">{entry.name}:</span>
+              <span className="font-bold text-zinc-900 dark:text-white">{formatCurrency(entry.value, true)}</span>
+            </div>
+          ))}
         </div>
       );
     }
@@ -88,6 +86,7 @@ export default function BacktestTab() {
             <h2 className="text-lg font-sans font-bold tracking-tight text-zinc-900 dark:text-[#e4e4e7] uppercase tracking-wider">Máquina del Tiempo (Backtesting)</h2>
             <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans">
               Viaja al pasado. Simula qué hubiera pasado si invertías tu capital en un activo vs el S&P 500.
+              Ambos con retorno total (dividendos reinvertidos).
             </p>
           </div>
         </div>
@@ -168,7 +167,7 @@ export default function BacktestTab() {
               <p className={`text-2xl font-bold font-sans tracking-tight ${result.metrics.benchmarkReturn >= 0 ? 'text-[#60a5fa]' : 'text-[#f87171]'}`}>
                 {result.metrics.benchmarkReturn >= 0 ? '+' : ''}{result.metrics.benchmarkReturn.toFixed(2)}%
               </p>
-              <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans font-medium mt-1">{formatCurrency(result.metrics.finalBenchmarkValue, false, true)}</p>
+              <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans font-medium mt-1">{formatCurrency(result.metrics.finalBenchmarkValue)}</p>
             </div>
             <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 rounded text-center">
               <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase mb-1">Victoria vs Mercado</p>

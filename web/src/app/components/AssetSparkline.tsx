@@ -2,36 +2,16 @@
 
 import React, { useEffect, useState } from 'react';
 import { AreaChart, Area, ResponsiveContainer, YAxis, XAxis, Tooltip } from 'recharts';
-import { usePortfolio } from '../context/PortfolioContext';
 
 export type TimePeriod = '1S' | '1M' | '3M' | '6M' | 'YTD' | '1A' | 'TOTAL';
 
 export default function AssetSparkline({ ticker, purchaseDate, period = 'TOTAL' }: { ticker: string, purchaseDate: string, period?: TimePeriod }) {
-  const [data, setData] = useState<any[]>([]);
+  const [data, setData] = useState<{ date: string; price: number }[]>([]);
   const [loading, setLoading] = useState(true);
-  const { isDemo } = usePortfolio();
 
   useEffect(() => {
     async function fetchData() {
       if (!purchaseDate) {
-        setLoading(false);
-        return;
-      }
-
-      if (isDemo) {
-        // Generar mock para sparkline
-        const mockData = [];
-        let p = 100;
-        let date = new Date(purchaseDate);
-        const today = new Date();
-        const days = Math.min(300, Math.floor((today.getTime() - date.getTime()) / (1000 * 3600 * 24)));
-        
-        for (let i = 0; i <= days; i++) {
-          mockData.push({ date: date.toISOString().split('T')[0], price: p });
-          p += (Math.random() - 0.45) * 5; // Ligeramente alcista
-          date.setDate(date.getDate() + 1);
-        }
-        setData(mockData);
         setLoading(false);
         return;
       }
@@ -50,7 +30,7 @@ export default function AssetSparkline({ ticker, purchaseDate, period = 'TOTAL' 
       }
     }
     fetchData();
-  }, [ticker, purchaseDate, isDemo]);
+  }, [ticker, purchaseDate]);
 
   if (loading) return <div className="h-32 flex items-center justify-center text-xs font-mono text-zinc-500">Cargando gráfico...</div>;
   if (data.length === 0) return <div className="h-32 flex items-center justify-center text-xs font-mono text-zinc-500">Sin datos desde la fecha de compra</div>;

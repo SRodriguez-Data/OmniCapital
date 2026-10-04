@@ -31,7 +31,8 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
     const [usdClpRate, setUsdClpRate] = useState<number>(930);
 
     const [period, setPeriod] = useState<TimePeriod>('TOTAL');
-    const [globalHistory, setGlobalHistory] = useState<any[]>([]);
+    const [globalHistory, setGlobalHistory] = useState<{ date: string; prices: Record<string, number> }[]>([]);
+    const [actionError, setActionError] = useState('');
 
     useEffect(() => {
       async function fetchLivePrices() {
@@ -48,8 +49,10 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
         }
       }
       fetchLivePrices();
+    }, [items]);
 
-      // Fetch real USDCLP rate
+    useEffect(() => {
+      // Dólar observado del día (Banco Central vía mindicador.cl)
       fetch('https://mindicador.cl/api/dolar')
         .then(res => res.json())
         .then(data => {
@@ -58,7 +61,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
            }
         })
         .catch(() => console.log('Failed to fetch USDCLP'));
-    }, [items]);
+    }, []);
 
     useEffect(() => {
       async function fetchHistory() {
@@ -67,7 +70,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
           const res = await fetch('/api/portfolio/history', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ items, usdClpRate })
+            body: JSON.stringify({ items: items.map(i => ({ ticker: i.ticker })) })
           });
           if (res.ok) {
              setGlobalHistory(await res.json());
@@ -77,7 +80,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
         }
       }
       fetchHistory();
-    }, [items, usdClpRate]);
+    }, [items]);
 
   // Calculamos KPIs
   let totalInvestedUSD = 0;
@@ -152,44 +155,35 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
     if (filteredGlobalHistory.length === 0) filteredGlobalHistory = globalHistory.slice(-2);
   }
 
-  // Recalcular el totalValue de cada día basado en el modo (Backtest vs Realidad)
-  const chartHistoryData = globalHistory.length > 0 
+  // Todo se consolida en CLP con el mismo dólar del día que usan los KPIs,
+  // para que el gráfico y el P&L sean consistentes entre sí.
+  const toCLP = (value: number, currency: string) => currency === 'CLP' ? value : value * usdClpRate;
+
+  // Valor diario real: cada activo cuenta solo desde su fecha de compra
+  const chartHistoryData = globalHistory.length > 0
     ? filteredGlobalHistory.map(day => {
         let dailyTotalCLP = 0;
-        let dailyTotalUSD = 0;
-        const currentUsdRate = 930; // Podrías guardar el historico de USDCLP, pero usaremos flat rate por simplicidad o sacarlo del día si estuviera.
-        
         items.forEach(item => {
-          // En modo TOTAL, si la fecha del día es menor a la fecha de compra, el activo vale 0 (aún no se compraba)
-          if (period === 'TOTAL' && item.purchase_date && day.date < item.purchase_date) {
-            return;
-          }
-          const price = (day.prices && day.prices[item.ticker]) || item.precio_compra;
-          if (item.moneda === 'CLP') dailyTotalCLP += item.cantidad * price;
-          else dailyTotalUSD += item.cantidad * price;
+          if (item.purchase_date && day.date < item.purchase_date) return;
+          const price = day.prices?.[item.ticker] ?? item.precio_compra;
+          dailyTotalCLP += toCLP(item.cantidad * price, item.moneda);
         });
-        
-        return {
-          ...day,
-          totalValue: dailyTotalCLP + (dailyTotalUSD * currentUsdRate)
-        };
+        return { date: day.date, totalValue: dailyTotalCLP };
       })
-    : [{ date: 'Compra Inicial', totalValue: totalInvestedCombinedCLP, prices: {} }, { date: 'Actual', totalValue: totalCurrentCombinedCLP, prices: {} }];
+    : [{ date: 'Compra Inicial', totalValue: totalInvestedCombinedCLP }, { date: 'Actual', totalValue: totalCurrentCombinedCLP }];
 
-  let dynamicInvestedCombinedCLP = totalInvestedCombinedCLP;
-  let dynamicCurrentCombinedCLP = totalCurrentCombinedCLP;
-  let startPrices: Record<string, number> = {};
+  // Precio de partida de cada activo en el período elegido. Si se compró dentro
+  // del período, su base es el precio de compra (no el precio de mercado al inicio).
+  const periodStart = period !== 'TOTAL' ? filteredGlobalHistory[0] : undefined;
+  const startPriceFor = (item: { ticker: string; precio_compra: number; purchase_date: string }) => {
+    if (!periodStart) return item.precio_compra;
+    if (item.purchase_date && item.purchase_date > periodStart.date) return item.precio_compra;
+    return periodStart.prices?.[item.ticker] ?? item.precio_compra;
+  };
 
-  if (globalHistory.length > 0 && chartHistoryData.length > 0) {
-    if (period === 'TOTAL') {
-      dynamicInvestedCombinedCLP = totalInvestedCombinedCLP;
-    } else {
-      dynamicInvestedCombinedCLP = chartHistoryData[0]?.totalValue || totalInvestedCombinedCLP;
-    }
-    // Usamos SIEMPRE el totalCurrentCombinedCLP real para no mostrar un P&L desactualizado de ayer
-    dynamicCurrentCombinedCLP = totalCurrentCombinedCLP;
-    startPrices = chartHistoryData[0]?.prices || {};
-  }
+  const dynamicInvestedCombinedCLP = items.reduce((sum, item) => sum + toCLP(item.cantidad * startPriceFor(item), item.moneda), 0);
+  // Siempre contra el valor en vivo, para no mostrar un P&L desactualizado de ayer
+  const dynamicCurrentCombinedCLP = totalCurrentCombinedCLP;
 
   const dynamicPnL_CombinedCLP = dynamicCurrentCombinedCLP - dynamicInvestedCombinedCLP;
   const dynamicPnL_Percent_CombinedCLP = dynamicInvestedCombinedCLP > 0 ? (dynamicPnL_CombinedCLP / dynamicInvestedCombinedCLP) * 100 : 0;
@@ -207,9 +201,10 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
+    setActionError('');
     if (isDemo || isCartolaMode) {
       if (isDemo) {
-        alert("⛔ Operación de escritura bloqueada. El modo Jurado (Demo) es de solo lectura y tus datos están aislados por seguridad.");
+        setActionError('El modo Demo es de solo lectura. Crea una cuenta para gestionar tu propio portafolio.');
       } else {
         const newItem = {
           id: `cartola-manual-${Math.random().toString(36).substr(2, 9)}`,
@@ -257,19 +252,23 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
         } else {
           await refreshPortfolio();
         }
+      } else {
+        const body = await res.json().catch(() => ({}));
+        setActionError(`No se pudo añadir ${ticker.toUpperCase()}: ${body.error || res.statusText}`);
       }
     } catch {
-      console.error("Error al añadir");
+      setActionError('Error de red al añadir el activo. Intenta de nuevo.');
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDelete = async (id: string) => {
+    setActionError('');
     // Si es un item generado localmente (por cartola), lo borramos del estado y listo
     if (id.startsWith('cartola-') || isDemo || isCartolaMode) {
       if (isDemo) {
-        alert("⛔ Operación de eliminación bloqueada. El modo Jurado (Demo) es de solo lectura.");
+        setActionError('El modo Demo es de solo lectura. Crea una cuenta para gestionar tu propio portafolio.');
       } else {
         setItems(prev => prev.filter(item => item.id !== id));
       }
@@ -289,21 +288,36 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
         } else {
           await refreshPortfolio();
         }
+      } else {
+        const body = await res.json().catch(() => ({}));
+        setActionError(`No se pudo quitar el activo: ${body.error || res.statusText}`);
       }
     } catch {
-      console.error("Error al eliminar");
+      setActionError('Error de red al quitar el activo. Intenta de nuevo.');
     }
   };
 
+  // Montos en su moneda: CLP sin decimales, USD con 2
+  const fmtMoney = (value: number, currency: string) => currency === 'CLP'
+    ? `$${value.toLocaleString('es-CL', { maximumFractionDigits: 0 })}`
+    : `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  const dataUSD = items.filter(i => i.moneda === 'USD').map(i => ({ name: i.ticker, value: i.cantidad * i.precio_compra }));
-  const dataCLP = items.filter(i => i.moneda === 'CLP').map(i => ({ name: i.ticker, value: i.cantidad * i.precio_compra }));
+  // Distribución según valor de mercado actual (o costo si aún no hay precio en vivo)
+  const dataUSD = chartDataUSD;
+  const dataCLP = chartDataCLP;
 
   if (loading) return <div className="text-center p-12 font-mono text-zinc-600 dark:text-[#a1a1aa]">Cargando portafolio...</div>;
 
   return (
     <div className="space-y-6">
-      
+
+      {actionError && (
+        <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 p-3 rounded-lg text-sm font-mono border border-red-200 dark:border-red-900/50 flex justify-between items-center gap-4">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError('')} className="text-xs font-bold hover:underline">CERRAR</button>
+        </div>
+      )}
+
       {/* ADD NEW ITEM FORM */}
       <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 rounded flex flex-col md:flex-row gap-4 items-end">
         <div className="flex-1 w-full">
@@ -443,7 +457,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* USD PIE CHART */}
         <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-sm dark:shadow-none p-4 h-80 flex flex-col">
-          <h2 className="text-xs font-sans font-medium font-bold text-[#60a5fa] uppercase border-b border-zinc-200 dark:border-[#27272a] pb-2 mb-2">Distribución Capital (USD)</h2>
+          <h2 className="text-xs font-sans font-medium font-bold text-[#60a5fa] uppercase border-b border-zinc-200 dark:border-[#27272a] pb-2 mb-2">Distribución Actual (USD)</h2>
           <div className="flex-1">
             {dataUSD.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -461,7 +475,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
 
         {/* CLP PIE CHART */}
         <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-sm dark:shadow-none p-4 h-80 flex flex-col">
-          <h2 className="text-xs font-sans font-medium font-bold text-[#34d399] uppercase border-b border-zinc-200 dark:border-[#27272a] pb-2 mb-2">Distribución Capital (CLP)</h2>
+          <h2 className="text-xs font-sans font-medium font-bold text-[#34d399] uppercase border-b border-zinc-200 dark:border-[#27272a] pb-2 mb-2">Distribución Actual (CLP)</h2>
           <div className="flex-1">
             {dataCLP.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -548,7 +562,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
           <tbody className="divide-y divide-zinc-200 dark:divide-[#27272a]">
             {items.map((row) => {
               const currentPrice = livePrices[row.ticker];
-              const startPrice = period === 'TOTAL' ? row.precio_compra : (startPrices[row.ticker] || row.precio_compra);
+              const startPrice = startPriceFor(row);
               const invested = row.cantidad * startPrice;
               const currentVal = currentPrice !== undefined ? row.cantidad * currentPrice : undefined;
               const pnlVal = currentVal !== undefined ? currentVal - invested : undefined;
@@ -564,14 +578,14 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
                     <td className="py-2 px-4 font-bold text-zinc-900 dark:text-[#e4e4e7]">{row.ticker}</td>
                     <td className="py-2 px-4 text-right">{row.cantidad.toLocaleString('en-US', {maximumFractionDigits: 4})}</td>
                     <td className="py-2 px-4 text-right">{row.purchase_date || '-'}</td>
-                    <td className="py-2 px-4 text-right">${startPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                    <td className="py-2 px-4 text-right">{fmtMoney(startPrice, row.moneda)}</td>
                     <td className="py-2 px-4 text-right">
-                      {currentPrice !== undefined ? `$${currentPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : <span className="text-zinc-500">N/A</span>}
+                      {currentPrice !== undefined ? fmtMoney(currentPrice, row.moneda) : <span className="text-zinc-500">N/A</span>}
                     </td>
                     <td className="py-2 px-4 text-right text-xs text-zinc-500">{row.moneda}</td>
-                    <td className="py-2 px-4 text-right">${invested.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                    <td className="py-2 px-4 text-right">{fmtMoney(invested, row.moneda)}</td>
                     <td className="py-2 px-4 text-right">
-                      {currentVal !== undefined ? `$${currentVal.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : <span className="text-zinc-500">N/A</span>}
+                      {currentVal !== undefined ? fmtMoney(currentVal, row.moneda) : <span className="text-zinc-500">N/A</span>}
                     </td>
                     <td className={`py-2 px-4 text-right font-bold ${currentVal !== undefined ? (isWin ? 'text-[#34d399]' : 'text-[#f87171]') : 'text-zinc-500'}`}>
                       {pnlPct !== undefined ? `${isWin ? '+' : ''}${pnlPct.toFixed(2)}%` : 'N/A'}

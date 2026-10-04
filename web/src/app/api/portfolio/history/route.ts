@@ -4,20 +4,25 @@ import YahooFinance from 'yahoo-finance2';
 const yahooFinance = new YahooFinance();
 
 // Cache simple en memoria para evitar saturar Yahoo Finance
-const historyCache = new Map<string, { timestamp: number, data: any[] }>();
+const historyCache = new Map<string, { timestamp: number, data: { date: Date; close: number | null }[] }>();
 const CACHE_TTL = 1000 * 60 * 60; // 1 hora
+const MAX_TICKERS = 60;
 
+// Devuelve el precio de cierre diario de cada ticker de los últimos 2 años.
+// El valor del portafolio se calcula en el cliente (necesita fechas de compra y tipo de cambio).
 export async function POST(request: Request) {
   try {
-    const { items, usdClpRate } = await request.json();
-    
-    if (!items || items.length === 0) {
+    const { items } = await request.json();
+
+    if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json([]);
     }
 
-    const tickers = Array.from(new Set(items.map((i: any) => String(i.ticker)))) as string[];
-    
-    // Obtener fecha de inicio (1 año atrás) para el histórico
+    const tickers = Array.from(new Set(items.map((i: { ticker: unknown }) => String(i.ticker))));
+    if (tickers.length > MAX_TICKERS) {
+      return NextResponse.json({ error: `Máximo ${MAX_TICKERS} activos` }, { status: 400 });
+    }
+
     const startDate = new Date();
     startDate.setFullYear(startDate.getFullYear() - 2);
     const period1 = startDate.toISOString().split('T')[0];
@@ -28,8 +33,8 @@ export async function POST(request: Request) {
     await Promise.all(tickers.map(async (ticker) => {
       try {
         const cacheKey = `${ticker}-${period1}`;
-        let historical: any[] = [];
-        
+        let historical: { date: Date; close: number | null }[] = [];
+
         const cached = historyCache.get(cacheKey);
         if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
           historical = cached.data;
@@ -39,7 +44,7 @@ export async function POST(request: Request) {
           historyCache.set(cacheKey, { timestamp: Date.now(), data: historical });
         }
 
-        historical.forEach((row: any) => {
+        historical.forEach((row) => {
           if (!row.date || row.close === null || row.close === undefined) return;
           const d = new Date(row.date).toISOString().split('T')[0];
           allDates.add(d);
@@ -67,25 +72,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const portfolioHistory = [];
-    for (const date of sortedDates) {
-      let totalValueCLP = 0;
-      
-      for (const item of items) {
-        // Al graficar, asumimos la tenencia actual a lo largo del tiempo
-        const price = pricesByDate[date][item.ticker] || item.precio_compra;
-        const rate = item.moneda === 'CLP' ? 1 : (usdClpRate || 930);
-        totalValueCLP += item.cantidad * price * rate;
-      }
-
-      if (totalValueCLP > 0) {
-        portfolioHistory.push({
-          date,
-          totalValue: totalValueCLP,
-          prices: { ...pricesByDate[date] }
-        });
-      }
-    }
+    const portfolioHistory = sortedDates.map(date => ({ date, prices: pricesByDate[date] }));
 
     return NextResponse.json(portfolioHistory);
   } catch (error) {
