@@ -1,2 +1,11 @@
-﻿*.db
 *.db
+
+# Secretos: nunca versionar (usar GitHub Secrets / variables de Vercel)
+.env
+.env.*
+serviceAccountKey.json
+
+# Artefactos de Python
+__pycache__/
+*.pyc
+*.log

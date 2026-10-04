@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+    # Los cambios solo de la web (Vercel) no deben re-ejecutar el minero ni gastar cuota de Gemini
+    paths-ignore:
+      - 'web/**'
   schedule:
     # Run at 21:00 UTC (17:00 or 18:00 Chile Time depending on DST)
     - cron: '0 21 * * 1-5'
