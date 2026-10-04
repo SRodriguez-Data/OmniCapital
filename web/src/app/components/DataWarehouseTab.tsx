@@ -1,18 +1,29 @@
 import React, { useState } from 'react';
 import { UploadCloud, FileText, CheckCircle, AlertCircle, Database } from 'lucide-react';
-import { usePortfolio } from '../context/PortfolioContext';
-import { parsePdfToCartola } from '@/lib/CartolaParser';
+import { usePortfolio, type PortfolioItem } from '../context/PortfolioContext';
+import { parsePdfToCartola, consolidarCartolas, type ResultadoCartola, type PosicionConsolidada } from '@/lib/CartolaParser';
+import { supabase } from '@/lib/supabase';
 
 interface DataWarehouseTabProps {
   onPortfolioUpdate?: () => void;
 }
 
+const fmtCantidad = (n: number) => n.toLocaleString('es-CL', { maximumFractionDigits: 8 });
+const fmtPrecio = (n: number, moneda: string) => moneda === 'CLP'
+  ? `$${n.toLocaleString('es-CL', { maximumFractionDigits: 2 })}`
+  : `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+
 export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTabProps) {
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<ResultadoCartola[]>([]);
+  const [posiciones, setPosiciones] = useState<PosicionConsolidada[]>([]);
+  const [duplicadas, setDuplicadas] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const { isCartolaMode, setItems } = usePortfolio();
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const { isDemo, isCartolaMode, items, setItems, refreshPortfolio } = usePortfolio();
+  const isLocalMode = isDemo || isCartolaMode;
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -20,87 +31,88 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
     }
   };
 
+  // Reemplaza en el estado local las posiciones de los tickers importados; el resto se mantiene
+  const aplicarLocalmente = (nuevas: PosicionConsolidada[]) => {
+    const importados = new Set(nuevas.map(p => p.ticker));
+    setItems(prev => [
+      ...prev.filter(i => !importados.has(i.ticker)),
+      ...nuevas.map((p): PortfolioItem => ({ id: `cartola-${p.ticker}`, ...p })),
+    ]);
+    if (onPortfolioUpdate) setTimeout(() => onPortfolioUpdate(), 800);
+  };
+
   const handleUpload = async () => {
     if (files.length === 0) return;
 
     setIsUploading(true);
     setError(null);
+    setSaveMessage(null);
     setResults([]);
+    setPosiciones([]);
 
     try {
-      // PROCESAR 100% EN EL NAVEGADOR
-      const extractedResults = [];
+      // PROCESAR 100% EN EL NAVEGADOR: los PDFs nunca salen de tu computador
+      const parsed: ResultadoCartola[] = [];
       for (const file of files) {
-        const res = await parsePdfToCartola(file);
-        if (res.data.length > 0) {
-           extractedResults.push(res);
-        }
+        parsed.push(await parsePdfToCartola(file));
       }
+      setResults(parsed);
 
-      if (extractedResults.length === 0) {
-        throw new Error('No se encontraron operaciones reconocidas en las cartolas subidas.');
+      const { posiciones: nuevas, duplicadas: dup } = consolidarCartolas(parsed);
+      setDuplicadas(dup);
+      if (nuevas.length === 0) {
+        throw new Error('No se encontraron operaciones ni posiciones reconocidas en las cartolas subidas.');
       }
+      setPosiciones(nuevas);
 
-      setResults(extractedResults);
-
-      // Auto-poblar el portafolio con los resultados extraídos (siempre, no solo en modo cartola)
-      if (extractedResults.length > 0) {
-        const newItems: any[] = [];
-        extractedResults.forEach((res: any) => {
-          if (res.data && Array.isArray(res.data)) {
-            res.data.forEach((row: any) => {
-              if (row.Tipo?.toUpperCase() === 'COMPRA' || row.Tipo?.toUpperCase() === 'BUY') {
-                newItems.push({
-                  id: `cartola-${Math.random().toString(36).substr(2, 9)}`,
-                  ticker: row.Ticker || 'UNKNOWN',
-                  cantidad: Number(row.Cantidad) || 1,
-                  precio_compra: Number(row.Precio) || 0,
-                  moneda: row.Moneda || (row.Precio > 1000 ? 'CLP' : 'USD'),
-                  purchase_date: row.Fecha || new Date().toISOString().split('T')[0]
-                });
-              }
-            });
-          }
-        });
-        
-        if (newItems.length > 0) {
-          setItems(prev => {
-            const updated = [...prev, ...newItems];
-            
-            // Agrupar por ticker (promedio ponderado)
-            const map = new Map<string, any>();
-            for (const item of updated) {
-              if (map.has(item.ticker)) {
-                const exist = map.get(item.ticker);
-                const totalCant = exist.cantidad + item.cantidad;
-                const totalCost = (exist.cantidad * exist.precio_compra) + (item.cantidad * item.precio_compra);
-                exist.precio_compra = totalCant > 0 ? totalCost / totalCant : 0;
-                exist.cantidad = totalCant;
-                if (item.purchase_date && (!exist.purchase_date || item.purchase_date < exist.purchase_date)) {
-                  exist.purchase_date = item.purchase_date;
-                }
-              } else {
-                map.set(item.ticker, { ...item });
-              }
-            }
-            
-            const finalItems = Array.from(map.values());
-
-            if (onPortfolioUpdate) {
-              setTimeout(() => onPortfolioUpdate(), 500);
-            }
-            return finalItems;
-          });
-        }
-      }
-
-    } catch (err: any) {
+      if (isLocalMode) aplicarLocalmente(nuevas);
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.message || 'Error desconocido al procesar el PDF en el navegador.');
+      setError(err instanceof Error ? err.message : 'Error desconocido al procesar el PDF en el navegador.');
     } finally {
       setIsUploading(false);
     }
   };
+
+  // Usuario con cuenta: reemplaza en Supabase las filas de los tickers importados
+  const guardarEnPortafolio = async () => {
+    setSaving(true);
+    setSaveMessage(null);
+    setError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Tu sesión expiró. Vuelve a iniciar sesión.');
+      const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` };
+
+      const importados = new Set(posiciones.map(p => p.ticker));
+      const filasDb = items.filter(i => importados.has(i.ticker) && !i.id.startsWith('cartola-') && !i.id.startsWith('demo-'));
+      for (const row of filasDb) {
+        const res = await fetch(`/api/portfolio?id=${encodeURIComponent(row.id)}`, { method: 'DELETE', headers });
+        if (!res.ok) throw new Error(`No se pudo reemplazar la posición anterior de ${row.ticker}`);
+      }
+      for (const p of posiciones) {
+        const res = await fetch('/api/portfolio', { method: 'POST', headers, body: JSON.stringify(p) });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(`No se pudo guardar ${p.ticker}: ${body.error || res.statusText}`);
+        }
+      }
+      await refreshPortfolio();
+      setSaveMessage(`${posiciones.length} posiciones guardadas en tu portafolio.`);
+      if (onPortfolioUpdate) setTimeout(() => onPortfolioUpdate(), 800);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error al guardar en tu portafolio.');
+      // Lo que alcanzó a guardarse queda reflejado al recargar
+      await refreshPortfolio();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const ilegibles = results.filter(r => r.sinTexto);
+  const desconocidos = results.filter(r => !r.sinTexto && r.broker === 'Desconocido');
+  const tickersExistentes = new Set(items.map(i => i.ticker));
+  const reemplazos = posiciones.filter(p => tickersExistentes.has(p.ticker)).map(p => p.ticker);
 
   return (
     <div className="space-y-6 fade-in">
@@ -119,7 +131,7 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
             </h2>
           </div>
           <p className="text-sm font-mono text-zinc-500 dark:text-[#a1a1aa] uppercase tracking-wider">
-            Ingestión de Datos Multi-Broker Institucional
+            Racional (EE.UU. y Chile) · Fintual
           </p>
         </div>
       </div>
@@ -132,9 +144,9 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
             Sube tus cartolas de brokers en PDF
           </h3>
           <p className="text-xs font-mono text-zinc-500 dark:text-[#a1a1aa] mb-6 text-center max-w-md">
-            Selecciona múltiples archivos. El motor local OCR y Regex extraerá automáticamente todas tus operaciones financieras.
+            Selecciona todas tus cartolas juntas (puedes repetir archivos: los duplicados se ignoran). Se procesan en tu navegador; los PDFs no se suben a ningún servidor.
           </p>
-          
+
           <input
             type="file"
             multiple
@@ -142,7 +154,7 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
             onChange={handleFileChange}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           />
-          
+
           <button className="bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 px-6 py-2 rounded-lg font-mono text-sm font-bold shadow-sm pointer-events-none">
             SELECCIONAR ARCHIVOS
           </button>
@@ -168,7 +180,7 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
               className="w-full bg-orange-600 hover:bg-orange-700 text-white font-mono font-bold text-sm py-3 rounded-lg shadow transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {isUploading ? (
-                <>Procesando en Servidor Local...</>
+                <>Procesando en tu navegador...</>
               ) : (
                 <>🚀 PROCESAR CARTOLAS</>
               )}
@@ -182,53 +194,118 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
             <span>{error}</span>
           </div>
         )}
+
+        {(ilegibles.length > 0 || desconocidos.length > 0 || duplicadas > 0) && (
+          <div className="mt-6 bg-amber-50 dark:bg-amber-900/10 text-amber-800 dark:text-amber-300 p-4 rounded-lg text-xs font-mono border border-amber-200 dark:border-amber-900/50 space-y-1">
+            {ilegibles.map(r => <p key={r.file_name}>⚠️ {r.file_name}: el PDF no tiene texto (parece escaneado), no se pudo leer.</p>)}
+            {desconocidos.map(r => <p key={r.file_name}>⚠️ {r.file_name}: broker no soportado todavía, se omitió.</p>)}
+            {duplicadas > 0 && <p>ℹ️ Se ignoraron {duplicadas} operaciones repetidas en archivos duplicados.</p>}
+          </div>
+        )}
       </div>
 
-      {/* RESULTS SECTION */}
-      {results.length > 0 && (
+      {/* CONSOLIDATED POSITIONS */}
+      {posiciones.length > 0 && (
         <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl p-6 shadow-sm dark:shadow-none transition-colors duration-300">
-          <h3 className="text-lg font-bold text-zinc-900 dark:text-[#e4e4e7] mb-6 font-sans flex items-center gap-2">
-            <CheckCircle className="w-5 h-5 text-emerald-500" /> Resultados de Extracción
+          <h3 className="text-lg font-bold text-zinc-900 dark:text-[#e4e4e7] mb-2 font-sans flex items-center gap-2">
+            <CheckCircle className="w-5 h-5 text-emerald-500" /> Posiciones Consolidadas ({posiciones.length})
           </h3>
-          
-          {isCartolaMode && (
-            <div className="mb-6 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-900/50 p-4 rounded-lg flex flex-col items-center justify-center text-center">
-              <span className="text-emerald-600 dark:text-emerald-400 font-bold mb-2 font-sans">
-                ¡Operaciones importadas exitosamente!
+          <p className="text-xs font-mono text-zinc-500 dark:text-[#a1a1aa] mb-4">
+            Compras menos ventas con costo promedio ponderado. En Racional Chile se usa la foto de cartera del estado de cuenta más reciente.
+          </p>
+
+          <div className="overflow-x-auto border border-zinc-200 dark:border-[#27272a] rounded-lg">
+            <table className="w-full text-left font-mono text-xs whitespace-nowrap">
+              <thead className="bg-zinc-100 dark:bg-[#09090b] text-zinc-500 dark:text-[#a1a1aa] uppercase">
+                <tr>
+                  <th className="px-4 py-2">Ticker</th>
+                  <th className="px-4 py-2 text-right">Cantidad</th>
+                  <th className="px-4 py-2 text-right">Precio Promedio</th>
+                  <th className="px-4 py-2">Moneda</th>
+                  <th className="px-4 py-2">Desde</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-200 dark:divide-[#27272a] text-zinc-700 dark:text-[#e4e4e7]">
+                {posiciones.map(p => (
+                  <tr key={p.ticker}>
+                    <td className="px-4 py-2 font-bold">{p.ticker}</td>
+                    <td className="px-4 py-2 text-right">{fmtCantidad(p.cantidad)}</td>
+                    <td className="px-4 py-2 text-right">{fmtPrecio(p.precio_compra, p.moneda)}</td>
+                    <td className="px-4 py-2">{p.moneda}</td>
+                    <td className="px-4 py-2">{p.purchase_date}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {isLocalMode ? (
+            <div className="mt-6 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-900/50 p-4 rounded-lg text-center">
+              <span className="text-emerald-600 dark:text-emerald-400 font-bold font-sans block mb-1">
+                ¡Posiciones importadas!
               </span>
               <span className="text-xs text-emerald-700 dark:text-emerald-500 font-mono">
                 Ve a la pestaña [01] Mi Portafolio para ver tus activos y P&L en vivo.
               </span>
             </div>
+          ) : (
+            <div className="mt-6 space-y-3">
+              {reemplazos.length > 0 && (
+                <p className="text-xs font-mono text-amber-700 dark:text-amber-400">
+                  Al guardar se reemplazarán tus posiciones actuales de: {reemplazos.join(', ')}.
+                </p>
+              )}
+              <button
+                onClick={guardarEnPortafolio}
+                disabled={saving}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-mono font-bold text-sm py-3 rounded-lg shadow transition-colors disabled:opacity-50"
+              >
+                {saving ? 'GUARDANDO...' : '💾 GUARDAR EN MI PORTAFOLIO'}
+              </button>
+              {saveMessage && (
+                <p className="text-sm font-mono text-emerald-600 dark:text-emerald-400 text-center">{saveMessage}</p>
+              )}
+            </div>
           )}
+        </div>
+      )}
 
-          <div className="space-y-8">
-            {results.map((result, idx) => (
+      {/* RAW RESULTS PER FILE */}
+      {results.some(r => r.data.length > 0) && (
+        <details className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl p-6 shadow-sm dark:shadow-none transition-colors duration-300">
+          <summary className="cursor-pointer text-sm font-bold text-zinc-900 dark:text-[#e4e4e7] font-sans">
+            Ver operaciones extraídas por archivo
+          </summary>
+          <div className="space-y-8 mt-6">
+            {results.filter(r => r.data.length > 0).map((result, idx) => (
               <div key={idx} className="border border-zinc-200 dark:border-[#27272a] rounded-lg overflow-hidden">
-                <div className="bg-zinc-50 dark:bg-[#09090b] border-b border-zinc-200 dark:border-[#27272a] px-4 py-3 flex justify-between items-center">
+                <div className="bg-zinc-50 dark:bg-[#09090b] border-b border-zinc-200 dark:border-[#27272a] px-4 py-3 flex justify-between items-center gap-4">
                   <div className="font-mono text-sm font-bold text-zinc-900 dark:text-[#e4e4e7]">
                     Broker: <span className="text-orange-600 dark:text-orange-400">{result.broker}</span>
                   </div>
-                  <div className="font-mono text-xs text-zinc-500 dark:text-[#71717a]">
+                  <div className="font-mono text-xs text-zinc-500 dark:text-[#71717a] truncate">
                     {result.file_name} ({result.data.length} operaciones)
                   </div>
                 </div>
-                
+
                 <div className="overflow-x-auto">
                   <table className="w-full text-left font-mono text-xs whitespace-nowrap">
                     <thead className="bg-zinc-100 dark:bg-[#18181b] text-zinc-500 dark:text-[#a1a1aa] border-b border-zinc-200 dark:border-[#27272a]">
                       <tr>
-                        {result.data.length > 0 && Object.keys(result.data[0]).map((col) => (
+                        {['Fecha', 'Tipo', 'Ticker', 'Cantidad', 'Precio', 'Moneda'].map(col => (
                           <th key={col} className="px-4 py-2 uppercase tracking-wider">{col}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-200 dark:divide-[#27272a] text-zinc-700 dark:text-[#e4e4e7]">
-                      {result.data.map((row: any, rIdx: number) => (
+                      {result.data.map((row, rIdx) => (
                         <tr key={rIdx} className="hover:bg-zinc-50 dark:hover:bg-[#09090b]">
-                          {Object.values(row).map((val: any, cIdx: number) => (
-                            <td key={cIdx} className="px-4 py-2">{String(val)}</td>
-                          ))}
+                          <td className="px-4 py-2">{row.Fecha}</td>
+                          <td className="px-4 py-2">{row.Tipo}</td>
+                          <td className="px-4 py-2 font-bold">{row.Ticker}</td>
+                          <td className="px-4 py-2">{fmtCantidad(row.Cantidad)}</td>
+                          <td className="px-4 py-2">{fmtPrecio(row.Precio, row.Moneda)}</td>
+                          <td className="px-4 py-2">{row.Moneda}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -237,7 +314,7 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
               </div>
             ))}
           </div>
-        </div>
+        </details>
       )}
     </div>
   );
