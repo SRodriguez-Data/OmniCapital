@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { genAI, generateText } from '@/lib/ai';
+import { aiConfigured, generateText } from '@/lib/ai';
 import { TICKER_RE } from '@/lib/validation';
 import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
-// Caché en memoria del resumen de IA por ticker: evita gastar cuota de Gemini en búsquedas repetidas
+// Caché en memoria del resumen de IA por ticker: evita gastar cuota de IA en búsquedas repetidas
 const aiCache = new Map<string, { timestamp: number; text: string }>();
 const AI_CACHE_TTL = 30 * 60 * 1000;
 
@@ -91,13 +91,13 @@ export async function GET(request: Request) {
     if (currentPrice <= bollingerLower) signal = 'COMPRAR';
     else if (currentPrice >= bollingerUpper) signal = 'VENDER';
 
-    // Gemini AI Analysis (if API key is present)
-    let aiAnalysis = "No se ha configurado la API Key de Gemini en Vercel, por lo que el análisis de IA está deshabilitado.";
+    // Resumen de IA (Claude, con Gemini de respaldo)
+    let aiAnalysis = "No hay un proveedor de IA configurado en el servidor, por lo que el análisis de IA está deshabilitado.";
     
     const cachedAi = aiCache.get(ticker);
     if (cachedAi && Date.now() - cachedAi.timestamp < AI_CACHE_TTL) {
       aiAnalysis = cachedAi.text;
-    } else if (genAI) {
+    } else if (aiConfigured) {
       try {
         const prompt = `
 Eres un analista cuantitativo senior. Haz un resumen ejecutivo (máximo 4 líneas) en ESPAÑOL sobre el activo ${meta.symbol} (${meta.longName || ''}).
@@ -110,10 +110,10 @@ Datos actuales:
 
 Dime de forma experta si el activo está sobrecomprado, sobrevendido o en zona de valor, y si recomendarías una entrada a estos precios basado estrictamente en el análisis técnico cuantitativo.
         `;
-        aiAnalysis = (await generateText(prompt)).text;
+        aiAnalysis = (await generateText(prompt, { speed: 'fast', maxTokens: 8000 })).text;
         aiCache.set(ticker, { timestamp: Date.now(), text: aiAnalysis });
       } catch (aiError) {
-        console.error("Gemini AI Error:", aiError);
+        console.error("AI Error:", aiError);
         aiAnalysis = "Hubo un error al generar el análisis de IA en este momento.";
       }
     }

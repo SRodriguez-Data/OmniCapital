@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import YahooFinance from 'yahoo-finance2';
-import { SchemaType, type ResponseSchema } from '@google/generative-ai';
-import { genAI, generateText, aiError } from '@/lib/ai';
+import { aiConfigured, generateText, aiError, type JsonSchema } from '@/lib/ai';
 import { parsePortfolioItems } from '@/lib/validation';
 import { fetchUsdClp } from '@/lib/fx';
 import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
@@ -27,17 +26,25 @@ interface Asset {
 }
 
 // La IA solo decide cuántas acciones y por qué; los costos los calcula el servidor
-const responseSchema: ResponseSchema = {
-  type: SchemaType.ARRAY,
-  items: {
-    type: SchemaType.OBJECT,
-    properties: {
-      ticker: { type: SchemaType.STRING },
-      sharesToBuy: { type: SchemaType.INTEGER },
-      rationale: { type: SchemaType.STRING },
+const responseSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    compras: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          ticker: { type: 'string' },
+          sharesToBuy: { type: 'integer' },
+          rationale: { type: 'string' },
+        },
+        required: ['ticker', 'sharesToBuy', 'rationale'],
+        additionalProperties: false,
+      },
     },
-    required: ['ticker', 'sharesToBuy', 'rationale'],
   },
+  required: ['compras'],
+  additionalProperties: false,
 };
 
 export async function POST(request: Request) {
@@ -49,8 +56,8 @@ export async function POST(request: Request) {
     if (!Number.isFinite(budget) || budget <= 0) {
       return NextResponse.json({ error: 'Monto de inversión inválido' }, { status: 400 });
     }
-    if (!genAI) {
-      return NextResponse.json({ error: 'Falta GEMINI_API_KEY para el optimizador de IA' }, { status: 500 });
+    if (!aiConfigured) {
+      return NextResponse.json({ error: 'No hay un proveedor de IA configurado en el servidor.' }, { status: 500 });
     }
     if (!rateLimit(request, 'rebalance', 15)) {
       return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
@@ -143,16 +150,13 @@ Decide cuántas acciones ENTERAS ("sharesToBuy") comprar de cada activo.
 - Solo puedes usar los tickers listados. Omite los activos donde no compres nada.
 - "rationale": una o dos frases concretas de por qué ese activo y esa cantidad.`;
 
-    const { text } = await generateText({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: 'application/json', responseSchema },
-    });
+    const { text, model } = await generateText(prompt, { schema: responseSchema, speed: 'quality' });
 
     let raw: unknown;
     try {
-      raw = JSON.parse(text);
+      raw = JSON.parse(text)?.compras;
     } catch {
-      console.error('Failed to parse Gemini JSON:', text);
+      console.error('Failed to parse AI JSON:', text.slice(0, 500));
       return NextResponse.json({ error: 'La IA devolvió un formato inválido' }, { status: 502 });
     }
 
@@ -184,6 +188,7 @@ Decide cuántas acciones ENTERAS ("sharesToBuy") comprar de cada activo.
       budget,
       totalCost: budget - restante,
       usdClp,
+      modelo: model,
     });
 
   } catch (err: unknown) {

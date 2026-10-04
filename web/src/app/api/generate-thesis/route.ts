@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { genAI, generateText, aiError } from '@/lib/ai';
+import { aiConfigured, generateText, aiError } from '@/lib/ai';
 import { TICKER_RE } from '@/lib/validation';
 import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
@@ -7,9 +7,9 @@ const num = (v: unknown, digits = 2) => (typeof v === 'number' && Number.isFinit
 
 export async function POST(req: Request) {
   try {
-    if (!genAI) {
+    if (!aiConfigured) {
       return NextResponse.json(
-        { error: 'API Key de Gemini no configurada en el servidor.' },
+        { error: 'No hay un proveedor de IA configurado en el servidor.' },
         { status: 500 }
       );
     }
@@ -47,10 +47,10 @@ Tu respuesta debe ser quirúrgica y estrictamente en 3 viñetas markdown:
 3. 🔗 Sinergia con Portafolio (Analiza OBLIGATORIAMENTE cómo ${ticker} beneficia o diversifica el portafolio actual del usuario. Si el usuario ya lo tiene, explica si acumular más tiene sentido).
 Usa solo los datos entregados; si un dato es N/A, dilo en vez de inventarlo.`;
 
-    const { text } = await generateText(prompt);
+    const { text } = await generateText(prompt, { speed: 'fast', maxTokens: 8000 });
     return NextResponse.json({ thesis: text });
   } catch (error: unknown) {
-    console.error('Error generando tesis con Gemini:', error);
+    console.error('Error generando tesis con IA:', error);
     const { message, status } = aiError(error);
     return NextResponse.json({ error: message }, { status });
   }

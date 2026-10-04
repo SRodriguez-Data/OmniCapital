@@ -26,7 +26,7 @@ export default function RecommendationsTab() {
   const [error, setError] = useState('');
 
   // El diagnóstico se cachea por sesión según la composición del portafolio,
-  // para no gastar cuota de Gemini cada vez que se cambia de pestaña.
+  // para no gastar cuota de IA cada vez que se cambia de pestaña.
   const cacheKey = CACHE_PREFIX + JSON.stringify(items.map(i => [i.ticker, i.cantidad]).sort());
 
   const generate = useCallback(async (force: boolean) => {
@@ -58,7 +58,7 @@ export default function RecommendationsTab() {
       const prices: Record<string, number> = pricesRes;
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 45000);
+      const timeoutId = setTimeout(() => controller.abort(), 120000);
       const res = await fetch('/api/portfolio/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -75,8 +75,9 @@ export default function RecommendationsTab() {
         signal: controller.signal,
       }).finally(() => clearTimeout(timeoutId));
 
+      // La ruta responde en streaming: si la IA falla después de empezar, el error llega con status 200
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || `Error ${res.status} al generar el diagnóstico`);
+      if (!res.ok || json.error) throw new Error(json.error || `Error ${res.status} al generar el diagnóstico`);
 
       const result: AiData = { fecha: json.generado, diagnostico: json.diagnostico, recomendaciones: json.recomendaciones };
       setData(result);
@@ -106,7 +107,7 @@ export default function RecommendationsTab() {
     );
   }
 
-  if (loading) return <div className="text-center p-12 font-mono text-zinc-600 dark:text-zinc-400">Generando diagnóstico con IA (puede tardar hasta 30 segundos)...</div>;
+  if (loading) return <div className="text-center p-12 font-mono text-zinc-600 dark:text-zinc-400">Claude está analizando tu portafolio (puede tardar hasta un minuto)...</div>;
 
   function renderAiData(aiData: AiData) {
     return (

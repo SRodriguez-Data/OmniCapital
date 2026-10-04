@@ -1,36 +1,33 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Quantum Trader (OmniCapital) — web
 
-## Getting Started
+Plataforma de gestión de portafolios: lector de cartolas (Racional EE.UU./Chile, Fintual), P&L con precios en vivo, dividendos, backtesting y análisis con IA. Next.js 16 (App Router) desplegado en Vercel, con Supabase para auth y datos.
 
-First, run the development server:
+## Desarrollo
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev      # http://localhost:3000
+npm run build    # lo mismo que corre Vercel
+npx eslint src   # debe quedar en 0 problemas
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Variables de entorno
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+En `.env.local` (local) y en **Vercel → Settings → Environment Variables** (producción):
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Variable | Uso |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | URL del proyecto Supabase |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Clave pública (publishable) de Supabase |
+| `ANTHROPIC_API_KEY` | IA principal: Claude (`claude-opus-5-5`). Se crea en console.anthropic.com |
+| `GEMINI_API_KEY` | IA de respaldo: si Claude falla o no hay clave, se usa Gemini |
 
-## Learn More
+Nunca subas claves al repositorio: `.env*` está en `.gitignore`.
 
-To learn more about Next.js, take a look at the following resources:
+## IA
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+`src/lib/ai.ts` es el único punto de entrada: intenta Claude (`src/lib/claude.ts`) y, ante cualquier error (cuota, saturación, rechazo, red), usa Gemini (`src/lib/gemini.ts`). Las rutas que gastan cuota tienen límite por IP (`src/lib/rateLimit.ts`).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Datos del bot
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+`analisis_ia`, `alertas_mercado` y `precios_historicos` los escribe el bot en Python de la carpeta superior (GitHub Actions). Para la web son de solo lectura.
