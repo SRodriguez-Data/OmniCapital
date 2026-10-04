@@ -5,6 +5,7 @@ import { SchemaType, type ResponseSchema } from '@google/generative-ai';
 import { genAI, generateText, aiError } from '@/lib/ai';
 import { parsePortfolioItems } from '@/lib/validation';
 import { fetchUsdClp } from '@/lib/fx';
+import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
 const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 
@@ -50,6 +51,9 @@ export async function POST(request: Request) {
     }
     if (!genAI) {
       return NextResponse.json({ error: 'Falta GEMINI_API_KEY para el optimizador de IA' }, { status: 500 });
+    }
+    if (!rateLimit(request, 'rebalance', 15)) {
+      return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
     }
     const parsed = parsePortfolioItems(body?.items);
     if ('error' in parsed) {

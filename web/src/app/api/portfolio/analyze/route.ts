@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { SchemaType, type ResponseSchema } from '@google/generative-ai';
 import { genAI, MODELS_FAST, generateText, aiError } from '@/lib/ai';
 import { parsePortfolioItems } from '@/lib/validation';
+import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
 export const runtime = 'edge';
 
@@ -35,6 +36,9 @@ export async function POST(req: Request) {
   try {
     if (!genAI) {
       return NextResponse.json({ error: 'API Key de Gemini no configurada.' }, { status: 500 });
+    }
+    if (!rateLimit(req, 'analyze', 15)) {
+      return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
     }
 
     const body = await req.json();

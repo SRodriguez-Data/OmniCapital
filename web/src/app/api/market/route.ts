@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { genAI, generateText } from '@/lib/ai';
 import { TICKER_RE } from '@/lib/validation';
+import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
 // Caché en memoria del resumen de IA por ticker: evita gastar cuota de Gemini en búsquedas repetidas
 const aiCache = new Map<string, { timestamp: number; text: string }>();
@@ -12,6 +13,9 @@ export async function GET(request: Request) {
 
   if (!ticker || !TICKER_RE.test(ticker)) {
     return NextResponse.json({ error: 'El ticker es obligatorio' }, { status: 400 });
+  }
+  if (!rateLimit(request, 'market', 60)) {
+    return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
   }
 
   try {

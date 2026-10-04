@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { genAI, generateText, aiError } from '@/lib/ai';
 import { TICKER_RE } from '@/lib/validation';
+import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
 const num = (v: unknown, digits = 2) => (typeof v === 'number' && Number.isFinite(v) ? v.toFixed(digits) : 'N/A');
 
@@ -11,6 +12,10 @@ export async function POST(req: Request) {
         { error: 'API Key de Gemini no configurada en el servidor.' },
         { status: 500 }
       );
+    }
+
+    if (!rateLimit(req, 'thesis', 30)) {
+      return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
     }
 
     const body = await req.json();

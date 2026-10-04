@@ -5,11 +5,13 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl || '', supabaseKey || '');
 
+// Alertas de mercado generadas por el bot (compartidas por todos los usuarios).
+// El estado "leída" se guarda en el navegador de cada usuario, no en la base de datos.
 export async function GET() {
   try {
     const { data, error } = await supabase
       .from('alertas_mercado')
-      .select('*')
+      .select('id, ticker, tipo, precio_actual, mensaje, fecha_creacion')
       .order('fecha_creacion', { ascending: false })
       .limit(50);
 
@@ -22,29 +24,8 @@ export async function GET() {
     }
 
     return NextResponse.json(data || []);
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('API Alerts GET Error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
-  }
-}
-
-export async function POST(request: Request) {
-  try {
-    const { id } = await request.json();
-    if (!id) {
-      return NextResponse.json({ error: 'ID is required' }, { status: 400 });
-    }
-
-    const { error } = await supabase
-      .from('alertas_mercado')
-      .update({ leido: true })
-      .eq('id', id);
-
-    if (error) throw error;
-
-    return NextResponse.json({ success: true });
-  } catch (err: any) {
-    console.error('API Alerts POST Error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Error interno' }, { status: 500 });
   }
 }

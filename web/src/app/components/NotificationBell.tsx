@@ -9,12 +9,23 @@ interface Alert {
   tipo: string;
   precio_actual: number;
   mensaje: string;
-  leido: boolean;
   fecha_creacion: string;
+}
+
+// Las alertas son compartidas: qué alertas leyó cada usuario se guarda en su navegador
+const READ_KEY = 'quantum_alertas_leidas';
+
+function loadReadIds(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(READ_KEY) || '[]'));
+  } catch {
+    return new Set();
+  }
 }
 
 export default function NotificationBell() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const [isOpen, setIsOpen] = useState(false);
 
   const fetchAlerts = async () => {
@@ -30,32 +41,32 @@ export default function NotificationBell() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setReadIds(loadReadIds());
     fetchAlerts();
     const interval = setInterval(fetchAlerts, 60000); // Check every minute
     return () => clearInterval(interval);
   }, []);
 
-  const unreadCount = alerts.filter(a => !a.leido).length;
-
-  const markAsRead = async (id: string) => {
-    try {
-      await fetch('/api/alerts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id })
-      });
-      // Optimistic update
-      setAlerts(alerts.map(a => a.id === id ? { ...a, leido: true } : a));
-    } catch (e) {
-      console.error('Error marking as read', e);
-    }
+  const saveReadIds = (ids: Set<string>) => {
+    // Solo guardamos ids de alertas que aún existen, para que la lista no crezca sin límite
+    const vigentes = new Set(alerts.map(a => a.id));
+    const toSave = [...ids].filter(id => vigentes.has(id));
+    try { localStorage.setItem(READ_KEY, JSON.stringify(toSave)); } catch { /* sin almacenamiento */ }
+    setReadIds(new Set(toSave));
   };
+
+  const markAsRead = (id: string) => saveReadIds(new Set([...readIds, id]));
+  const markAllAsRead = () => saveReadIds(new Set(alerts.map(a => a.id)));
+
+  const unreadCount = alerts.filter(a => !readIds.has(a.id)).length;
 
   return (
     <div className="relative">
-      <button 
+      <button
         onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 text-zinc-600 dark:text-[#a1a1aa] hover:text-zinc-900 dark:text-[#e4e4e7] transition-colors focus:outline-none"
+        className="relative p-2 text-zinc-600 dark:text-[#a1a1aa] hover:text-zinc-900 dark:hover:text-[#e4e4e7] transition-colors focus:outline-none"
+        aria-label="Alertas de mercado"
       >
         <Bell className="w-5 h-5" />
         {unreadCount > 0 && (
@@ -67,16 +78,20 @@ export default function NotificationBell() {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-sm dark:shadow-none shadow-2xl z-50">
+        <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-2xl z-50">
           <div className="px-4 py-3 border-b border-zinc-200 dark:border-[#27272a] bg-zinc-50 dark:bg-[#09090b] flex justify-between items-center">
             <h3 className="text-xs font-sans font-medium font-bold uppercase tracking-wider text-zinc-900 dark:text-[#e4e4e7]">Alertas de Mercado</h3>
             {unreadCount > 0 && (
-              <span className="text-[10px] font-mono bg-[#f87171]/20 text-[#fca5a5] px-2 py-0.5 rounded">
-                {unreadCount} Nuevas
-              </span>
+              <button
+                onClick={markAllAsRead}
+                className="text-[10px] font-mono bg-[#f87171]/20 text-red-600 dark:text-[#fca5a5] px-2 py-0.5 rounded hover:bg-[#f87171]/30"
+                title="Marcar todas como leídas"
+              >
+                {unreadCount} Nuevas ✓
+              </button>
             )}
           </div>
-          
+
           <div className="max-h-96 overflow-y-auto">
             {alerts.length === 0 ? (
               <div className="p-6 text-center text-zinc-500 dark:text-[#71717a] text-xs font-sans font-medium">
@@ -84,41 +99,40 @@ export default function NotificationBell() {
               </div>
             ) : (
               <div className="divide-y divide-zinc-200 dark:divide-[#27272a]">
-                {alerts.map(alert => (
-                  <div 
-                    key={alert.id} 
-                    className={`p-4 transition-colors ${!alert.leido ? 'bg-zinc-50 dark:bg-[#09090b]' : 'bg-white dark:bg-[#18181b] opacity-60'}`}
-                  >
-                    <div className="flex gap-3">
-                      <div className="mt-0.5">
-                        {alert.tipo === 'BUY_ZONE' ? (
-                          <AlertTriangle className="w-4 h-4 text-[#34d399]" />
-                        ) : (
-                          <AlertTriangle className="w-4 h-4 text-[#f59e0b]" />
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex justify-between items-start">
-                          <p className="text-sm font-bold text-zinc-900 dark:text-[#e4e4e7] font-mono">{alert.ticker}</p>
-                          <span className="text-[10px] text-zinc-500 dark:text-[#71717a]">
-                            {new Date(alert.fecha_creacion).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                          </span>
+                {alerts.map(alert => {
+                  const leida = readIds.has(alert.id);
+                  return (
+                    <div
+                      key={alert.id}
+                      className={`p-4 transition-colors ${!leida ? 'bg-zinc-50 dark:bg-[#09090b]' : 'bg-white dark:bg-[#18181b] opacity-60'}`}
+                    >
+                      <div className="flex gap-3">
+                        <div className="mt-0.5">
+                          <AlertTriangle className={`w-4 h-4 ${alert.tipo === 'BUY_ZONE' ? 'text-[#34d399]' : 'text-[#f59e0b]'}`} />
                         </div>
-                        <p className="text-xs text-zinc-600 dark:text-[#a1a1aa] mt-1 leading-relaxed">
-                          {alert.mensaje}
-                        </p>
-                        {!alert.leido && (
-                          <button 
-                            onClick={() => markAsRead(alert.id)}
-                            className="mt-3 flex items-center gap-1 text-[10px] uppercase font-mono tracking-wider text-[#60a5fa] hover:text-[#3b82f6] transition-colors"
-                          >
-                            <CheckCircle2 className="w-3 h-3" /> Marcar como leída
-                          </button>
-                        )}
+                        <div className="flex-1">
+                          <div className="flex justify-between items-start">
+                            <p className="text-sm font-bold text-zinc-900 dark:text-[#e4e4e7] font-mono">{alert.ticker}</p>
+                            <span className="text-[10px] text-zinc-500 dark:text-[#71717a]">
+                              {new Date(alert.fecha_creacion).toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className="text-xs text-zinc-600 dark:text-[#a1a1aa] mt-1 leading-relaxed">
+                            {alert.mensaje}
+                          </p>
+                          {!leida && (
+                            <button
+                              onClick={() => markAsRead(alert.id)}
+                              className="mt-3 flex items-center gap-1 text-[10px] uppercase font-mono tracking-wider text-[#60a5fa] hover:text-[#3b82f6] transition-colors"
+                            >
+                              <CheckCircle2 className="w-3 h-3" /> Marcar como leída
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
