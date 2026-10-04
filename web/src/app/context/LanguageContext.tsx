@@ -10,7 +10,7 @@ interface LanguageContextType {
   t: (key: string) => string;
 }
 
-const translations = {
+const translations: Record<Language, Record<string, string>> = {
   es: {
     // General
     'app.title': 'OmniCapital',
@@ -75,8 +75,10 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguage] = useState<Language>('es');
 
   useEffect(() => {
-    const saved = localStorage.getItem('omnicapital_lang') as Language;
-    if (saved && (saved === 'es' || saved === 'en')) {
+    // Se lee después de hidratar (localStorage no existe en el servidor)
+    const saved = localStorage.getItem('omnicapital_lang');
+    if (saved === 'es' || saved === 'en') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLanguage(saved);
     }
   }, []);
@@ -90,9 +92,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   };
 
   const t = (key: string): string => {
-    const langDict = translations[language];
-    // @ts-ignore
-    return langDict[key] || translations['es'][key] || key;
+    return translations[language][key] || translations.es[key] || key;
   };
 
   return (

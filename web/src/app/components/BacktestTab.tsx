@@ -2,17 +2,54 @@
 
 import React, { useState } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { History, Loader2, TrendingUp, TrendingDown, DollarSign, Search } from 'lucide-react';
+import { History, Loader2, Search } from 'lucide-react';
 import SymbolSearchModal from './SymbolSearchModal';
+
+interface BacktestResult {
+  ticker: string; // el ticker simulado (puede diferir del que está seleccionado ahora en el formulario)
+  chartData: { date: string; Estrategia: number; SP500: number }[];
+  metrics: { targetReturn: number; benchmarkReturn: number; finalTargetValue: number; finalBenchmarkValue: number; maxDrawdown: number };
+}
+
+// El benchmark se simula con el mismo capital y en la misma moneda que el activo (sin efecto cambiario)
+function formatCurrency(val: number, isCLP: boolean, withDecimals = false) {
+  if (isCLP) {
+    return `CLP$ ${val.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  }
+  return `$${val.toLocaleString(undefined, { minimumFractionDigits: withDecimals ? 2 : 0, maximumFractionDigits: withDecimals ? 2 : 0 })}`;
+}
+
+interface TooltipProps {
+  active?: boolean;
+  payload?: { name: string; value: number; color: string }[];
+  label?: string;
+  isCLP: boolean;
+}
+
+function BacktestTooltip({ active, payload, label, isCLP }: TooltipProps) {
+  if (!active || !payload || payload.length === 0) return null;
+  return (
+    <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-3 rounded shadow-lg">
+      <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans font-medium mb-2">{label}</p>
+      {payload.map((entry, index) => (
+        <div key={index} className="flex items-center gap-2 text-sm font-mono rounded-lg">
+          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+          <span className="text-zinc-900 dark:text-[#e4e4e7]">{entry.name}:</span>
+          <span className="font-bold text-zinc-900 dark:text-white">{formatCurrency(entry.value, isCLP, true)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function BacktestTab() {
   const [ticker, setTicker] = useState('NVDA');
   const [capital, setCapital] = useState('10000');
   const [years, setYears] = useState('5');
-  
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<BacktestResult | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const handleSelectTicker = (selectedTicker: string) => {
@@ -21,14 +58,7 @@ export default function BacktestTab() {
   };
 
   const isCLP = ticker.toUpperCase().endsWith('.SN');
-  
-  // El benchmark se simula con el mismo capital y en la misma moneda que el activo (sin efecto cambiario)
-  const formatCurrency = (val: number, isTooltip: boolean = false) => {
-    if (isCLP) {
-      return `CLP$ ${val.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-    }
-    return `$${val.toLocaleString(undefined, { minimumFractionDigits: isTooltip ? 2 : 0, maximumFractionDigits: isTooltip ? 2 : 0 })}`;
-  };
+  const resultIsCLP = result?.ticker.endsWith('.SN') ?? false;
 
   const runBacktest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,44 +66,27 @@ export default function BacktestTab() {
     setError('');
     setResult(null);
 
+    const simTicker = ticker.trim().toUpperCase();
     try {
       const res = await fetch('/api/backtest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          ticker: ticker.trim().toUpperCase(), 
-          capital: Number(capital), 
-          years: Number(years) 
+        body: JSON.stringify({
+          ticker: simTicker,
+          capital: Number(capital),
+          years: Number(years)
         })
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Error al ejecutar backtest');
 
-      setResult(data);
-    } catch (err: any) {
-      setError(err.message);
+      setResult({ ...data, ticker: simTicker });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error al ejecutar backtest');
     } finally {
       setLoading(false);
     }
-  };
-
-  const CustomTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-3 rounded shadow-lg">
-          <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans font-medium mb-2">{label}</p>
-          {payload.map((entry: any, index: number) => (
-            <div key={index} className="flex items-center gap-2 text-sm font-mono rounded-lg">
-              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
-              <span className="text-zinc-900 dark:text-[#e4e4e7]">{entry.name}:</span>
-              <span className="font-bold text-zinc-900 dark:text-white">{formatCurrency(entry.value, true)}</span>
-            </div>
-          ))}
-        </div>
-      );
-    }
-    return null;
   };
 
   return (
@@ -156,18 +169,18 @@ export default function BacktestTab() {
           {/* Metrics */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 rounded text-center">
-              <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase mb-1">Rendimiento {ticker}</p>
+              <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase mb-1">Rendimiento {result.ticker}</p>
               <p className={`text-2xl font-bold font-sans tracking-tight ${result.metrics.targetReturn >= 0 ? 'text-[#34d399]' : 'text-[#f87171]'}`}>
                 {result.metrics.targetReturn >= 0 ? '+' : ''}{result.metrics.targetReturn.toFixed(2)}%
               </p>
-              <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans font-medium mt-1">{formatCurrency(result.metrics.finalTargetValue)}</p>
+              <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans font-medium mt-1">{formatCurrency(result.metrics.finalTargetValue, resultIsCLP)}</p>
             </div>
             <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 rounded text-center">
               <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase mb-1">Rendimiento S&P 500</p>
               <p className={`text-2xl font-bold font-sans tracking-tight ${result.metrics.benchmarkReturn >= 0 ? 'text-[#60a5fa]' : 'text-[#f87171]'}`}>
                 {result.metrics.benchmarkReturn >= 0 ? '+' : ''}{result.metrics.benchmarkReturn.toFixed(2)}%
               </p>
-              <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans font-medium mt-1">{formatCurrency(result.metrics.finalBenchmarkValue)}</p>
+              <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans font-medium mt-1">{formatCurrency(result.metrics.finalBenchmarkValue, resultIsCLP)}</p>
             </div>
             <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 rounded text-center">
               <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase mb-1">Victoria vs Mercado</p>
@@ -208,15 +221,15 @@ export default function BacktestTab() {
                 <YAxis 
                   stroke="#71717a" 
                   fontSize={10}
-                  tickFormatter={(val) => isCLP ? `CLP$ ${(val/1000).toFixed(0)}k` : `$${(val / 1000)}k`}
+                  tickFormatter={(val) => resultIsCLP ? `CLP$ ${(val/1000).toFixed(0)}k` : `$${(val / 1000)}k`}
                   domain={['auto', 'auto']}
                 />
-                <Tooltip content={<CustomTooltip />} />
+                <Tooltip content={<BacktestTooltip isCLP={resultIsCLP} />} />
                 <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', fontFamily: 'monospace' }} />
-                <Area 
-                  type="monotone" 
-                  dataKey="Estrategia" 
-                  name={ticker}
+                <Area
+                  type="monotone"
+                  dataKey="Estrategia"
+                  name={result.ticker}
                   stroke="#d946ef" 
                   strokeWidth={2}
                   fillOpacity={1} 

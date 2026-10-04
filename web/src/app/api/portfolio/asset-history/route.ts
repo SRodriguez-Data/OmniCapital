@@ -39,9 +39,9 @@ export async function GET(request: Request) {
 
     const history = timestamps.map((ts: number, i: number) => {
       const date = new Date(ts * 1000).toISOString().split('T')[0];
-      const price = closes[i];
+      const price: number | null = closes[i];
       return { date, price };
-    }).filter((item: any) => item.price !== null);
+    }).filter((item: { price: number | null }) => item.price !== null);
 
     return NextResponse.json(history);
 

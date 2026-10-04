@@ -4,13 +4,12 @@ import * as React from 'react';
 import { Moon, Sun } from 'lucide-react';
 import { useTheme } from 'next-themes';
 
-export function ThemeToggle() {
-  const { setTheme, theme } = useTheme();
-  const [mounted, setMounted] = React.useState(false);
+const noopSubscribe = () => () => {};
 
-  React.useEffect(() => {
-    setMounted(true);
-  }, []);
+export function ThemeToggle() {
+  const { setTheme, resolvedTheme } = useTheme();
+  // true solo en el cliente: el tema real no se conoce durante el render del servidor
+  const mounted = React.useSyncExternalStore(noopSubscribe, () => true, () => false);
 
   if (!mounted) {
     return <div className="w-9 h-9" />;
@@ -18,11 +17,11 @@ export function ThemeToggle() {
 
   return (
     <button
-      onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+      onClick={() => setTheme(resolvedTheme === 'light' ? 'dark' : 'light')}
       className="p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900"
-      aria-label="Toggle theme"
+      aria-label="Cambiar tema claro/oscuro"
     >
-      {theme === 'light' ? (
+      {resolvedTheme === 'light' ? (
         <Moon className="w-5 h-5 text-zinc-600" />
       ) : (
         <Sun className="w-5 h-5 text-zinc-400" />

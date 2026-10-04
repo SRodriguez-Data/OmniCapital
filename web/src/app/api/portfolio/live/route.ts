@@ -24,79 +24,61 @@ export async function GET(request: Request) {
     const prices: Record<string, number> = {};
     
     // Ejecutar Yahoo Finance con un Timeout generoso para evitar cold starts en Vercel
-    const timeoutPromise = new Promise<any[]>((_, reject) => setTimeout(() => reject(new Error("Yahoo Timeout")), 9000));
-    const results = await Promise.race([
-      yahooFinance.quote(symbols),
+    const timeoutPromise = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Yahoo Timeout")), 9000));
+    const quotes = await Promise.race([
+      yahooFinance.quote(symbols, { return: 'array' }),
       timeoutPromise
     ]);
-    const quotes: any[] = Array.isArray(results) ? results : [results];
 
     for (const quote of quotes) {
-      if (quote && quote.symbol) {
-        let price = quote.regularMarketPrice || quote.regularMarketPreviousClose || quote.postMarketPrice || quote.preMarketPrice;
-        
-        if (price) {
-          prices[quote.symbol] = price;
-        } else {
-          try {
-            const queryOptions = { period1: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) };
-            const hist = (await yahooFinance.historical(quote.symbol, queryOptions)) as any[];
-            if (hist && hist.length > 0) {
-              prices[quote.symbol] = hist[hist.length - 1].close;
-            }
-          } catch (e) {
-            console.error(`Historical fallback failed for ${quote.symbol}`);
-          }
-        }
+      if (!quote?.symbol) continue;
+      const price = quote.regularMarketPrice || quote.regularMarketPreviousClose || quote.postMarketPrice || quote.preMarketPrice;
+
+      if (price) {
+        prices[quote.symbol] = price;
+        continue;
+      }
+      // Sin precio en la cotización: último cierre de los últimos 5 días
+      try {
+        const chart = await yahooFinance.chart(quote.symbol, { period1: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000), interval: '1d' });
+        const last = chart.quotes.filter(q => q.close !== null && q.close !== undefined).at(-1);
+        if (last?.close) prices[quote.symbol] = last.close;
+      } catch {
+        console.error(`Historical fallback failed for ${quote.symbol}`);
       }
     }
 
     // Fallback parcial si faltaron algunos
     const missingSymbols = symbols.filter(s => !prices[s]);
     if (missingSymbols.length > 0) {
-      const { data } = await supabase
-        .from('precios_historicos')
-        .select('ticker, close')
-        .in('ticker', missingSymbols)
-        .order('date', { ascending: false });
-        
-      if (data) {
-        const found = new Set();
-        for (const row of data) {
-          if (!found.has(row.ticker)) {
-            prices[row.ticker] = row.close;
-            found.add(row.ticker);
-          }
-        }
-      }
+      Object.assign(prices, await latestClosesFromDb(missingSymbols));
     }
 
     return NextResponse.json(prices);
 
   } catch (error) {
     console.error('Live Prices Error (yahoo-finance2):', error);
-    
-    // Fallo catastrófico de Yahoo: rescatar todo desde Supabase
+
+    // Fallo catastrófico de Yahoo: rescatar todo desde el data warehouse del bot en Supabase
     try {
-      const prices: Record<string, number> = {};
-      const { data } = await supabase
-        .from('precios_historicos')
-        .select('ticker, close')
-        .in('ticker', symbols)
-        .order('date', { ascending: false });
-        
-      if (data) {
-        const found = new Set();
-        for (const row of data) {
-          if (!found.has(row.ticker)) {
-            prices[row.ticker] = row.close;
-            found.add(row.ticker);
-          }
-        }
-      }
-      return NextResponse.json(prices);
-    } catch(dbError) {
+      return NextResponse.json(await latestClosesFromDb(symbols));
+    } catch {
       return NextResponse.json({ error: 'Fallo interno en Yahoo y DB' }, { status: 500 });
     }
   }
+}
+
+// Último cierre conocido de cada ticker en precios_historicos (lo llena el minero diario)
+async function latestClosesFromDb(tickers: string[]): Promise<Record<string, number>> {
+  const prices: Record<string, number> = {};
+  const { data } = await supabase
+    .from('precios_historicos')
+    .select('ticker, close')
+    .in('ticker', tickers)
+    .order('date', { ascending: false });
+
+  for (const row of data || []) {
+    if (prices[row.ticker] === undefined && row.close) prices[row.ticker] = row.close;
+  }
+  return prices;
 }

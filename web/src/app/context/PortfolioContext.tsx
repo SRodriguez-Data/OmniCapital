@@ -64,7 +64,7 @@ export const PortfolioProvider = ({ children }: { children: React.ReactNode }) =
         if (savedCartola) {
           try {
             setItems(JSON.parse(savedCartola));
-          } catch (e) {
+          } catch {
             setItems(prev => prev.length > 0 ? prev : []);
           }
         } else {
@@ -102,6 +102,8 @@ export const PortfolioProvider = ({ children }: { children: React.ReactNode }) =
   };
 
   useEffect(() => {
+    // Carga inicial: depende de localStorage y de la sesión, que solo existen en el cliente
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPortfolio();
   }, []);
 

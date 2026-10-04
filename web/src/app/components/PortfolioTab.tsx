@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable react-hooks/set-state-in-effect */
 'use client';
 
 import React, { useEffect, useState } from 'react';
@@ -9,12 +7,11 @@ import { Search, ChevronDown, ChevronUp } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { usePortfolio } from '../context/PortfolioContext';
 import AssetSparkline from './AssetSparkline';
+import type { TimePeriod } from './AssetSparkline';
 import { fetchUsdClp } from '@/lib/fx';
 
 const COLORS_USD = ['#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8', '#1e40af', '#1e3a8a'];
 const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064e3b'];
-
-  import type { TimePeriod } from './AssetSparkline';
 
   export default function PortfolioTab() {
     const { items, loading, isDemo, isCartolaMode, refreshPortfolio, setItems } = usePortfolio();
@@ -103,8 +100,6 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
 
   const totalInvestedCombinedCLP = totalInvestedCLP + (totalInvestedUSD * usdClpRate);
   const totalCurrentCombinedCLP = totalCurrentCLP + (totalCurrentUSD * usdClpRate);
-  const totalPnL_CombinedCLP = totalCurrentCombinedCLP - totalInvestedCombinedCLP;
-  const totalPnL_Percent_CombinedCLP = totalInvestedCombinedCLP > 0 ? (totalPnL_CombinedCLP / totalInvestedCombinedCLP) * 100 : 0;
 
   const chartDataUSD = items.filter(i => i.moneda === 'USD').map((i, index) => ({
     name: i.ticker,
@@ -124,7 +119,6 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
 
   const pnlColorUSD = totalPnL_USD >= 0 ? 'text-[#34d399]' : 'text-[#f87171]';
   const pnlColorCLP = totalPnL_CLP >= 0 ? 'text-[#34d399]' : 'text-[#f87171]';
-  const pnlColorCombined = totalPnL_CombinedCLP >= 0 ? 'text-[#34d399]' : 'text-[#f87171]';
 
   let filteredGlobalHistory = globalHistory;
   if (period !== 'TOTAL' && globalHistory.length > 0) {
@@ -432,7 +426,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
                   contentStyle={{backgroundColor: '#09090b', borderColor: '#27272a', fontFamily: 'monospace'}} 
                   itemStyle={{color: '#e4e4e7'}} 
                   labelStyle={{color: '#71717a'}}
-                  formatter={(value: any, name: any) => [`$${Number(value).toLocaleString('es-CL', {minimumFractionDigits: 0, maximumFractionDigits: 0})}`, name]}
+                  formatter={(value, name) => [`$${Number(value).toLocaleString('es-CL', {minimumFractionDigits: 0, maximumFractionDigits: 0})}`, name]}
                 />
                 <Area 
                   type="monotone" 
@@ -457,7 +451,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie data={dataUSD} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={2}>
-                    {dataUSD.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS_USD[index % COLORS_USD.length]} />)}
+                    {dataUSD.map((_, index) => <Cell key={`cell-${index}`} fill={COLORS_USD[index % COLORS_USD.length]} />)}
                   </Pie>
                   <RechartsTooltip contentStyle={{backgroundColor: '#09090b', borderColor: '#27272a', fontFamily: 'monospace'}} itemStyle={{color: '#e4e4e7'}} formatter={(val) => `$${Number(val).toLocaleString()}`} />
                   <Legend wrapperStyle={{fontFamily: 'monospace', fontSize: '12px', color: '#a1a1aa'}} />
@@ -475,7 +469,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie data={dataCLP} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={2}>
-                    {dataCLP.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS_CLP[index % COLORS_CLP.length]} />)}
+                    {dataCLP.map((_, index) => <Cell key={`cell-${index}`} fill={COLORS_CLP[index % COLORS_CLP.length]} />)}
                   </Pie>
                   <RechartsTooltip contentStyle={{backgroundColor: '#09090b', borderColor: '#27272a', fontFamily: 'monospace'}} itemStyle={{color: '#e4e4e7'}} formatter={(val) => `$${Number(val).toLocaleString()}`} />
                   <Legend wrapperStyle={{fontFamily: 'monospace', fontSize: '12px', color: '#a1a1aa'}} />

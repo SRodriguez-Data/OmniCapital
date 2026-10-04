@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell } from 'recharts';
-import { DollarSign, Percent, TrendingUp } from 'lucide-react';
+import { DollarSign, TrendingUp } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { usePortfolio } from '../context/PortfolioContext';
 
@@ -25,7 +25,7 @@ export default function DividendsTab() {
   const [items, setItems] = useState<DividendItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  async function fetchDividends() {
+  const fetchDividends = useCallback(async () => {
     try {
       // También en modo demo se calculan con dividendos reales de Yahoo sobre el portafolio de ejemplo
       const { data: { session } } = await supabase.auth.getSession();
@@ -46,11 +46,12 @@ export default function DividendsTab() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [contextItems]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- carga de datos al cambiar el portafolio
     fetchDividends();
-  }, [contextItems]);
+  }, [fetchDividends]);
 
   if (loading) return <div className="text-center p-12 font-mono text-zinc-600 dark:text-[#a1a1aa]">Calculando proyecciones de dividendos...</div>;
 
@@ -113,8 +114,8 @@ export default function DividendsTab() {
                 contentStyle={{backgroundColor: '#09090b', borderColor: '#27272a', fontFamily: 'monospace'}} 
                 itemStyle={{color: '#e4e4e7'}} 
                 labelStyle={{color: '#60a5fa', fontWeight: 'bold', marginBottom: '4px'}}
-                formatter={(value: any, name: any, props: any) => {
-                  const item = props.payload;
+                formatter={(value, _name, props) => {
+                  const item = props.payload as DividendItem;
                   return [
                     `$${Number(value).toLocaleString(undefined, {minimumFractionDigits: item.moneda === 'USD' ? 2 : 0, maximumFractionDigits: item.moneda === 'USD' ? 2 : 0})} ${item.moneda}`,
                     'Ingreso Anual Proyectado'

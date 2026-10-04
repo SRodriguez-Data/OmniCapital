@@ -68,8 +68,8 @@ export default function LoginPage() {
         
         router.push('/');
       }
-    } catch (error: any) {
-      setErrorMsg(error.message || t('login.error_auth'));
+    } catch (error: unknown) {
+      setErrorMsg((error instanceof Error && error.message) || t('login.error_auth'));
     } finally {
       setLoading(false);
     }

@@ -12,14 +12,13 @@ import NotificationBell from './components/NotificationBell';
 import BacktestTab from './components/BacktestTab';
 import DataWarehouseTab from './components/DataWarehouseTab';
 import { ThemeToggle } from './components/ThemeToggle';
-import { PortfolioProvider } from './context/PortfolioContext';
 import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History, LogOut, Database, Landmark } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA' | 'TOP5' | 'DIVIDENDOS' | 'BACKTEST' | 'DATA_WAREHOUSE'>('DATA_WAREHOUSE');
-  const [session, setSession] = useState<any>(null);
+  const [session, setSession] = useState<{ user: { id: string; email?: string } } | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -28,7 +27,8 @@ export default function Home() {
       const demoMode = localStorage.getItem('isDemo') === 'true';
       const cartolaMode = localStorage.getItem('isCartolaMode') === 'true';
       if (demoMode || cartolaMode) {
-        setSession({ user: { id: demoMode ? 'demo' : 'cartola', email: 'user@jurado.com' } });
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- modo sin login, leído de localStorage tras hidratar
+        setSession({ user: { id: demoMode ? 'demo' : 'cartola' } });
         return; 
       }
     }

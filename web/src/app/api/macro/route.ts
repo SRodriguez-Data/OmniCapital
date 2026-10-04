@@ -10,7 +10,7 @@ export async function GET() {
     const results = await Promise.all(
       tickers.map(async (ticker) => {
         try {
-          const quote = await yahooFinance.quote(ticker) as any;
+          const quote = await yahooFinance.quote(ticker);
           return {
             symbol: ticker,
             price: quote.regularMarketPrice || 0,
@@ -43,8 +43,8 @@ export async function GET() {
 
     return NextResponse.json(formattedResults);
 
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('API Macro Error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Error interno' }, { status: 500 });
   }
 }

@@ -1,10 +1,24 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Target, TrendingUp, ShieldAlert, Sparkles, AlertTriangle, Loader2 } from 'lucide-react';
+import { ShieldAlert, Sparkles, AlertTriangle, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import ReactMarkdown from 'react-markdown';
 import { usePortfolio } from '../context/PortfolioContext';
+
+// Candidato tal como lo guarda el bot en analisis_ia.candidatos_json
+interface Candidato {
+  ticker: string;
+  price: number;
+  rsi: number;
+  score: number;
+  distancia_ema200: number;
+  bollinger_lower?: number;
+  bollinger_upper?: number;
+  pe?: string | number;
+  div_str?: string;
+  deuda?: string | number;
+}
 
 interface TopOpportunity {
   ticker: string;
@@ -44,19 +58,19 @@ export default function TopOportunidadesTab() {
           
           let top5: TopOpportunity[] = [];
           if (report.candidatos_json) {
-            const us = report.candidatos_json.us || [];
-            const cl = report.candidatos_json.cl || [];
+            const us: Candidato[] = report.candidatos_json.us || [];
+            const cl: Candidato[] = report.candidatos_json.cl || [];
             const combined = [...us, ...cl];
-            let sorted = combined.sort((a, b) => b.score - a.score).slice(0, 5);
-            
+            const sorted = combined.sort((a, b) => b.score - a.score).slice(0, 5);
+
             // Garantizar al menos una acción chilena (.SN)
-            const hasChilean = sorted.some((c: any) => c.ticker.endsWith('.SN'));
+            const hasChilean = sorted.some(c => c.ticker.endsWith('.SN'));
             if (!hasChilean && cl.length > 0) {
-               const bestCl = cl.sort((a: any, b: any) => b.score - a.score)[0];
+               const bestCl = [...cl].sort((a, b) => b.score - a.score)[0];
                sorted.push(bestCl); // Añadimos como sexta oportunidad
             }
 
-            top5 = sorted.map((c: any) => ({
+            top5 = sorted.map(c => ({
               ticker: c.ticker,
               precio_entrada_ideal: c.bollinger_lower ? `$${c.bollinger_lower.toFixed(2)}` : `$${c.price.toFixed(2)}`,
               target_price: c.bollinger_upper ? `$${c.bollinger_upper.toFixed(2)}` : `$${(c.price * 1.1).toFixed(2)}`,
@@ -119,8 +133,8 @@ export default function TopOportunidadesTab() {
       // Guardar en caché
       localStorage.setItem(cacheKey, data.thesis);
       setTheses(prev => ({ ...prev, [op.ticker]: { loading: false, content: data.thesis } }));
-    } catch (e: any) {
-      setTheses(prev => ({ ...prev, [op.ticker]: { loading: false, content: '', error: e.message } }));
+    } catch (e: unknown) {
+      setTheses(prev => ({ ...prev, [op.ticker]: { loading: false, content: '', error: e instanceof Error ? e.message : 'Error al generar tesis' } }));
     }
   };
 
@@ -128,6 +142,9 @@ export default function TopOportunidadesTab() {
     if (expandedIndex !== null && oportunidades[expandedIndex]) {
       generateThesis(oportunidades[expandedIndex]);
     }
+    // generateThesis no va en las dependencias a propósito: cambia con cada respuesta y,
+    // si la tesis falla, provocaría reintentos infinitos. El usuario reintenta con el botón.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandedIndex, oportunidades]);
 
   if (loading) return <div className="text-center p-12 font-mono text-zinc-600 dark:text-[#a1a1aa]">Escaneando el mercado en busca de oportunidades...</div>;

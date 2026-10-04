@@ -76,7 +76,7 @@ export default function AssetSparkline({ ticker, purchaseDate, period = 'TOTAL' 
               contentStyle={{backgroundColor: '#09090b', borderColor: '#27272a', fontFamily: 'monospace', fontSize: '10px'}} 
               itemStyle={{color: '#e4e4e7'}}
               labelStyle={{color: '#71717a'}}
-              formatter={(val: any) => [`$${Number(val).toFixed(2)}`, 'Precio']}
+              formatter={(val) => [`$${Number(val).toFixed(2)}`, 'Precio']}
             />
             <Area 
               type="monotone" 
