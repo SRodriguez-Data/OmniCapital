@@ -115,8 +115,16 @@ def get_fundamentals(ticker):
     try:
         info = yf.Ticker(ticker).info
         pe = info.get('trailingPE', info.get('forwardPE', -1))
-        div = info.get('dividendYield', 0)
-        div_str = f"{div*100:.2f}%" if isinstance(div, (int, float)) else "0.00%"
+        # Yahoo cambió 'dividendYield' a porcentaje (3.46 = 3,46%); multiplicarlo por 100 daba 346%.
+        # Se calcula como dividendo anual / precio, que no depende de ese formato.
+        rate = info.get('dividendRate')
+        price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
+        if isinstance(rate, (int, float)) and isinstance(price, (int, float)) and price > 0:
+            div_pct = rate / price * 100
+        else:
+            div = info.get('dividendYield')
+            div_pct = div if isinstance(div, (int, float)) else 0
+        div_str = f"{div_pct:.2f}%"
         deuda = info.get('debtToEquity', 0)
         
         if not isinstance(pe, (int, float)): pe = -1
