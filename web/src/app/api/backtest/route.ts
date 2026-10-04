@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { yahooFinance, dailyHistory, withTimeout, BENCH_CL } from '@/lib/marketData';
 import { annualVol, maxDrawdown, returns } from '@/lib/quant';
+import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
 interface Point { date: string; price: number }
 
@@ -31,6 +32,9 @@ function weekly(points: Point[]): Point[] {
 }
 
 export async function POST(request: Request) {
+  if (!rateLimit(request, 'backtest', 30)) {
+    return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
+  }
   try {
     const body = await request.json();
     const ticker = typeof body.ticker === 'string' ? body.ticker.trim().toUpperCase() : '';
@@ -96,6 +100,7 @@ export async function POST(request: Request) {
 
   } catch (err: unknown) {
     console.error('API Backtest Error:', err);
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Error interno' }, { status: 500 });
+    const sinDatos = err instanceof Error && err.message.startsWith('No hay datos');
+    return NextResponse.json({ error: sinDatos ? err.message : 'No se pudo simular con los datos de mercado disponibles. Intenta de nuevo en unos minutos.' }, { status: sinDatos ? 404 : 502 });
   }
 }

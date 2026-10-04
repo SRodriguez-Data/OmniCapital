@@ -13,26 +13,44 @@ export const FX_TICKER = 'CLP=X'; // pesos chilenos por dólar
 export const BENCH_US = '^GSPC';
 // Yahoo no publica el IPSA (^IPSA) desde hace tiempo; el ETF It Now IPSA lo replica en CLP
 export const BENCH_CL = 'CFMITNIPSA.SN';
+// Acciones globales (MSCI ACWI) para el índice de comparación en pesos
+export const BENCH_GLOBAL = 'ACWI';
 
 export interface DailyHistory {
   ticker: string;
-  dates: string[]; // ordenadas, YYYY-MM-DD
+  dates: string[]; // ordenadas, YYYY-MM-DD en la zona horaria de la bolsa
   closes: number[];
   series: DatedSeries;
   source: 'yahoo' | 'supabase';
+  fresh: boolean; // el último cierre tiene menos de una semana
+  frozen: boolean; // los últimos cierres son idénticos (dato congelado)
 }
 
-const historyCache = new Map<string, { at: number; data: DailyHistory | null }>();
-const HISTORY_TTL = 60 * 60 * 1000;
-
-// Cuando Yahoo limita las consultas (HTTP 429) la librería reintenta durante minutos:
-// se corta antes y se usa el respaldo, para que la página nunca quede esperando
+const DAY_MS = 24 * 60 * 60 * 1000;
 const YAHOO_TIMEOUT_MS = 8000;
+
+// Corta la espera de una promesa y libera el temporizador al terminar
 export function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${what}: sin respuesta en ${ms / 1000}s`)), ms)),
-  ]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what}: sin respuesta en ${ms / 1000}s`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+// La señal también cuenta el tiempo en la cola de la librería: cuando Yahoo limita (HTTP 429) los
+// trabajos vencidos fallan al instante en vez de ocupar la cola por minutos
+export const yahooRequest = () => ({ fetchOptions: { signal: AbortSignal.timeout(YAHOO_TIMEOUT_MS) } });
+
+// Fecha del cierre en la zona horaria de la bolsa: Yahoo marca el dólar a la medianoche de Londres
+// (23:00 UTC del día anterior en horario de verano) y con toISOString quedaba un día corrido
+function dayFormatter(timeZone?: string): (d: Date) => string {
+  try {
+    const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: timeZone || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' });
+    return d => fmt.format(d);
+  } catch {
+    return d => d.toISOString().slice(0, 10);
+  }
 }
 
 function build(ticker: string, rows: { date: string; close: number }[], source: DailyHistory['source']): DailyHistory | null {
@@ -42,20 +60,30 @@ function build(ticker: string, rows: { date: string; close: number }[], source: 
   }
   const dates = [...byDate.keys()].sort();
   if (dates.length === 0) return null;
-  return { ticker, dates, closes: dates.map(d => byDate.get(d)!), series: byDate, source };
+  const closes = dates.map(d => byDate.get(d)!);
+  const tail = closes.slice(-6);
+  return {
+    ticker, dates, closes, series: byDate, source,
+    fresh: Date.now() - new Date(dates[dates.length - 1]).getTime() < 7 * DAY_MS,
+    frozen: tail.length === 6 && tail.every(c => c === tail[0]),
+  };
 }
 
 async function fromYahoo(ticker: string, days: number): Promise<DailyHistory | null> {
-  const period1 = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-  const chart = await withTimeout(yahooFinance.chart(ticker, { period1, interval: '1d' }), YAHOO_TIMEOUT_MS, `Yahoo ${ticker}`);
+  const period1 = new Date(Date.now() - days * DAY_MS);
+  const chart = await withTimeout(
+    yahooFinance.chart(ticker, { period1, interval: '1d' }, yahooRequest()),
+    YAHOO_TIMEOUT_MS + 1000, `Yahoo ${ticker}`,
+  );
+  const toDay = dayFormatter(chart.meta.exchangeTimezoneName);
   return build(ticker, chart.quotes
     .filter(q => q.date && q.close !== null && q.close !== undefined)
-    .map(q => ({ date: new Date(q.date).toISOString().slice(0, 10), close: q.close as number })), 'yahoo');
+    .map(q => ({ date: toDay(new Date(q.date)), close: q.close as number })), 'yahoo');
 }
 
 // El minero diario (GitHub Actions) guarda los cierres en precios_historicos desde 2021
 async function fromSupabase(ticker: string, days: number): Promise<DailyHistory | null> {
-  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const since = new Date(Date.now() - days * DAY_MS).toISOString().slice(0, 10);
   const PAGE = 1000; // máximo de filas por consulta en Supabase
   const rows: { date: string; close: number }[] = [];
   for (let page = 0; page < 10; page++) {
@@ -73,36 +101,77 @@ async function fromSupabase(ticker: string, days: number): Promise<DailyHistory 
   return build(ticker, rows, 'supabase');
 }
 
-// Yahoo a veces congela el historial de las acciones chilenas (el mismo cierre durante semanas)
-function isStale(h: DailyHistory): boolean {
-  const last = h.closes.slice(-8);
-  return last.length === 8 && last.every(c => c === last[0]);
+const usable = (h: DailyHistory) => h.closes.length >= 30 && h.fresh && !h.frozen;
+
+// Caché por instancia con tope de tamaño. Cada ticker se descarga en una ventana fija (2, 5 o 15 años)
+// y las consultas más cortas se recortan en memoria, para no repetir descargas ni llenar la memoria.
+const WINDOWS = [2 * 365 + 10, 5 * 365 + 10, 15 * 365];
+const MAX_ENTRIES = 250;
+const TTL_OK = 60 * 60 * 1000;
+const TTL_FAIL = 2 * 60 * 1000; // un fallo pasajero (429) no se arrastra por una hora
+const cache = new Map<string, { at: number; ttl: number; data: DailyHistory | null }>();
+const inFlight = new Map<string, Promise<DailyHistory | null>>();
+
+function cacheGet(key: string): DailyHistory | null | undefined {
+  const hit = cache.get(key);
+  if (!hit) return undefined;
+  if (Date.now() - hit.at > hit.ttl) {
+    cache.delete(key);
+    return undefined;
+  }
+  cache.delete(key); // se reinserta al final: los menos usados quedan primero
+  cache.set(key, hit);
+  return hit.data;
 }
 
-function usable(h: DailyHistory): boolean {
-  return h.closes.length >= 30 && !isStale(h);
+function cacheSet(key: string, data: DailyHistory | null) {
+  cache.set(key, { at: Date.now(), ttl: data && usable(data) ? TTL_OK : TTL_FAIL, data });
+  while (cache.size > MAX_ENTRIES) cache.delete(cache.keys().next().value!);
 }
 
-// Cierres diarios de los últimos `days` días corridos, con caché de 1 hora por instancia.
-// Chile: primero la base del minero (Yahoo trae datos congelados); resto: primero Yahoo.
-export async function dailyHistory(ticker: string, days = 400): Promise<DailyHistory | null> {
-  const key = `${ticker}:${days}`;
-  const cached = historyCache.get(key);
-  if (cached && Date.now() - cached.at < HISTORY_TTL) return cached.data;
+function slice(h: DailyHistory, days: number): DailyHistory {
+  const since = new Date(Date.now() - days * DAY_MS).toISOString().slice(0, 10);
+  const start = h.dates.findIndex(d => d >= since);
+  if (start <= 0) return h;
+  const dates = h.dates.slice(start);
+  return { ...h, dates, closes: h.closes.slice(start), series: new Map(dates.map(d => [d, h.series.get(d)!])) };
+}
 
+async function load(ticker: string, window: number): Promise<DailyHistory | null> {
+  // Chile: primero la base del minero (Yahoo congela el historial chileno); resto: primero Yahoo
   const sources = ticker.endsWith('.SN') ? [fromSupabase, fromYahoo] : [fromYahoo, fromSupabase];
   let best: DailyHistory | null = null;
   for (const source of sources) {
     try {
-      const h = await source(ticker, days);
-      if (h && usable(h)) { best = h; break; }
-      if (h && (!best || h.closes.length > best.closes.length)) best = h;
+      const h = await source(ticker, window);
+      if (h && usable(h)) return h;
+      if (h && (!best || (best.frozen && !h.frozen) || (!best.fresh && h.fresh) || h.closes.length > best.closes.length)) best = h;
     } catch (e) {
       console.warn(`Sin historia de ${ticker} en ${source.name}:`, e instanceof Error ? e.message.slice(0, 120) : e);
     }
   }
-  historyCache.set(key, { at: Date.now(), data: best });
   return best;
+}
+
+// Cierres diarios de los últimos `days` días corridos. Si ninguna fuente está al día, devuelve la mejor
+// disponible marcada con `fresh`/`frozen` para que quien la use decida si confiar en ella.
+export async function dailyHistory(ticker: string, days = 400): Promise<DailyHistory | null> {
+  const window = WINDOWS.find(w => w >= days) ?? WINDOWS[WINDOWS.length - 1];
+  for (const w of WINDOWS.filter(x => x >= window)) {
+    const hit = cacheGet(`${ticker}:${w}`);
+    if (hit !== undefined) return hit ? slice(hit, days) : null;
+  }
+  const key = `${ticker}:${window}`;
+  let pending = inFlight.get(key);
+  if (!pending) {
+    pending = load(ticker, window).then(data => {
+      cacheSet(key, data);
+      return data;
+    }).finally(() => inFlight.delete(key));
+    inFlight.set(key, pending);
+  }
+  const data = await pending;
+  return data ? slice(data, days) : null;
 }
 
 export interface LiveQuote {
@@ -117,7 +186,10 @@ export async function liveQuotes(tickers: string[]): Promise<Map<string, LiveQuo
   const out = new Map<string, LiveQuote>();
   if (tickers.length === 0) return out;
   try {
-    const quotes = await withTimeout(yahooFinance.quote(tickers, { return: 'array' }), YAHOO_TIMEOUT_MS, 'Yahoo quote');
+    const quotes = await withTimeout(
+      yahooFinance.quote(tickers, { return: 'array' }, yahooRequest()),
+      YAHOO_TIMEOUT_MS + 1000, 'Yahoo quote',
+    );
     for (const q of quotes) {
       const price = q.regularMarketPrice || q.regularMarketPreviousClose;
       if (q.symbol && price && price > 0) {
@@ -132,7 +204,10 @@ export async function liveQuotes(tickers: string[]): Promise<Map<string, LiveQuo
 
 async function mindicador(code: string): Promise<number | null> {
   try {
-    const res = await fetch(`https://mindicador.cl/api/${code}`, { next: { revalidate: 3600 } } as RequestInit);
+    const res = await fetch(`https://mindicador.cl/api/${code}`, {
+      signal: AbortSignal.timeout(3000),
+      next: { revalidate: 3600 },
+    } as RequestInit);
     if (!res.ok) return null;
     const valor = Number((await res.json())?.serie?.[0]?.valor);
     return Number.isFinite(valor) && valor > 0 ? valor : null;
@@ -147,7 +222,7 @@ export async function riskFreeRateClp(): Promise<number> {
   return tpm ? tpm / 100 : 0.045;
 }
 
-// Dólar observado de hoy (Banco Central). Si falla, el último cierre de Yahoo.
-export async function usdClpToday(fx?: DailyHistory | null): Promise<number | null> {
-  return (await mindicador('dolar')) ?? fx?.closes.at(-1) ?? null;
+// Dólar observado de hoy según el Banco Central (null si mindicador.cl no responde)
+export async function dolarObservado(): Promise<number | null> {
+  return mindicador('dolar');
 }

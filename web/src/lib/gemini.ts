@@ -37,7 +37,8 @@ export function toGeminiSchema(schema: Record<string, unknown>): ResponseSchema 
 export async function geminiText(
   prompt: string,
   schema: Record<string, unknown> | undefined,
-  models: string[]
+  models: string[],
+  signal?: AbortSignal,
 ): Promise<{ text: string; model: string }> {
   if (!genAI) throw new Error('GEMINI_API_KEY no configurada');
 
@@ -48,14 +49,15 @@ export async function geminiText(
 
   let lastError: unknown;
   for (const model of models) {
+    if (signal?.aborted) break; // se acabó el tiempo: no seguir gastando cuota en otros modelos
     try {
-      const result = await genAI.getGenerativeModel({ model }).generateContent(request);
+      const result = await genAI.getGenerativeModel({ model }).generateContent(request, { signal });
       return { text: result.response.text(), model };
     } catch (error) {
       lastError = error;
-      if (!isTransient(error)) throw error;
+      if (signal?.aborted || !isTransient(error)) throw error;
       console.warn(`Gemini ${model} no disponible, probando el siguiente modelo:`, errorText(error).slice(0, 200));
     }
   }
-  throw lastError;
+  throw lastError ?? new Error('timeout');
 }

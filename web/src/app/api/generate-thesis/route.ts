@@ -47,7 +47,7 @@ Tu respuesta debe ser quirúrgica y estrictamente en 3 viñetas markdown:
 3. 🔗 Sinergia con Portafolio (Analiza OBLIGATORIAMENTE cómo ${ticker} beneficia o diversifica el portafolio actual del usuario. Si el usuario ya lo tiene, explica si acumular más tiene sentido).
 Usa solo los datos entregados; si un dato es N/A, dilo en vez de inventarlo.`;
 
-    const { text } = await generateText(prompt, { speed: 'fast' });
+    const { text } = await generateText(prompt, { speed: 'fast', timeoutMs: 25000 });
     return NextResponse.json({ thesis: text });
   } catch (error: unknown) {
     console.error('Error generando tesis con IA:', error);

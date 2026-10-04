@@ -4,12 +4,21 @@
 export const MAX_ITEMS = 60;
 export const TICKER_RE = /^[A-Z0-9.^=\-]{1,20}$/;
 
+// Fecha YYYY-MM-DD real (no 2024-13-45) y no futura; si no, null
+export function validDate(value: unknown): string | null {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const time = Date.parse(`${value}T00:00:00Z`);
+  if (!Number.isFinite(time) || new Date(time).toISOString().slice(0, 10) !== value) return null;
+  return time <= Date.now() ? value : null;
+}
+
 export interface PortfolioInput {
   ticker: string;
   cantidad: number;
   precio_compra: number;
   moneda: 'USD' | 'CLP';
   precio_actual?: number;
+  purchase_date: string | null;
 }
 
 export function parsePortfolioItems(raw: unknown): { items: PortfolioInput[] } | { error: string } {
@@ -33,6 +42,7 @@ export function parsePortfolioItems(raw: unknown): { items: PortfolioInput[] } |
       precio_compra,
       moneda: r?.moneda === 'CLP' ? 'CLP' : 'USD',
       precio_actual: precio_actual !== undefined && Number.isFinite(precio_actual) && precio_actual > 0 ? precio_actual : undefined,
+      purchase_date: validDate(r?.purchase_date),
     });
   }
   return { items };

@@ -22,8 +22,58 @@ export function returns(series: number[]): number[] {
   return out;
 }
 
-export function annualVol(rets: number[]): number | null {
-  return rets.length >= 20 ? std(rets) * Math.sqrt(TRADING_DAYS) : null;
+// Volatilidad anual de un activo que cotiza en una sola bolsa
+export function annualVol(rets: number[], periodsPerYear = TRADING_DAYS): number | null {
+  return rets.length >= 20 ? std(rets) * Math.sqrt(periodsPerYear) : null;
+}
+
+// Varianza de largo plazo de Newey-West (pesos de Bartlett). Corrige la autocorrelación que generan
+// los cierres asincrónicos: el peso chileno reacciona al día siguiente a lo que hizo Wall Street,
+// así que la varianza diaria simple no escala bien a un año.
+export function neweyWestVariance(rets: number[], lags = 2): number {
+  const n = rets.length;
+  if (n < 3) return 0;
+  const m = mean(rets);
+  const x = rets.map(r => r - m);
+  const gamma = (k: number) => {
+    let s = 0;
+    for (let t = k; t < n; t++) s += x[t] * x[t - k];
+    return s / n;
+  };
+  let v = gamma(0);
+  for (let k = 1; k <= lags; k++) v += 2 * (1 - k / (lags + 1)) * gamma(k);
+  return Math.max(v, 0);
+}
+
+// Matriz de covarianza diaria de Newey-West (T observaciones × N series), semidefinida positiva
+export function neweyWestCov(matrix: number[][], lags = 2): number[][] {
+  const T = matrix.length;
+  const N = T ? matrix[0].length : 0;
+  const means = Array.from({ length: N }, (_, j) => mean(matrix.map(row => row[j])));
+  const X = matrix.map(row => row.map((v, j) => v - means[j]));
+  const cov = Array.from({ length: N }, () => new Array<number>(N).fill(0));
+  for (let k = 0; k <= lags; k++) {
+    const w = k === 0 ? 1 : 1 - k / (lags + 1);
+    for (let t = k; t < T; t++) {
+      const a = X[t], b = X[t - k];
+      for (let i = 0; i < N; i++) {
+        for (let j = 0; j < N; j++) {
+          const g = a[i] * b[j] / T;
+          cov[i][j] += k === 0 ? g : w * g;
+          if (k > 0) cov[j][i] += w * g;
+        }
+      }
+    }
+  }
+  return cov;
+}
+
+export function matVec(m: number[][], v: number[]): number[] {
+  return m.map(row => row.reduce((s, x, j) => s + x * v[j], 0));
+}
+
+export function dot(a: number[], b: number[]): number {
+  return a.reduce((s, x, i) => s + x * b[i], 0);
 }
 
 // Mayor caída desde un máximo previo, como fracción positiva (0.25 = -25%)
@@ -45,11 +95,25 @@ export function periodReturn(closes: number[], sessions: number): number | null 
   return start > 0 ? closes[closes.length - 1] / start - 1 : null;
 }
 
+// Momentum 12-1: rentabilidad de los últimos 12 meses sin el último mes (que tiende a revertirse).
+// Con menos historia usa 6-1.
+export function momentum(closes: number[]): { valor: number; meses: 12 | 6 } | null {
+  const n = closes.length;
+  for (const [lookback, meses] of [[TRADING_DAYS, 12], [126, 6]] as const) {
+    if (n > lookback) {
+      const start = closes[n - 1 - lookback];
+      const end = closes[n - 1 - 21];
+      if (start > 0) return { valor: end / start - 1, meses };
+    }
+  }
+  return null;
+}
+
 export function sma(closes: number[], n: number): number | null {
   return closes.length >= n ? mean(closes.slice(-n)) : null;
 }
 
-// RSI de Wilder
+// RSI de Wilder. Una serie sin movimiento es neutral (50), no sobrecomprada.
 export function rsi(closes: number[], period = 14): number | null {
   if (closes.length <= period) return null;
   let gain = 0;
@@ -65,13 +129,14 @@ export function rsi(closes: number[], period = 14): number | null {
     gain = (gain * (period - 1) + Math.max(d, 0)) / period;
     loss = (loss * (period - 1) + Math.max(-d, 0)) / period;
   }
+  if (gain === 0 && loss === 0) return 50;
   if (loss === 0) return 100;
   return 100 - 100 / (1 + gain / loss);
 }
 
-// Stop de volatilidad: máximo de cierre del último mes menos 2 desviaciones estándar mensuales
-// (una caída así ocurre ~1 de cada 20 meses). Usa cierres porque Yahoo no trae máximos y mínimos
-// intradía confiables para las acciones chilenas. La distancia al máximo queda entre 5% y 35%.
+// Stop de volatilidad: máximo de cierre del último mes menos 2 desviaciones estándar mensuales.
+// Usa cierres porque Yahoo no trae máximos y mínimos intradía confiables para las acciones chilenas.
+// La distancia al máximo queda entre 5% y 35%.
 export function volatilityStop(closes: number[], lookback = 22, sigmas = 2): { stop: number; caidaMax: number } | null {
   if (closes.length < 127) return null;
   const sdMensual = std(returns(closes.slice(-127))) * Math.sqrt(21);
@@ -98,19 +163,72 @@ export function correlation(a: number[], b: number[]): number | null {
   return sa > 0 && sb > 0 ? covariance(a, b) / (sa * sb) : null;
 }
 
-export function beta(asset: number[], bench: number[]): number | null {
+// Beta de Dimson (rezagos -1, 0 y +1): no subestima la beta de activos poco transados o que cierran
+// a distinta hora que su índice
+export function dimsonBeta(asset: number[], bench: number[]): number | null {
   const n = Math.min(asset.length, bench.length);
-  if (n < 20) return null;
-  const vb = std(bench.slice(0, n)) ** 2;
-  return vb > 0 ? covariance(asset, bench) / vb : null;
+  if (n < 30) return null;
+  const a = asset.slice(0, n), b = bench.slice(0, n);
+  const vb = std(b) ** 2;
+  if (vb <= 0) return null;
+  const lead = covariance(a.slice(0, n - 1), b.slice(1)); // índice al día siguiente
+  const lag = covariance(a.slice(1), b.slice(0, n - 1)); // índice el día anterior
+  return (covariance(a, b) + lead + lag) / vb;
 }
 
 // VaR histórico: la pérdida diaria que solo se supera el (1 - conf) de los días
 export function historicalVaR(rets: number[], conf = 0.95): number | null {
   if (rets.length < 50) return null;
   const sorted = [...rets].sort((a, b) => a - b);
-  const idx = Math.floor((1 - conf) * sorted.length);
-  return Math.max(0, -sorted[idx]);
+  return Math.max(0, -sorted[Math.floor((1 - conf) * sorted.length)]);
+}
+
+// Expected shortfall (CVaR): la pérdida promedio en ese (1 - conf) de peores días
+export function expectedShortfall(rets: number[], conf = 0.95): number | null {
+  if (rets.length < 50) return null;
+  const sorted = [...rets].sort((a, b) => a - b);
+  const tail = sorted.slice(0, Math.max(1, Math.floor((1 - conf) * sorted.length)));
+  return Math.max(0, -mean(tail));
+}
+
+// Reparte pesos proporcionales a `raw` sin pasar ningún tope. Si los topes suman menos de 1, lo que
+// no cabe queda sin asignar (no se le carga al activo con más espacio).
+export function capWeights(raw: number[], caps: number[]): { weights: number[]; unallocated: number } {
+  const n = raw.length;
+  const weights = new Array<number>(n).fill(0);
+  const fixed = new Array<boolean>(n).fill(false);
+  for (let iter = 0; iter <= n; iter++) {
+    const remaining = 1 - weights.reduce((s, w, i) => s + (fixed[i] ? w : 0), 0);
+    const free = raw.map((r, i) => (!fixed[i] && r > 0 ? i : -1)).filter(i => i >= 0);
+    const sumRaw = free.reduce((s, i) => s + raw[i], 0);
+    if (sumRaw <= 0 || remaining <= 1e-12) break;
+    const over = free.filter(i => remaining * raw[i] / sumRaw > caps[i]);
+    if (over.length === 0) {
+      free.forEach(i => { weights[i] = remaining * raw[i] / sumRaw; });
+      break;
+    }
+    over.forEach(i => { weights[i] = caps[i]; fixed[i] = true; });
+  }
+  return { weights, unallocated: Math.max(0, 1 - weights.reduce((s, w) => s + w, 0)) };
+}
+
+// Pesos de paridad de riesgo (cada activo aporta lo mismo al riesgo total) por iteración de punto fijo
+export function riskParityWeights(cov: number[][], iterations = 300): number[] {
+  const n = cov.length;
+  if (n === 0) return [];
+  let w = new Array<number>(n).fill(1 / n);
+  for (let it = 0; it < iterations; it++) {
+    const m = matVec(cov, w);
+    const variance = dot(w, m);
+    if (variance <= 0) break;
+    const next = w.map((wi, i) => (m[i] > 0 ? wi * Math.sqrt(variance / (n * wi * m[i])) : wi));
+    const total = next.reduce((s, x) => s + x, 0);
+    const normalized = next.map(x => x / total);
+    const change = normalized.reduce((s, x, i) => s + Math.abs(x - w[i]), 0);
+    w = normalized;
+    if (change < 1e-10) break;
+  }
+  return w;
 }
 
 // Serie de cierres por fecha (YYYY-MM-DD)

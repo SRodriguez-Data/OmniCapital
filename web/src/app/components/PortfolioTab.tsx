@@ -27,52 +27,58 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
     const [purchaseDate, setPurchaseDate] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [usdClpRate, setUsdClpRate] = useState<number>(930);
+    const [observedUsdClp, setObservedUsdClp] = useState<number | null>(null);
 
     const [period, setPeriod] = useState<TimePeriod>('TOTAL');
     const [globalHistory, setGlobalHistory] = useState<{ date: string; prices: Record<string, number>; fx?: number | null }[]>([]);
     const [actionError, setActionError] = useState('');
 
+    // Cada efecto ignora su respuesta si el portafolio cambió mientras esperaba (evita pisar datos nuevos)
     useEffect(() => {
-      async function fetchLivePrices() {
-        if (items.length === 0) return;
-        const tickers = items.map(i => i.ticker).join(',');
-        try {
-          const res = await fetch(`/api/portfolio/live?symbols=${encodeURIComponent(tickers)}&t=${Date.now()}`);
-          if (res.ok) {
-            const data = await res.json();
-            setLivePrices(data);
-          }
-        } catch (err) {
-          console.error("Error fetching live prices", err);
-        }
-      }
-      fetchLivePrices();
+      if (items.length === 0) return;
+      let cancelled = false;
+      const tickers = items.map(i => i.ticker).join(',');
+      fetch(`/api/portfolio/live?symbols=${encodeURIComponent(tickers)}&t=${Date.now()}`)
+        .then(res => (res.ok ? res.json() : null))
+        .then(data => { if (!cancelled && data && !data.error) setLivePrices(data); })
+        .catch(err => console.error('Error fetching live prices', err));
+      return () => { cancelled = true; };
     }, [items]);
 
     useEffect(() => {
       // Dólar observado del día (Banco Central vía mindicador.cl)
-      fetchUsdClp().then(rate => { if (rate) setUsdClpRate(rate); });
+      fetchUsdClp().then(rate => { if (rate) setObservedUsdClp(rate); });
     }, []);
 
     useEffect(() => {
-      async function fetchHistory() {
-        if (items.length === 0) return;
-        try {
-          const res = await fetch('/api/portfolio/history', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ items: items.map(i => ({ ticker: i.ticker, purchase_date: i.purchase_date || null })) })
-          });
-          if (res.ok) {
-             setGlobalHistory(await res.json());
-          }
-        } catch (e) {
-           console.error("Error fetching global history", e);
-        }
-      }
-      fetchHistory();
+      if (items.length === 0) return;
+      let cancelled = false;
+      fetch('/api/portfolio/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: items.map(i => ({ ticker: i.ticker, purchase_date: i.purchase_date || null })) })
+      })
+        .then(res => (res.ok ? res.json() : null))
+        .then((data: { dates: string[]; fx: (number | null)[]; series: Record<string, (number | null)[]> } | null) => {
+          if (cancelled || !data?.dates) return;
+          // La ruta responde en columnas (más liviano); aquí se arma una fila por día
+          setGlobalHistory(data.dates.map((date, k) => {
+            const prices: Record<string, number> = {};
+            for (const [ticker, values] of Object.entries(data.series)) {
+              if (values[k] !== null) prices[ticker] = values[k] as number;
+            }
+            return { date, prices, fx: data.fx[k] };
+          }));
+        })
+        .catch(e => console.error('Error fetching global history', e));
+      return () => { cancelled = true; };
     }, [items]);
+
+    // Dólar de hoy: el observado del Banco Central o, si no responde, el último del historial
+    const lastHistoryDay = globalHistory[globalHistory.length - 1];
+    const usdClpRate = observedUsdClp ?? lastHistoryDay?.fx ?? 950;
+    // Precio actual: el en vivo o, si Yahoo no lo trae, el último cierre conocido (nunca el costo)
+    const currentPriceOf = (ticker: string): number | undefined => livePrices[ticker] ?? lastHistoryDay?.prices[ticker];
 
   // Calculamos KPIs
   let totalInvestedUSD = 0;
@@ -81,7 +87,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
   let totalCurrentCLP = 0;
 
   items.forEach(item => {
-    const cp = livePrices[item.ticker];
+    const cp = currentPriceOf(item.ticker);
     if (item.moneda === 'USD') {
       totalInvestedUSD += item.cantidad * item.precio_compra;
       if (cp !== undefined) totalCurrentUSD += item.cantidad * cp;
@@ -104,13 +110,13 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
 
   const chartDataUSD = items.filter(i => i.moneda === 'USD').map((i, index) => ({
     name: i.ticker,
-    value: livePrices[i.ticker] ? i.cantidad * livePrices[i.ticker] : i.cantidad * i.precio_compra,
+    value: i.cantidad * (currentPriceOf(i.ticker) ?? i.precio_compra),
     fill: COLORS_USD[index % COLORS_USD.length]
   }));
 
   const chartDataCLP = items.filter(i => i.moneda === 'CLP').map((i, index) => ({
     name: i.ticker,
-    value: livePrices[i.ticker] ? i.cantidad * livePrices[i.ticker] : i.cantidad * i.precio_compra,
+    value: i.cantidad * (currentPriceOf(i.ticker) ?? i.precio_compra),
     fill: COLORS_CLP[index % COLORS_CLP.length]
   }));
 
@@ -559,7 +565,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
           </thead>
           <tbody className="divide-y divide-zinc-200 dark:divide-[#27272a]">
             {items.map((row) => {
-              const currentPrice = livePrices[row.ticker];
+              const currentPrice = currentPriceOf(row.ticker);
               const startPrice = startPriceFor(row);
               const invested = row.cantidad * startPrice;
               const currentVal = currentPrice !== undefined ? row.cantidad * currentPrice : undefined;

@@ -23,6 +23,8 @@ interface RebalanceResult {
   currency: 'USD' | 'CLP';
   budget: number;
   totalCost: number;
+  sinAsignar: number;
+  motivoSinAsignar: string | null;
   resumen: string | null;
   modelo: string | null;
 }
@@ -57,10 +59,10 @@ export default function SizingTab() {
         body: JSON.stringify({ budget: Number(budget), currency, fraccionar, items })
       });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Error al calcular rebalanceo');
+      // Un 504 de Vercel llega como HTML: no intentar leerlo como JSON
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || data.error) {
+        throw new Error(data?.error || `El cálculo no respondió (error ${res.status}). Intenta de nuevo.`);
       }
 
       setResult(data);
@@ -83,7 +85,7 @@ export default function SizingTab() {
               Optimizador de Rebalanceo IA <Sparkles className="w-4 h-4 text-[#d946ef]" />
             </h2>
             <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans">
-              Reparte tu nuevo capital sin vender nada: cada activo recibe un peso objetivo según su riesgo (menos volatilidad, más peso) y la señal de tu informe, y se compra solo lo que está bajo ese objetivo. Precios reales; nunca supera tu presupuesto.
+              Reparte tu nuevo capital sin vender nada. Cada activo recibe un peso objetivo por paridad de riesgo (todos aportan lo mismo al riesgo de tu cartera, medido en pesos), un poco más si su señal es AUMENTAR, con máximo 20% por empresa y 40% por fondo. Solo se compra lo que está bajo su objetivo; lo que no conviene invertir queda sin asignar.
             </p>
           </div>
         </div>
@@ -205,7 +207,8 @@ export default function SizingTab() {
           )}
 
           <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 text-xs text-zinc-500 dark:text-[#71717a] font-mono text-center">
-            Total Asignado: <span className="text-zinc-900 dark:text-[#e4e4e7] font-bold">{fmt(result.totalCost, result.currency)}</span> de {fmt(result.budget, result.currency)} · Sobrante: {fmt(result.budget - result.totalCost, result.currency)}
+            Total Asignado: <span className="text-zinc-900 dark:text-[#e4e4e7] font-bold">{fmt(result.totalCost, result.currency)}</span> de {fmt(result.budget, result.currency)} · Sin asignar: {fmt(result.sinAsignar, result.currency)}
+            {result.motivoSinAsignar && <p className="mt-2 normal-case text-amber-600 dark:text-amber-400">{result.motivoSinAsignar}</p>}
           </div>
         </div>
       )}

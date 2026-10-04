@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { dailyHistory } from '@/lib/marketData';
-import { TICKER_RE } from '@/lib/validation';
+import { TICKER_RE, validDate } from '@/lib/validation';
+import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -13,8 +14,11 @@ export async function GET(request: Request) {
   if (!TICKER_RE.test(ticker)) {
     return NextResponse.json({ error: 'Ticker inválido' }, { status: 400 });
   }
+  if (!rateLimit(request, 'asset-history', 120)) {
+    return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
+  }
 
-  const since = purchaseDate && /^\d{4}-\d{2}-\d{2}$/.test(purchaseDate) ? purchaseDate : null;
+  const since = validDate(purchaseDate);
   const days = since ? Math.max(30, Math.ceil((Date.now() - new Date(since).getTime()) / DAY_MS) + 5) : 2 * 365;
 
   try {
@@ -22,9 +26,10 @@ export async function GET(request: Request) {
     if (!history) {
       return NextResponse.json({ error: 'Sin datos históricos para este periodo' }, { status: 404 });
     }
-    return NextResponse.json(history.dates
-      .filter(d => !since || d >= since)
-      .map(date => ({ date, price: history.series.get(date)! })));
+    return NextResponse.json(
+      history.dates.filter(d => !since || d >= since).map(date => ({ date, price: history.series.get(date)! })),
+      { headers: { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400' } },
+    );
   } catch (error) {
     console.error('Asset History Error:', error);
     return NextResponse.json({ error: 'Fallo interno al procesar los datos' }, { status: 500 });

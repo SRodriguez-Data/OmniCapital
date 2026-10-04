@@ -9,6 +9,7 @@ import { planPurchases } from '@/lib/optimizer';
 export const maxDuration = 60;
 
 const AI_TIMEOUT_MS = 20000;
+const MAX_BUDGET = 1e12;
 
 interface Candidate { ticker?: unknown; score?: unknown }
 
@@ -19,7 +20,7 @@ export async function POST(request: Request) {
     const currency: 'USD' | 'CLP' = body?.currency === 'CLP' ? 'CLP' : 'USD';
     const fraccionar = body?.fraccionar !== false;
 
-    if (!Number.isFinite(budget) || budget <= 0) {
+    if (!Number.isFinite(budget) || budget <= 0 || budget > MAX_BUDGET) {
       return NextResponse.json({ error: 'Monto de inversión inválido' }, { status: 400 });
     }
     if (!rateLimit(request, 'rebalance', 15)) {
@@ -43,8 +44,8 @@ export async function POST(request: Request) {
       .slice(0, 5)
       .map(c => c.ticker.toUpperCase());
 
-    const report = await buildAdvisorReport(parsed.items, oportunidades);
-    const plan = planPurchases(report, budget, currency, { fraccionar });
+    const { modelo: riesgo, ...report } = await buildAdvisorReport(parsed.items, oportunidades);
+    const plan = planPurchases(report, riesgo, budget, currency, { fraccionar });
 
     let resumen: string | null = null;
     let modelo: string | null = null;
@@ -56,11 +57,9 @@ export async function POST(request: Request) {
 Plan:
 ${ordenes}
 ${plan.excluidos.length ? `No se compran: ${plan.excluidos.map(e => `${e.ticker} (${e.motivo})`).join('; ')}` : ''}
-Criterio: peso objetivo según el riesgo de cada activo (menos volatilidad, más peso), sin superar 20% en una empresa, y solo se completa lo que está bajo su objetivo.`;
-        const r = await Promise.race([
-          generateText(prompt, { speed: 'fast' }),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), AI_TIMEOUT_MS)),
-        ]);
+${plan.motivoSinAsignar ? `Queda sin asignar ${fmtMoney(plan.sinAsignar, currency)}: ${plan.motivoSinAsignar}` : ''}
+Criterio: paridad de riesgo (cada activo aporta lo mismo al riesgo total del portafolio, medido en pesos), un poco más de peso a las señales AUMENTAR, máximo 20% por empresa y 40% por fondo, y solo se completa lo que está bajo su objetivo.`;
+        const r = await generateText(prompt, { speed: 'fast', timeoutMs: AI_TIMEOUT_MS });
         resumen = r.text.trim();
         modelo = r.model;
       } catch (e) {

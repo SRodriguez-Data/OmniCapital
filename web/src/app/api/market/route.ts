@@ -97,7 +97,7 @@ Datos actuales:
 
 Dime de forma experta si el activo está sobrecomprado, sobrevendido o en zona de valor, y si recomendarías una entrada a estos precios basado estrictamente en el análisis técnico cuantitativo.
         `;
-        aiAnalysis = (await generateText(prompt, { speed: 'fast' })).text;
+        aiAnalysis = (await generateText(prompt, { speed: 'fast', timeoutMs: 20000 })).text;
         aiCache.set(ticker, { timestamp: Date.now(), text: aiAnalysis });
       } catch (aiError) {
         console.error("AI Error:", aiError);
@@ -117,7 +117,10 @@ Dime de forma experta si el activo está sobrecomprado, sobrevendido o en zona d
       name: meta.longName || meta.shortName || meta.symbol || ticker,
       currency: meta.currency || 'USD',
       aiAnalysis
-    });
+    }, aiCache.has(ticker)
+      // Con el resumen de IA listo, la CDN comparte la respuesta 15 minutos (ahorra cuota de Gemini)
+      ? { headers: { 'Cache-Control': 'public, s-maxage=900, stale-while-revalidate=3600' } }
+      : undefined);
 
   } catch (error) {
     console.error('API Market Error:', error);

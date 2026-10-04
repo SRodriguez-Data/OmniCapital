@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Info, RefreshCw, ShieldAlert } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 
@@ -14,9 +14,11 @@ interface Posicion {
   valorCLP: number;
   peso: number;
   pnl: number | null;
-  ret6m: number | null;
+  momentum: number | null;
+  momentumMeses: 12 | 6 | null;
   ret1y: number | null;
   vol: number | null;
+  aporteRiesgo: number | null;
   beta: number | null;
   benchmark: string;
   rsi: number | null;
@@ -46,6 +48,13 @@ interface Informe {
     sharpe: number | null;
     var95: number | null;
     var95CLP: number | null;
+    es95: number | null;
+    es95CLP: number | null;
+    diversificacion: number | null;
+    posicionesEfectivas: number | null;
+    riesgoCambiario: number | null;
+    cobertura: number;
+    indice: { nombre: string; ret1y: number; diferencia: number | null; trackingError: number | null } | null;
     perfil: string | null;
   };
   hallazgos: Hallazgo[];
@@ -55,7 +64,14 @@ interface Informe {
   avisoIa: string | null;
 }
 
-const CACHE_PREFIX = 'omnicapital_informe_v2_';
+const CACHE_PREFIX = 'omnicapital_informe_v3_';
+
+// Fecha de hoy en Chile: el informe se renueva cada día de mercado chileno, no a medianoche UTC
+const hoyEnChile = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
+
+// Una sola solicitud en curso por composición: si el usuario sale de la pestaña y vuelve, se reutiliza
+// en vez de gastar otra llamada a la IA
+const enCurso = new Map<string, Promise<Informe>>();
 
 const pct = (x: number | null, digits = 1, sign = false) =>
   x === null || x === undefined ? 'N/D' : `${sign && x >= 0 ? '+' : ''}${(x * 100).toFixed(digits)}%`;
@@ -108,11 +124,13 @@ export default function RecommendationsTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [abiertos, setAbiertos] = useState<Record<string, boolean>>({});
+  const cacheKeyRef = useRef('');
 
   // Se cachea por sesión según la composición del portafolio y el día, para no gastar cuota de IA
-  const cacheKey = CACHE_PREFIX + new Date().toISOString().slice(0, 10) + JSON.stringify(items.map(i => [i.ticker, i.cantidad, i.precio_compra]).sort());
+  const cacheKey = CACHE_PREFIX + hoyEnChile() + JSON.stringify(items.map(i => [i.ticker, i.cantidad, i.precio_compra, i.moneda, i.purchase_date || '']).sort());
 
   const generate = useCallback(async (force: boolean) => {
+    cacheKeyRef.current = cacheKey;
     if (items.length === 0) {
       setLoading(false);
       return;
@@ -132,33 +150,38 @@ export default function RecommendationsTab() {
     }
 
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 90000);
-      const res = await fetch('/api/portfolio/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          items: items.map(i => ({
-            ticker: i.ticker,
-            cantidad: i.cantidad,
-            precio_compra: i.precio_compra,
-            moneda: i.moneda,
-            purchase_date: i.purchase_date || null,
-          })),
-        }),
-        signal: controller.signal,
-      }).finally(() => clearTimeout(timeoutId));
-
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || json.error) throw new Error(json.error || `Error ${res.status} al generar el informe`);
-
-      setData(json);
-      try { sessionStorage.setItem(cacheKey, JSON.stringify(json)); } catch { /* sin caché */ }
+      let pending = enCurso.get(cacheKey);
+      if (!pending) {
+        pending = (async () => {
+          const res = await fetch('/api/portfolio/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              items: items.map(i => ({
+                ticker: i.ticker,
+                cantidad: i.cantidad,
+                precio_compra: i.precio_compra,
+                moneda: i.moneda,
+                purchase_date: i.purchase_date || null,
+              })),
+            }),
+            signal: AbortSignal.timeout(90000),
+          });
+          const json = await res.json().catch(() => ({}));
+          if (!res.ok || json.error) throw new Error(json.error || `Error ${res.status} al generar el informe`);
+          try { sessionStorage.setItem(cacheKey, JSON.stringify(json)); } catch { /* sin caché */ }
+          return json as Informe;
+        })().finally(() => enCurso.delete(cacheKey));
+        enCurso.set(cacheKey, pending);
+      }
+      const json = await pending;
+      if (cacheKeyRef.current === cacheKey) setData(json);
     } catch (e: unknown) {
-      const aborted = e instanceof DOMException && e.name === 'AbortError';
+      if (cacheKeyRef.current !== cacheKey) return; // el portafolio cambió mientras esperaba
+      const aborted = e instanceof DOMException && (e.name === 'AbortError' || e.name === 'TimeoutError');
       setError(aborted ? 'El análisis tardó demasiado. Intenta de nuevo.' : e instanceof Error ? e.message : 'Error desconocido');
     } finally {
-      setLoading(false);
+      if (cacheKeyRef.current === cacheKey) setLoading(false);
     }
   }, [items, cacheKey]);
 
@@ -220,10 +243,32 @@ export default function RecommendationsTab() {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <Kpi label="Valor total" value={clp(r.valorCLP)} sub={`${pct(r.pesoUSD, 0)} en dólares`} />
         <Kpi label="Resultado desde compra" value={pct(r.pnlPct, 1, true)} valueClass={tone(r.pnlPct)} sub={`${r.pnlCLP >= 0 ? '+' : '-'}${clp(Math.abs(r.pnlCLP))} en pesos`} />
-        <Kpi label="Rentabilidad 12 meses" value={pct(r.ret1y, 1, true)} valueClass={tone(r.ret1y)} sub={r.sharpe !== null ? `Sharpe ${r.sharpe.toFixed(2)}` : undefined} />
+        <Kpi
+          label="Rentabilidad 12 meses"
+          value={pct(r.ret1y, 1, true)}
+          valueClass={tone(r.ret1y)}
+          sub={r.indice ? `Índice equivalente ${pct(r.indice.ret1y, 1, true)}` : r.sharpe !== null ? `Sharpe estimado ${r.sharpe.toFixed(2)}` : undefined}
+        />
         <Kpi label="Volatilidad anual" value={pct(r.vol)} sub={r.perfil ? `Perfil ${r.perfil}` : undefined} />
         <Kpi label="Caída máxima 12m" value={r.maxDD !== null ? `-${pct(r.maxDD)}` : 'N/D'} valueClass="text-red-600 dark:text-red-400" />
-        <Kpi label="Pérdida en un mal día" value={r.var95CLP !== null ? `-${clp(r.var95CLP)}` : 'N/D'} sub={r.var95 !== null ? `VaR 95%: ${pct(r.var95, 2)}` : undefined} />
+        <Kpi
+          label="Pérdida en un mal día"
+          value={r.var95CLP !== null ? `-${clp(r.var95CLP)}` : 'N/D'}
+          sub={r.es95CLP !== null ? `Promedio en días malos: -${clp(r.es95CLP)}` : undefined}
+        />
+      </div>
+
+      {/* Estructura del riesgo */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Kpi label="Diversificación" value={r.diversificacion !== null ? `${r.diversificacion.toFixed(2)}x` : 'N/D'} sub="Cuánto reduce el riesgo vs. sumar cada activo" />
+        <Kpi label="Apuestas independientes" value={r.posicionesEfectivas !== null ? r.posicionesEfectivas.toFixed(1) : 'N/D'} sub="Según cómo se reparte el riesgo" />
+        <Kpi label="Riesgo del dólar" value={pct(r.riesgoCambiario, 0)} sub="Parte del riesgo total" />
+        <Kpi
+          label="Vs. índice equivalente"
+          value={r.indice?.diferencia != null ? pct(r.indice.diferencia, 1, true) : 'N/D'}
+          valueClass={tone(r.indice?.diferencia ?? null)}
+          sub={r.indice?.trackingError != null ? `Desvío vs. índice ${pct(r.indice.trackingError)} anual` : undefined}
+        />
       </div>
 
       {/* Hallazgos calculados */}
@@ -276,12 +321,13 @@ export default function RecommendationsTab() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-8 gap-3 mt-4 pt-4 border-t border-zinc-200 dark:border-zinc-800">
+              <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-3 mt-4 pt-4 border-t border-zinc-200 dark:border-zinc-800">
                 <Metric label="Precio" value={money(p.precio, p.moneda)} />
                 <Metric label="P&L compra" value={pct(p.pnl, 1, true)} className={tone(p.pnl)} />
-                <Metric label="6 meses" value={pct(p.ret6m, 1, true)} className={tone(p.ret6m)} />
+                <Metric label={`Momentum ${p.momentumMeses ?? 12}-1`} value={pct(p.momentum, 1, true)} className={tone(p.momentum)} />
                 <Metric label="12 meses" value={pct(p.ret1y, 1, true)} className={tone(p.ret1y)} />
                 <Metric label="Volatilidad" value={pct(p.vol, 0)} />
+                <Metric label="Aporte al riesgo" value={pct(p.aporteRiesgo)} />
                 <Metric label={`Beta ${p.benchmark}`} value={p.beta !== null ? p.beta.toFixed(2) : 'N/D'} />
                 <Metric label="RSI 14" value={p.rsi !== null ? p.rsi.toFixed(0) : 'N/D'} />
                 <Metric
@@ -310,9 +356,11 @@ export default function RecommendationsTab() {
       </div>
 
       <p className="text-[11px] text-zinc-500 dark:text-zinc-500 leading-relaxed">
-        Cómo se calcula: precios diarios de Yahoo Finance del último año. Tendencia por medias móviles de 50 y 200 días, impulso por la rentabilidad de 6 meses,
-        RSI de 14 días, y stop &quot;chandelier&quot; (máximo de 22 días menos 3 veces el movimiento diario promedio). El riesgo del portafolio se mide en pesos con tus
-        cantidades actuales y el dólar de cada día. {data.modelo ? `Redacción: ${data.modelo}.` : ''} Es una herramienta de apoyo y no constituye asesoría financiera personalizada.
+        Cómo se calcula: cierres diarios del último año (base del minero para Chile, Yahoo Finance para EE.UU.), solo con datos al día. Señales: tendencia sobre la
+        media de 200 días, momentum 12-1 y RSI de 14 días; stop = máximo del último mes menos 2 desviaciones estándar mensuales, confirmado con dos cierres.
+        Riesgo en pesos con tus pesos actuales y el dólar de cada día: volatilidad con corrección de Newey-West (el peso reacciona un día después a Wall Street),
+        VaR y pérdida promedio en el 5% de peores días, aporte de cada activo y del dólar al riesgo total, y beta de Dimson contra el índice de su mercado.
+        {data.modelo ? ` Redacción: ${data.modelo}.` : ''} Es una herramienta de apoyo y no constituye asesoría financiera personalizada.
       </p>
     </div>
   );

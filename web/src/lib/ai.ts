@@ -21,15 +21,23 @@ interface GenerateOptions {
   // 'fast' (gemini-flash-lite-latest primero) para respuestas que el usuario espera en pantalla;
   // 'quality' (gemini-3.5-flash primero) para razonamiento más cuidadoso
   speed?: 'fast' | 'quality';
+  // Corta la llamada (y los reintentos con otros modelos) pasado este tiempo
+  timeoutMs?: number;
 }
 
 export async function generateText(
   prompt: string,
-  { schema, speed = 'quality' }: GenerateOptions = {}
+  { schema, speed = 'quality', timeoutMs }: GenerateOptions = {}
 ): Promise<{ text: string; model: string }> {
   if (!geminiConfigured) throw new Error('GEMINI_API_KEY no configurada');
   const models = speed === 'fast' ? GEMINI_MODELS_FAST : GEMINI_MODELS_QUALITY;
-  return geminiText(prompt, schema as Record<string, unknown> | undefined, models);
+  const controller = timeoutMs ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(new Error('timeout')), timeoutMs) : undefined;
+  try {
+    return await geminiText(prompt, schema as Record<string, unknown> | undefined, models, controller?.signal);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Traduce los errores de Gemini a algo que el usuario entienda, con un status HTTP útil

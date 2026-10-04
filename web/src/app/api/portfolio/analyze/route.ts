@@ -7,7 +7,8 @@ import { buildAdvisorReport, fmtMoney, type AdvisorReport } from '@/lib/advisor'
 // Node (no Edge): necesita yahoo-finance2 para el historial de precios
 export const maxDuration = 60;
 
-const AI_TIMEOUT_MS = 35000;
+// La IA usa el tiempo que queda hasta este límite, para que el informe nunca se pierda por timeout
+const DEADLINE_MS = 52000;
 
 // La IA solo redacta: no decide acciones ni inventa cifras
 const responseSchema: JsonSchema = {
@@ -31,6 +32,7 @@ const responseSchema: JsonSchema = {
 const pct = (x: number | null, digits = 1) => (x === null ? 'N/D' : `${(x * 100).toFixed(digits)}%`);
 
 export async function POST(req: Request) {
+  const started = Date.now();
   if (!rateLimit(req, 'analyze', 15)) {
     return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
   }
@@ -48,11 +50,9 @@ export async function POST(req: Request) {
 
   let report: AdvisorReport;
   try {
-    const raw = body.items as { purchase_date?: unknown }[];
-    report = await buildAdvisorReport(parsed.items.map((i, idx) => ({
-      ...i,
-      purchase_date: typeof raw[idx]?.purchase_date === 'string' ? raw[idx].purchase_date as string : null,
-    })));
+    const { modelo: _modelo, ...rest } = await buildAdvisorReport(parsed.items);
+    void _modelo; // la matriz de riesgo es para el optimizador, no para el navegador
+    report = rest;
   } catch (error) {
     console.error('Error construyendo el informe:', error);
     return NextResponse.json({ error: 'No se pudieron obtener los precios de mercado. Intenta de nuevo en unos minutos.' }, { status: 502 });
@@ -66,10 +66,11 @@ export async function POST(req: Request) {
 
   if (aiConfigured) {
     try {
-      const { text, model } = await Promise.race([
-        generateText(buildPrompt(report), { schema: responseSchema, speed: 'fast' }),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), AI_TIMEOUT_MS)),
-      ]);
+      const { text, model } = await generateText(buildPrompt(report), {
+        schema: responseSchema,
+        speed: 'fast',
+        timeoutMs: Math.max(5000, DEADLINE_MS - (Date.now() - started)),
+      });
       const data = JSON.parse(text);
       if (typeof data?.diagnostico === 'string' && data.diagnostico.trim()) diagnostico = data.diagnostico.trim();
       for (const p of Array.isArray(data?.posiciones) ? data.posiciones : []) {
@@ -100,9 +101,10 @@ function buildPrompt(r: AdvisorReport): string {
     `- ${p.ticker}${p.nombre ? ` (${p.nombre})` : ''}: DECISIÓN ${p.accion}`,
     `peso ${pct(p.peso)}`,
     `P&L desde compra ${pct(p.pnl)}`,
-    `6m ${pct(p.ret6m)}`,
+    `momentum ${p.momentumMeses ?? 12}-1 ${pct(p.momentum)}`,
     `12m ${pct(p.ret1y)}`,
     `volatilidad ${pct(p.vol, 0)}`,
+    `aporte al riesgo ${pct(p.aporteRiesgo)}`,
     `beta vs ${p.benchmark} ${p.beta?.toFixed(2) ?? 'N/D'}`,
     `RSI ${p.rsi?.toFixed(0) ?? 'N/D'}`,
     `stop ${p.stop !== null ? `${fmtMoney(p.stop, p.moneda)} (${pct(p.stopDist)})` : 'N/D'}`,
@@ -113,7 +115,7 @@ function buildPrompt(r: AdvisorReport): string {
 Todas las cifras y decisiones ya fueron calculadas con precios reales. Tu trabajo es SOLO redactarlas con claridad.
 
 Portafolio: valor ${fmtMoney(s.valorCLP, 'CLP')} CLP, resultado desde la compra ${pct(s.pnlPct)}, ${pct(s.pesoUSD, 0)} en dólares.
-Riesgo (últimos 12 meses con las posiciones actuales): volatilidad ${pct(s.vol)}, caída máxima ${pct(s.maxDD)}, rentabilidad ${pct(s.ret1y)}, Sharpe ${s.sharpe?.toFixed(2) ?? 'N/D'}, perfil ${s.perfil ?? 'N/D'}. Tasa libre de riesgo (TPM) ${pct(r.tasaLibreRiesgo)}.
+Riesgo en pesos (simulación de 12 meses con los pesos actuales): volatilidad ${pct(s.vol)}, caída máxima ${pct(s.maxDD)}, rentabilidad ${pct(s.ret1y)}, perfil ${s.perfil ?? 'N/D'}, pérdida esperada en el 5% de peores días ${pct(s.es95, 2)}, parte del riesgo que viene del dólar ${pct(s.riesgoCambiario, 0)}. Tasa libre de riesgo (TPM) ${pct(r.tasaLibreRiesgo)}.${s.indice ? ` Índice equivalente (${s.indice.nombre}): ${pct(s.indice.ret1y)}.` : ''}
 Hallazgos:
 ${r.hallazgos.map(h => `- [${h.nivel}] ${h.titulo}. ${h.detalle}`).join('\n')}
 

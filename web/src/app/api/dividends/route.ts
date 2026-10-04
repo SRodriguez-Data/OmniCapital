@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { yahooFinance, withTimeout } from '@/lib/marketData';
+import { yahooFinance, withTimeout, yahooRequest } from '@/lib/marketData';
+import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
+import { TICKER_RE } from '@/lib/validation';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
@@ -18,6 +20,9 @@ interface PortfolioRow {
 }
 
 export async function POST(req: Request) {
+  if (!rateLimit(req, 'dividends', 30)) {
+    return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
+  }
   try {
     let portfolio: PortfolioRow[] = [];
     const bodyText = await req.text();
@@ -43,6 +48,7 @@ export async function POST(req: Request) {
     if (portfolio.length === 0) {
       return NextResponse.json([]);
     }
+    portfolio = portfolio.filter(i => TICKER_RE.test(String(i?.ticker)) && Number(i?.cantidad) > 0);
     if (portfolio.length > MAX_ITEMS) {
       return NextResponse.json({ error: `Máximo ${MAX_ITEMS} activos por consulta` }, { status: 400 });
     }
@@ -58,7 +64,7 @@ export async function POST(req: Request) {
           const purchase = item.purchase_date ? new Date(item.purchase_date) : null;
           const period1 = purchase && !isNaN(purchase.getTime()) && purchase < oneYearAgo ? purchase : oneYearAgo;
 
-          const chart = await withTimeout(yahooFinance.chart(item.ticker, { period1, interval: '1mo', events: 'div' }), 10000, `Yahoo ${item.ticker}`);
+          const chart = await withTimeout(yahooFinance.chart(item.ticker, { period1, interval: '1mo', events: 'div' }, yahooRequest()), 10000, `Yahoo ${item.ticker}`);
           const price = chart.meta.regularMarketPrice as number | undefined;
           const dividends = chart.events?.dividends || [];
 
@@ -100,6 +106,6 @@ export async function POST(req: Request) {
 
   } catch (err: unknown) {
     console.error('API Dividends Error:', err);
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Error interno' }, { status: 500 });
+    return NextResponse.json({ error: 'No se pudieron calcular los dividendos en este momento.' }, { status: 500 });
   }
 }
