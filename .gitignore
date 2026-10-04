@@ -9,3 +9,6 @@ serviceAccountKey.json
 __pycache__/
 *.pyc
 *.log
+
+# Cartolas reales (RUT, dirección, cuentas): nunca versionar
+Cartolas/
