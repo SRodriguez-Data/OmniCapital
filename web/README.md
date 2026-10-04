@@ -19,14 +19,13 @@ En `.env.local` (local) y en **Vercel → Settings → Environment Variables** (
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | URL del proyecto Supabase |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Clave pública (publishable) de Supabase |
-| `ANTHROPIC_API_KEY` | IA principal: Claude (`claude-opus-5-5`). Se crea en console.anthropic.com |
-| `GEMINI_API_KEY` | IA de respaldo: si Claude falla o no hay clave, se usa Gemini |
+| `GEMINI_API_KEY` | IA (Google Gemini, plan gratuito). Se crea en aistudio.google.com |
 
 Nunca subas claves al repositorio: `.env*` está en `.gitignore`.
 
 ## IA
 
-`src/lib/ai.ts` es el único punto de entrada: intenta Claude (`src/lib/claude.ts`) y, ante cualquier error (cuota, saturación, rechazo, red), usa Gemini (`src/lib/gemini.ts`). Las rutas que gastan cuota tienen límite por IP (`src/lib/rateLimit.ts`).
+`src/lib/ai.ts` es el único punto de entrada. Usa Gemini (`src/lib/gemini.ts`) con una cadena de modelos: `gemini-3.5-flash` para análisis más cuidadosos y `gemini-flash-lite-latest` para respuestas rápidas; si un modelo está saturado o sin cuota, se prueba el siguiente. Las rutas que gastan cuota tienen límite por IP (`src/lib/rateLimit.ts`).
 
 ## Datos del bot
 

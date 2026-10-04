@@ -91,7 +91,7 @@ export async function GET(request: Request) {
     if (currentPrice <= bollingerLower) signal = 'COMPRAR';
     else if (currentPrice >= bollingerUpper) signal = 'VENDER';
 
-    // Resumen de IA (Claude, con Gemini de respaldo)
+    // Resumen de IA (Gemini)
     let aiAnalysis = "No hay un proveedor de IA configurado en el servidor, por lo que el análisis de IA está deshabilitado.";
     
     const cachedAi = aiCache.get(ticker);
@@ -110,7 +110,7 @@ Datos actuales:
 
 Dime de forma experta si el activo está sobrecomprado, sobrevendido o en zona de valor, y si recomendarías una entrada a estos precios basado estrictamente en el análisis técnico cuantitativo.
         `;
-        aiAnalysis = (await generateText(prompt, { speed: 'fast', maxTokens: 8000 })).text;
+        aiAnalysis = (await generateText(prompt, { speed: 'fast' })).text;
         aiCache.set(ticker, { timestamp: Date.now(), text: aiAnalysis });
       } catch (aiError) {
         console.error("AI Error:", aiError);

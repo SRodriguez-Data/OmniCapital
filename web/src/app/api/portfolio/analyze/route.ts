@@ -7,7 +7,7 @@ export const runtime = 'edge';
 
 const ACCIONES = ['🟢 BUY', '🟡 HOLD', '🔴 SELL'];
 
-// La IA queda obligada a devolver exactamente esta forma (Claude y Gemini)
+// La IA queda obligada a devolver exactamente esta forma
 const responseSchema: JsonSchema = {
   type: 'object',
   properties: {

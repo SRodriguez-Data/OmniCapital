@@ -107,7 +107,7 @@ export default function RecommendationsTab() {
     );
   }
 
-  if (loading) return <div className="text-center p-12 font-mono text-zinc-600 dark:text-zinc-400">Claude está analizando tu portafolio (puede tardar hasta un minuto)...</div>;
+  if (loading) return <div className="text-center p-12 font-mono text-zinc-600 dark:text-zinc-400">La IA está analizando tu portafolio (puede tardar hasta un minuto)...</div>;
 
   function renderAiData(aiData: AiData) {
     return (
