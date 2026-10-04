@@ -6,29 +6,45 @@ import { usePortfolio } from '../context/PortfolioContext';
 
 interface RebalanceRecommendation {
   ticker: string;
+  origen: 'EN_CARTERA' | 'OPORTUNIDAD';
   sharesToBuy: number;
+  price: number;
   expectedCost: number;
   rationale: string;
+}
+
+interface RebalanceResult {
+  recommendations: RebalanceRecommendation[];
+  currency: 'USD' | 'CLP';
+  budget: number;
+  totalCost: number;
 }
 
 export default function SizingTab() {
   const { items } = usePortfolio();
   const [budget, setBudget] = useState('');
+  const [currency, setCurrency] = useState<'USD' | 'CLP'>('USD');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [recommendations, setRecommendations] = useState<RebalanceRecommendation[] | null>(null);
+  const [result, setResult] = useState<RebalanceResult | null>(null);
+
+  const fmt = (n: number, cur: 'USD' | 'CLP') => cur === 'CLP'
+    ? `$${Math.round(n).toLocaleString('es-CL')} CLP`
+    : `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
 
   const calculateRebalance = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
-    setRecommendations(null);
+    setResult(null);
 
     try {
+      if (items.length === 0) throw new Error('Tu portafolio está vacío. Agrega activos primero.');
+
       const res = await fetch('/api/rebalance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ budget: Number(budget), items })
+        body: JSON.stringify({ budget: Number(budget), currency, items })
       });
 
       const data = await res.json();
@@ -37,13 +53,14 @@ export default function SizingTab() {
         throw new Error(data.error || 'Error al calcular rebalanceo');
       }
 
-      setRecommendations(data.recommendations);
-    } catch (err: any) {
-      setError(err.message);
+      setResult(data);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error desconocido');
     } finally {
       setLoading(false);
     }
   };
+  const recommendations = result?.recommendations;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -56,24 +73,36 @@ export default function SizingTab() {
               Optimizador de Rebalanceo IA <Sparkles className="w-4 h-4 text-[#d946ef]" />
             </h2>
             <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans">
-              Google Gemini analizará tu portafolio actual y los precios del mercado para recomendarte matemáticamente cómo invertir tu nuevo capital.
+              La IA propone cómo repartir tu nuevo capital entre tu portafolio y las oportunidades del escáner. Los costos se recalculan con precios reales y nunca superan tu presupuesto.
             </p>
           </div>
         </div>
 
         <form onSubmit={calculateRebalance} className="space-y-4">
           <div>
-            <label className="block text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] mb-1">Nuevo Capital a Invertir (USD o CLP)</label>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-[#71717a]">$</span>
-              <input 
-                type="number" 
-                required
-                value={budget}
-                onChange={e => setBudget(e.target.value)}
-                className="w-full bg-zinc-50 dark:bg-[#09090b] border border-zinc-300 dark:border-[#3f3f46] text-zinc-900 dark:text-[#e4e4e7] p-3 pl-8 font-mono text-lg focus:outline-none focus:border-[#60a5fa]"
-                placeholder="1000"
-              />
+            <label className="block text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] mb-1">Nuevo Capital a Invertir</label>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-[#71717a]">$</span>
+                <input
+                  type="number"
+                  required
+                  min="0"
+                  step="any"
+                  value={budget}
+                  onChange={e => setBudget(e.target.value)}
+                  className="w-full bg-zinc-50 dark:bg-[#09090b] border border-zinc-300 dark:border-[#3f3f46] text-zinc-900 dark:text-[#e4e4e7] p-3 pl-8 font-mono text-lg focus:outline-none focus:border-[#60a5fa]"
+                  placeholder={currency === 'CLP' ? '1000000' : '1000'}
+                />
+              </div>
+              <select
+                value={currency}
+                onChange={e => setCurrency(e.target.value as 'USD' | 'CLP')}
+                className="bg-zinc-50 dark:bg-[#09090b] border border-zinc-300 dark:border-[#3f3f46] text-zinc-900 dark:text-[#e4e4e7] px-3 font-mono focus:outline-none focus:border-[#60a5fa]"
+              >
+                <option value="USD">USD</option>
+                <option value="CLP">CLP</option>
+              </select>
             </div>
           </div>
 
@@ -93,7 +122,7 @@ export default function SizingTab() {
         </div>
       )}
 
-      {recommendations && (
+      {result && recommendations && (
         <div className="space-y-6 animate-fade-in">
           <div className="bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-[#27272a] rounded overflow-hidden">
             <div className="px-6 py-4 border-b border-zinc-200 dark:border-[#27272a] bg-white dark:bg-[#18181b]">
@@ -109,22 +138,29 @@ export default function SizingTab() {
                   <tr>
                     <th className="px-6 py-3 font-medium">Activo</th>
                     <th className="px-6 py-3 font-medium text-right">Cantidad</th>
-                    <th className="px-6 py-3 font-medium text-right">Costo Estimado</th>
+                    <th className="px-6 py-3 font-medium text-right">Precio Actual</th>
+                    <th className="px-6 py-3 font-medium text-right">Costo</th>
                     <th className="px-6 py-3 font-medium">Justificación IA</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-200 dark:divide-[#27272a]">
                   {recommendations.map((rec, i) => (
-                    <tr key={i} className="hover:bg-white dark:bg-[#18181b]/50 transition-colors">
-                      <td className="px-6 py-4 font-sans font-bold tracking-tight text-zinc-900 dark:text-[#e4e4e7]">{rec.ticker}</td>
+                    <tr key={i} className="hover:bg-white dark:hover:bg-[#18181b]/50 transition-colors">
+                      <td className="px-6 py-4 font-sans font-bold tracking-tight text-zinc-900 dark:text-[#e4e4e7]">
+                        {rec.ticker}
+                        {rec.origen === 'OPORTUNIDAD' && (
+                          <span className="ml-2 text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-fuchsia-100 dark:bg-fuchsia-900/30 text-fuchsia-700 dark:text-fuchsia-300">Nueva</span>
+                        )}
+                      </td>
                       <td className="px-6 py-4 font-mono text-[#34d399] text-right">+{rec.sharesToBuy}</td>
-                      <td className="px-6 py-4 font-mono text-zinc-600 dark:text-[#a1a1aa] text-right">${rec.expectedCost.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                      <td className="px-6 py-4 font-mono text-zinc-600 dark:text-[#a1a1aa] text-right">{fmt(rec.price, result.currency)}</td>
+                      <td className="px-6 py-4 font-mono text-zinc-600 dark:text-[#a1a1aa] text-right">{fmt(rec.expectedCost, result.currency)}</td>
                       <td className="px-6 py-4 text-zinc-600 dark:text-[#a1a1aa] text-xs">{rec.rationale}</td>
                     </tr>
                   ))}
                   {recommendations.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="px-6 py-8 text-center text-zinc-500 dark:text-[#71717a] font-mono">
+                      <td colSpan={5} className="px-6 py-8 text-center text-zinc-500 dark:text-[#71717a] font-mono">
                         No se sugirieron compras. Quizás el capital es insuficiente para adquirir acciones completas.
                       </td>
                     </tr>
@@ -135,7 +171,7 @@ export default function SizingTab() {
           </div>
           
           <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 text-xs text-zinc-500 dark:text-[#71717a] font-mono text-center">
-            Total Asignado: <span className="text-zinc-900 dark:text-[#e4e4e7] font-bold">${recommendations.reduce((acc, r) => acc + r.expectedCost, 0).toLocaleString()}</span> de ${budget} ingresados.
+            Total Asignado: <span className="text-zinc-900 dark:text-[#e4e4e7] font-bold">{fmt(result.totalCost, result.currency)}</span> de {fmt(result.budget, result.currency)} · Sobrante: {fmt(result.budget - result.totalCost, result.currency)}
           </div>
         </div>
       )}

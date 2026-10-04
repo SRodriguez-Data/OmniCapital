@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import YahooFinance from 'yahoo-finance2';
 import { supabase } from '@/lib/supabase';
+import { MAX_ITEMS, TICKER_RE } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +15,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Faltan tickers' }, { status: 400 });
   }
 
-  const symbols = symbolsParam.split(',').map(s => s.trim());
+  const symbols = Array.from(new Set(symbolsParam.split(',').map(s => s.trim().toUpperCase()).filter(Boolean)));
+  if (symbols.length > MAX_ITEMS || symbols.some(s => !TICKER_RE.test(s))) {
+    return NextResponse.json({ error: `Tickers inválidos (máximo ${MAX_ITEMS})` }, { status: 400 });
+  }
 
   try {
     const prices: Record<string, number> = {};

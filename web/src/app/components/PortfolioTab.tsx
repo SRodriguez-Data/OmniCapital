@@ -9,6 +9,7 @@ import { Search, ChevronDown, ChevronUp } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { usePortfolio } from '../context/PortfolioContext';
 import AssetSparkline from './AssetSparkline';
+import { fetchUsdClp } from '@/lib/fx';
 
 const COLORS_USD = ['#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8', '#1e40af', '#1e3a8a'];
 const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064e3b'];
@@ -53,14 +54,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
 
     useEffect(() => {
       // Dólar observado del día (Banco Central vía mindicador.cl)
-      fetch('https://mindicador.cl/api/dolar')
-        .then(res => res.json())
-        .then(data => {
-           if (data && data.serie && data.serie.length > 0) {
-             setUsdClpRate(data.serie[0].valor);
-           }
-        })
-        .catch(() => console.log('Failed to fetch USDCLP'));
+      fetchUsdClp().then(rate => { if (rate) setUsdClpRate(rate); });
     }, []);
 
     useEffect(() => {

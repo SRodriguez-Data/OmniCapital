@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { genAI, generateText, aiError } from '@/lib/ai';
+import { TICKER_RE } from '@/lib/validation';
 
-// Instanciar Google Generative AI
-const apiKey = process.env.GEMINI_API_KEY;
-const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
+const num = (v: unknown, digits = 2) => (typeof v === 'number' && Number.isFinite(v) ? v.toFixed(digits) : 'N/A');
 
 export async function POST(req: Request) {
   try {
@@ -15,42 +14,39 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { ticker, price, rsi, ema200, score, pe, div_str, deuda, portfolio } = body;
+    const { price, rsi, ema200, pe, div_str, deuda, portfolio } = body;
+    const ticker = typeof body.ticker === 'string' ? body.ticker.trim().toUpperCase() : '';
 
-    if (!ticker) {
+    if (!TICKER_RE.test(ticker)) {
       return NextResponse.json(
         { error: 'Falta el Ticker en la solicitud.' },
         { status: 400 }
       );
     }
 
-    // Usar directamente gemini-3.5-flash
-    const modelName = 'gemini-3.5-flash';
-    const model = genAI.getGenerativeModel({ model: modelName });
+    const portafolioContext = typeof portfolio === 'string' && portfolio.trim()
+      ? `El portafolio actual del usuario contiene: [${portfolio.slice(0, 1000)}].`
+      : "El usuario no tiene activos en su portafolio aún.";
 
-    const portafolioContext = portfolio ? `El portafolio actual del usuario contiene: [${portfolio}].` : "El usuario no tiene activos en su portafolio aún.";
+    // distancia_ema200 viene del bot como fracción (-0.09 = 9% bajo la EMA200)
+    const emaDist = typeof ema200 === 'number' && Number.isFinite(ema200) ? `${(ema200 * 100).toFixed(1)}%` : 'N/A';
 
-    // Armar el prompt institucional exacto solicitado
     const prompt = `Actúa como el Director de Estrategia de un Fondo Cuantitativo. Genera una tesis de inversión para la oportunidad detectada en ${ticker}.
 ${portafolioContext}
 
-Datos obligatorios de ${ticker}: Precio actual: ${price}, RSI: ${rsi}, Distancia EMA200: ${ema200}, P/E Ratio: ${pe}, Dividend Yield: ${div_str}, Deuda/Equity: ${deuda}.
+Datos de ${ticker}: Precio actual: ${num(price)}, RSI(14): ${num(rsi, 1)}, Distancia a la EMA200: ${emaDist}, P/E: ${String(pe ?? 'N/A').slice(0, 20)}, Dividend Yield: ${String(div_str ?? 'N/A').slice(0, 20)}, Deuda/Equity: ${String(deuda ?? 'N/A').slice(0, 20)}.
 
 Tu respuesta debe ser quirúrgica y estrictamente en 3 viñetas markdown:
 1. 🎯 Catalizador de Valor (Analiza P/E, dividendos y deuda).
-2. 📊 Estructura Técnica (Analiza el RSI y la EMA200).
-3. 🔗 Sinergia con Portafolio (Analiza OBLIGATORIAMENTE cómo este activo específico (${ticker}) beneficia o diversifica el portafolio actual del usuario. Si el usuario ya lo tiene, explica por qué acumular más es buena idea).`;
+2. 📊 Estructura Técnica (Analiza el RSI y la distancia a la EMA200).
+3. 🔗 Sinergia con Portafolio (Analiza OBLIGATORIAMENTE cómo ${ticker} beneficia o diversifica el portafolio actual del usuario. Si el usuario ya lo tiene, explica si acumular más tiene sentido).
+Usa solo los datos entregados; si un dato es N/A, dilo en vez de inventarlo.`;
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
-
+    const { text } = await generateText(prompt);
     return NextResponse.json({ thesis: text });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error generando tesis con Gemini:', error);
-    return NextResponse.json(
-      { error: `Error de la API: ${error.message || 'Error interno'}` },
-      { status: 500 }
-    );
+    const { message, status } = aiError(error);
+    return NextResponse.json({ error: message }, { status });
   }
 }

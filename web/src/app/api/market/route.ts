@@ -1,14 +1,16 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { genAI, generateText } from '@/lib/ai';
+import { TICKER_RE } from '@/lib/validation';
 
-// Initialize Gemini only if key exists (don't break the build if missing, we just return no AI)
-const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
+// Caché en memoria del resumen de IA por ticker: evita gastar cuota de Gemini en búsquedas repetidas
+const aiCache = new Map<string, { timestamp: number; text: string }>();
+const AI_CACHE_TTL = 30 * 60 * 1000;
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const ticker = searchParams.get('ticker');
+  const ticker = searchParams.get('ticker')?.trim().toUpperCase();
 
-  if (!ticker) {
+  if (!ticker || !TICKER_RE.test(ticker)) {
     return NextResponse.json({ error: 'El ticker es obligatorio' }, { status: 400 });
   }
 
@@ -88,9 +90,11 @@ export async function GET(request: Request) {
     // Gemini AI Analysis (if API key is present)
     let aiAnalysis = "No se ha configurado la API Key de Gemini en Vercel, por lo que el análisis de IA está deshabilitado.";
     
-    if (genAI) {
+    const cachedAi = aiCache.get(ticker);
+    if (cachedAi && Date.now() - cachedAi.timestamp < AI_CACHE_TTL) {
+      aiAnalysis = cachedAi.text;
+    } else if (genAI) {
       try {
-        const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
         const prompt = `
 Eres un analista cuantitativo senior. Haz un resumen ejecutivo (máximo 4 líneas) en ESPAÑOL sobre el activo ${meta.symbol} (${meta.longName || ''}).
 Datos actuales:
@@ -102,8 +106,8 @@ Datos actuales:
 
 Dime de forma experta si el activo está sobrecomprado, sobrevendido o en zona de valor, y si recomendarías una entrada a estos precios basado estrictamente en el análisis técnico cuantitativo.
         `;
-        const aiResponse = await model.generateContent(prompt);
-        aiAnalysis = aiResponse.response.text();
+        aiAnalysis = (await generateText(prompt)).text;
+        aiCache.set(ticker, { timestamp: Date.now(), text: aiAnalysis });
       } catch (aiError) {
         console.error("Gemini AI Error:", aiError);
         aiAnalysis = "Hubo un error al generar el análisis de IA en este momento.";
