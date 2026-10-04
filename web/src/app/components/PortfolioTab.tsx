@@ -9,6 +9,7 @@ import { usePortfolio } from '../context/PortfolioContext';
 import AssetSparkline from './AssetSparkline';
 import type { TimePeriod } from './AssetSparkline';
 import { fetchUsdClp } from '@/lib/fx';
+import { valueOn } from '@/lib/quant';
 
 const COLORS_USD = ['#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8', '#1e40af', '#1e3a8a'];
 const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064e3b'];
@@ -29,7 +30,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
     const [usdClpRate, setUsdClpRate] = useState<number>(930);
 
     const [period, setPeriod] = useState<TimePeriod>('TOTAL');
-    const [globalHistory, setGlobalHistory] = useState<{ date: string; prices: Record<string, number> }[]>([]);
+    const [globalHistory, setGlobalHistory] = useState<{ date: string; prices: Record<string, number>; fx?: number | null }[]>([]);
     const [actionError, setActionError] = useState('');
 
     useEffect(() => {
@@ -61,7 +62,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
           const res = await fetch('/api/portfolio/history', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ items: items.map(i => ({ ticker: i.ticker })) })
+            body: JSON.stringify({ items: items.map(i => ({ ticker: i.ticker, purchase_date: i.purchase_date || null })) })
           });
           if (res.ok) {
              setGlobalHistory(await res.json());
@@ -134,27 +135,31 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
     filteredGlobalHistory = globalHistory.filter(d => new Date(d.date) >= cutoff);
     if (filteredGlobalHistory.length < 2) filteredGlobalHistory = globalHistory.slice(-2);
   } else if (globalHistory.length > 0) {
-    // Si es TOTAL, filtramos para mostrar solo desde la compra más antigua
-    const minPurchaseDate = items.reduce((min, item) => {
-      if (!item.purchase_date) return min;
-      return item.purchase_date < min ? item.purchase_date : min;
-    }, new Date().toISOString().split('T')[0]);
-    filteredGlobalHistory = globalHistory.filter(d => d.date >= minPurchaseDate);
-    if (filteredGlobalHistory.length === 0) filteredGlobalHistory = globalHistory.slice(-2);
+    // Si es TOTAL, se muestra desde la compra más antigua (o todo el historial si no hay fechas)
+    const dates = items.map(i => i.purchase_date).filter(Boolean).sort();
+    if (dates.length > 0) {
+      filteredGlobalHistory = globalHistory.filter(d => d.date >= dates[0]);
+      if (filteredGlobalHistory.length === 0) filteredGlobalHistory = globalHistory.slice(-2);
+    }
   }
 
-  // Todo se consolida en CLP con el mismo dólar del día que usan los KPIs,
-  // para que el gráfico y el P&L sean consistentes entre sí.
-  const toCLP = (value: number, currency: string) => currency === 'CLP' ? value : value * usdClpRate;
+  // Dólar de cada fecha según el historial (o el de hoy si no hay dato), para medir el resultado
+  // real en pesos: un activo en dólares también gana o pierde por el tipo de cambio.
+  const fxSeries = new Map<string, number>();
+  globalHistory.forEach(d => { if (d.fx) fxSeries.set(d.date, d.fx); });
+  const fxDates = [...fxSeries.keys()];
+  const fxOn = (date?: string | null) => (date ? valueOn(fxSeries, fxDates, date) : undefined) ?? usdClpRate;
+  const toCLP = (value: number, currency: string, date?: string | null) =>
+    currency === 'CLP' ? value : value * (date === undefined ? usdClpRate : fxOn(date));
 
-  // Valor diario real: cada activo cuenta solo desde su fecha de compra
+  // Valor diario real en pesos: cada activo cuenta desde su fecha de compra, con el dólar de ese día
   const chartHistoryData = globalHistory.length > 0
     ? filteredGlobalHistory.map(day => {
         let dailyTotalCLP = 0;
         items.forEach(item => {
           if (item.purchase_date && day.date < item.purchase_date) return;
           const price = day.prices?.[item.ticker] ?? item.precio_compra;
-          dailyTotalCLP += toCLP(item.cantidad * price, item.moneda);
+          dailyTotalCLP += toCLP(item.cantidad * price, item.moneda, day.date);
         });
         return { date: day.date, totalValue: dailyTotalCLP };
       })
@@ -163,13 +168,18 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
   // Precio de partida de cada activo en el período elegido. Si se compró dentro
   // del período, su base es el precio de compra (no el precio de mercado al inicio).
   const periodStart = period !== 'TOTAL' ? filteredGlobalHistory[0] : undefined;
+  const boughtInPeriod = (item: { purchase_date: string }) => !periodStart || (!!item.purchase_date && item.purchase_date > periodStart.date);
   const startPriceFor = (item: { ticker: string; precio_compra: number; purchase_date: string }) => {
-    if (!periodStart) return item.precio_compra;
-    if (item.purchase_date && item.purchase_date > periodStart.date) return item.precio_compra;
-    return periodStart.prices?.[item.ticker] ?? item.precio_compra;
+    if (boughtInPeriod(item)) return item.precio_compra;
+    return periodStart?.prices?.[item.ticker] ?? item.precio_compra;
   };
 
-  const dynamicInvestedCombinedCLP = items.reduce((sum, item) => sum + toCLP(item.cantidad * startPriceFor(item), item.moneda), 0);
+  // Base en pesos: el costo con el dólar del día de compra, o el valor al inicio del período con el dólar de ese día
+  const dynamicInvestedCombinedCLP = items.reduce((sum, item) => sum + toCLP(
+    item.cantidad * startPriceFor(item),
+    item.moneda,
+    boughtInPeriod(item) ? item.purchase_date || null : periodStart!.date,
+  ), 0);
   // Siempre contra el valor en vivo, para no mostrar un P&L desactualizado de ayer
   const dynamicCurrentCombinedCLP = totalCurrentCombinedCLP;
 
@@ -395,7 +405,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
               </div>
             </div>
             <div className="text-left sm:text-right">
-              <p className="text-[10px] text-zinc-500 dark:text-[#71717a] font-mono uppercase">P&L Actual Consolidado (CLP)</p>
+              <p className="text-[10px] text-zinc-500 dark:text-[#71717a] font-mono uppercase" title="Los activos en dólares se valorizan con el dólar del día de compra (o del inicio del período) y el de hoy, así que incluye la ganancia o pérdida cambiaria">P&L Consolidado en pesos (incl. dólar)</p>
               <div className="flex items-baseline justify-end gap-2">
                 <p className={`text-lg font-bold font-mono ${dynamicPnlColorCombined}`}>
                   {dynamicPnL_CombinedCLP >= 0 ? '+' : ''}${dynamicPnL_CombinedCLP.toLocaleString('es-CL', {minimumFractionDigits: 0, maximumFractionDigits: 0})}

@@ -1,63 +1,26 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import YahooFinance from 'yahoo-finance2';
-import { aiConfigured, generateText, aiError, type JsonSchema } from '@/lib/ai';
+import { aiConfigured, generateText } from '@/lib/ai';
 import { parsePortfolioItems } from '@/lib/validation';
-import { fetchUsdClp } from '@/lib/fx';
 import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
+import { supabase } from '@/lib/supabase';
+import { buildAdvisorReport, fmtMoney } from '@/lib/advisor';
+import { planPurchases } from '@/lib/optimizer';
 
-const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
+export const maxDuration = 60;
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl || '', supabaseKey || '');
+const AI_TIMEOUT_MS = 20000;
 
-type Currency = 'USD' | 'CLP';
-
-interface Candidate { ticker: string; price: number; score: number; rsi?: number; bollinger_lower?: number }
-
-interface Asset {
-  ticker: string;
-  origen: 'EN_CARTERA' | 'OPORTUNIDAD';
-  precio: number; // en la moneda del presupuesto
-  pesoActual?: number;
-  score?: number;
-  rsi?: number;
-}
-
-// La IA solo decide cuántas acciones y por qué; los costos los calcula el servidor
-const responseSchema: JsonSchema = {
-  type: 'object',
-  properties: {
-    compras: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          ticker: { type: 'string' },
-          sharesToBuy: { type: 'integer' },
-          rationale: { type: 'string' },
-        },
-        required: ['ticker', 'sharesToBuy', 'rationale'],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ['compras'],
-  additionalProperties: false,
-};
+interface Candidate { ticker?: unknown; score?: unknown }
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const budget = Number(body?.budget);
-    const currency: Currency = body?.currency === 'CLP' ? 'CLP' : 'USD';
+    const currency: 'USD' | 'CLP' = body?.currency === 'CLP' ? 'CLP' : 'USD';
+    const fraccionar = body?.fraccionar !== false;
 
     if (!Number.isFinite(budget) || budget <= 0) {
       return NextResponse.json({ error: 'Monto de inversión inválido' }, { status: 400 });
-    }
-    if (!aiConfigured) {
-      return NextResponse.json({ error: 'No hay un proveedor de IA configurado en el servidor.' }, { status: 500 });
     }
     if (!rateLimit(request, 'rebalance', 15)) {
       return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
@@ -66,134 +29,56 @@ export async function POST(request: Request) {
     if ('error' in parsed) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
-    const { items } = parsed;
 
-    // 1. Top 5 oportunidades del último escaneo del bot
+    // Las 5 mejores oportunidades del último escaneo del bot, evaluadas con las mismas reglas
     const { data: iaData } = await supabase
       .from('analisis_ia')
       .select('candidatos_json')
       .order('fecha', { ascending: false })
       .limit(1);
-
-    const candidatos: Candidate[] = [
-      ...(iaData?.[0]?.candidatos_json?.us || []),
-      ...(iaData?.[0]?.candidatos_json?.cl || []),
-    ];
-    const externas = candidatos
-      .filter(c => typeof c?.ticker === 'string')
+    const scan: Candidate[] = [...(iaData?.[0]?.candidatos_json?.us || []), ...(iaData?.[0]?.candidatos_json?.cl || [])];
+    const oportunidades = scan
+      .filter((c): c is { ticker: string; score: number } => typeof c?.ticker === 'string' && typeof c?.score === 'number')
       .sort((a, b) => b.score - a.score)
-      .slice(0, 5);
+      .slice(0, 5)
+      .map(c => c.ticker.toUpperCase());
 
-    // 2. Precios actuales reales de todo el universo invertible, en una sola llamada
-    const portfolioTickers = Array.from(new Set(items.map(i => i.ticker)));
-    const universe = Array.from(new Set([...portfolioTickers, ...externas.map(c => c.ticker)]));
-    const [quotesRaw, usdClp] = await Promise.all([
-      yahooFinance.quote(universe, { return: 'array' }).catch(() => []),
-      fetchUsdClp(),
-    ]);
-    const quotes = Array.isArray(quotesRaw) ? quotesRaw : [];
+    const report = await buildAdvisorReport(parsed.items, oportunidades);
+    const plan = planPurchases(report, budget, currency, { fraccionar });
 
-    // Convierte un precio a la moneda del presupuesto. Sin dólar del día no mezclamos monedas.
-    const toBudget = (price: number, from: string | undefined): number | null => {
-      if (from === currency) return price;
-      if (!usdClp) return null;
-      if (from === 'USD' && currency === 'CLP') return price * usdClp;
-      if (from === 'CLP' && currency === 'USD') return price / usdClp;
-      return null; // otras monedas (EUR, etc.) quedan fuera
-    };
-
-    const priceOf = new Map<string, number>();
-    for (const q of quotes) {
-      const p = q.regularMarketPrice;
-      if (!q.symbol || !p || p <= 0) continue;
-      const converted = toBudget(p, q.currency);
-      if (converted) priceOf.set(q.symbol, converted);
-    }
-
-    // 3. Universo con precios válidos y pesos actuales del portafolio
-    const valorActual = (t: string) => items
-      .filter(i => i.ticker === t)
-      .reduce((s, i) => s + i.cantidad * (priceOf.get(t) ?? 0), 0);
-    const totalCartera = portfolioTickers.reduce((s, t) => s + valorActual(t), 0);
-
-    const assets: Asset[] = [];
-    for (const t of portfolioTickers) {
-      const precio = priceOf.get(t);
-      if (precio) assets.push({ ticker: t, origen: 'EN_CARTERA', precio, pesoActual: totalCartera > 0 ? valorActual(t) / totalCartera * 100 : undefined });
-    }
-    for (const c of externas) {
-      const precio = priceOf.get(c.ticker);
-      if (precio && !portfolioTickers.includes(c.ticker)) {
-        assets.push({ ticker: c.ticker, origen: 'OPORTUNIDAD', precio, score: c.score, rsi: c.rsi });
+    let resumen: string | null = null;
+    let modelo: string | null = null;
+    if (aiConfigured && plan.recommendations.length > 0) {
+      try {
+        const ordenes = plan.recommendations.map(o =>
+          `- ${o.ticker} (${o.origen === 'OPORTUNIDAD' ? 'nueva' : 'ya en cartera'}, señal ${o.accion}): ${fmtMoney(o.expectedCost, currency)}, peso ${(o.pesoAntes * 100).toFixed(1)}% → ${(o.pesoDespues * 100).toFixed(1)}%`).join('\n');
+        const prompt = `Eres un asesor de inversiones chileno. Explica en 2 o 3 frases simples, a un cliente no experto, por qué este plan de compra con ${fmtMoney(budget, currency)} ${currency} mejora su portafolio. No inventes cifras ni cambies el plan.
+Plan:
+${ordenes}
+${plan.excluidos.length ? `No se compran: ${plan.excluidos.map(e => `${e.ticker} (${e.motivo})`).join('; ')}` : ''}
+Criterio: peso objetivo según el riesgo de cada activo (menos volatilidad, más peso), sin superar 20% en una empresa, y solo se completa lo que está bajo su objetivo.`;
+        const r = await Promise.race([
+          generateText(prompt, { speed: 'fast' }),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), AI_TIMEOUT_MS)),
+        ]);
+        resumen = r.text.trim();
+        modelo = r.model;
+      } catch (e) {
+        console.warn('Resumen de IA no disponible para el optimizador:', e instanceof Error ? e.message.slice(0, 120) : e);
       }
-    }
-    if (assets.length === 0) {
-      return NextResponse.json({ error: 'No se pudieron obtener precios actuales para calcular la asignación.' }, { status: 502 });
-    }
-
-    const fmt = (n: number) => currency === 'CLP' ? `$${Math.round(n).toLocaleString('es-CL')} CLP` : `$${n.toFixed(2)} USD`;
-    const lineas = assets.map(a => {
-      const extra = a.origen === 'EN_CARTERA'
-        ? (a.pesoActual !== undefined ? `peso actual ${a.pesoActual.toFixed(1)}%` : '')
-        : `oportunidad del escáner (score ${a.score?.toFixed(1)}${a.rsi ? `, RSI ${a.rsi.toFixed(1)}` : ''})`;
-      return `- ${a.ticker} [${a.origen}] precio ${fmt(a.precio)} ${extra}`;
-    }).join('\n');
-
-    const prompt = `Eres un portfolio manager cuantitativo. El cliente tiene ${fmt(budget)} de capital nuevo para invertir HOY.
-
-Activos disponibles (precios actuales ya convertidos a ${currency}):
-${lineas}
-
-Decide cuántas acciones ENTERAS ("sharesToBuy") comprar de cada activo.
-- Mejora la diversificación: si el portafolio está concentrado, prioriza las OPORTUNIDADES del escáner o los activos con menor peso.
-- La suma de sharesToBuy × precio NO debe superar ${fmt(budget)}. Intenta usar la mayor parte del presupuesto.
-- Solo puedes usar los tickers listados. Omite los activos donde no compres nada.
-- "rationale": una o dos frases concretas de por qué ese activo y esa cantidad.`;
-
-    const { text, model } = await generateText(prompt, { schema: responseSchema, speed: 'quality' });
-
-    let raw: unknown;
-    try {
-      raw = JSON.parse(text)?.compras;
-    } catch {
-      console.error('Failed to parse AI JSON:', text.slice(0, 500));
-      return NextResponse.json({ error: 'La IA devolvió un formato inválido' }, { status: 502 });
-    }
-
-    // 4. Validación: tickers permitidos, enteros, costos con precios reales y nunca sobre el presupuesto
-    const byTicker = new Map(assets.map(a => [a.ticker, a]));
-    let restante = budget;
-    const recommendations = [];
-    for (const r of Array.isArray(raw) ? raw : []) {
-      const asset = byTicker.get(String(r?.ticker).toUpperCase());
-      if (!asset) continue;
-      byTicker.delete(asset.ticker); // un activo una sola vez
-      const shares = Math.min(Math.max(0, Math.floor(Number(r.sharesToBuy) || 0)), Math.floor(restante / asset.precio));
-      if (shares <= 0) continue;
-      const expectedCost = shares * asset.precio;
-      restante -= expectedCost;
-      recommendations.push({
-        ticker: asset.ticker,
-        origen: asset.origen,
-        sharesToBuy: shares,
-        price: asset.precio,
-        expectedCost,
-        rationale: typeof r.rationale === 'string' ? r.rationale : '',
-      });
     }
 
     return NextResponse.json({
-      recommendations,
+      ...plan,
       currency,
       budget,
-      totalCost: budget - restante,
-      usdClp,
-      modelo: model,
+      usdClp: report.usdClp,
+      resumen,
+      modelo,
     });
 
   } catch (err: unknown) {
     console.error('API Rebalance Error:', err);
-    const { message, status } = aiError(err);
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json({ error: 'No se pudo calcular la asignación con precios de mercado. Intenta de nuevo en unos minutos.' }, { status: 502 });
   }
 }

@@ -1,47 +1,41 @@
 import { NextResponse } from 'next/server';
 import { aiConfigured, generateText, aiError, type JsonSchema } from '@/lib/ai';
-import { parsePortfolioItems, type PortfolioInput } from '@/lib/validation';
+import { parsePortfolioItems } from '@/lib/validation';
 import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
+import { buildAdvisorReport, fmtMoney, type AdvisorReport } from '@/lib/advisor';
 
-export const runtime = 'edge';
+// Node (no Edge): necesita yahoo-finance2 para el historial de precios
+export const maxDuration = 60;
 
-const ACCIONES = ['🟢 BUY', '🟡 HOLD', '🔴 SELL'];
+const AI_TIMEOUT_MS = 35000;
 
-// La IA queda obligada a devolver exactamente esta forma
+// La IA solo redacta: no decide acciones ni inventa cifras
 const responseSchema: JsonSchema = {
   type: 'object',
   properties: {
     diagnostico: { type: 'string' },
-    recomendaciones: {
+    posiciones: {
       type: 'array',
       items: {
         type: 'object',
-        properties: {
-          ticker: { type: 'string' },
-          accion: { type: 'string', enum: ACCIONES },
-          stop_loss: { type: 'string' },
-          analisis: { type: 'string' },
-        },
-        required: ['ticker', 'accion', 'stop_loss', 'analisis'],
+        properties: { ticker: { type: 'string' }, analisis: { type: 'string' } },
+        required: ['ticker', 'analisis'],
         additionalProperties: false,
       },
     },
   },
-  required: ['diagnostico', 'recomendaciones'],
+  required: ['diagnostico', 'posiciones'],
   additionalProperties: false,
 };
 
-interface Recomendacion { ticker: string; accion: string; stop_loss: string; analisis: string }
+const pct = (x: number | null, digits = 1) => (x === null ? 'N/D' : `${(x * 100).toFixed(digits)}%`);
 
 export async function POST(req: Request) {
-  if (!aiConfigured) {
-    return NextResponse.json({ error: 'No hay un proveedor de IA configurado en el servidor.' }, { status: 500 });
-  }
   if (!rateLimit(req, 'analyze', 15)) {
     return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
   }
 
-  let body: { items?: unknown; usdClp?: unknown };
+  let body: { items?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -51,94 +45,84 @@ export async function POST(req: Request) {
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
-  const usdClp = Number(body?.usdClp) > 0 ? Number(body.usdClp) : null;
 
-  // Edge exige empezar a responder antes de 25s, y el análisis puede tardar más.
-  // Mientras la IA trabaja enviamos espacios: el espacio inicial es JSON válido, así que el
-  // cliente sigue usando res.json(). Como el status ya salió (200), los errores van en { error }.
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    async start(controller) {
-      const heartbeat = setInterval(() => controller.enqueue(encoder.encode(' ')), 5000);
-      try {
-        const result = await analizar(parsed.items, usdClp);
-        controller.enqueue(encoder.encode(JSON.stringify(result)));
-      } catch (error: unknown) {
-        console.error('Error generating AI analysis:', error);
-        controller.enqueue(encoder.encode(JSON.stringify({ error: aiError(error).message })));
-      } finally {
-        clearInterval(heartbeat);
-        controller.close();
+  let report: AdvisorReport;
+  try {
+    const raw = body.items as { purchase_date?: unknown }[];
+    report = await buildAdvisorReport(parsed.items.map((i, idx) => ({
+      ...i,
+      purchase_date: typeof raw[idx]?.purchase_date === 'string' ? raw[idx].purchase_date as string : null,
+    })));
+  } catch (error) {
+    console.error('Error construyendo el informe:', error);
+    return NextResponse.json({ error: 'No se pudieron obtener los precios de mercado. Intenta de nuevo en unos minutos.' }, { status: 502 });
+  }
+
+  // Texto por defecto, armado con las mismas reglas: la pestaña funciona aunque la IA no responda
+  let diagnostico = report.hallazgos.slice(0, 3).map(h => `${h.titulo}. ${h.detalle}`).join(' ');
+  const analisis = new Map(report.posiciones.map(p => [p.ticker, p.motivos.join(' ')]));
+  let modelo: string | null = null;
+  let avisoIa: string | null = null;
+
+  if (aiConfigured) {
+    try {
+      const { text, model } = await Promise.race([
+        generateText(buildPrompt(report), { schema: responseSchema, speed: 'fast' }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), AI_TIMEOUT_MS)),
+      ]);
+      const data = JSON.parse(text);
+      if (typeof data?.diagnostico === 'string' && data.diagnostico.trim()) diagnostico = data.diagnostico.trim();
+      for (const p of Array.isArray(data?.posiciones) ? data.posiciones : []) {
+        const t = typeof p?.ticker === 'string' ? p.ticker.toUpperCase() : '';
+        if (analisis.has(t) && typeof p.analisis === 'string' && p.analisis.trim()) analisis.set(t, p.analisis.trim());
       }
-    },
-  });
+      modelo = model;
+    } catch (error) {
+      console.error('IA no disponible para el diagnóstico:', error);
+      avisoIa = `${aiError(error).message} Se muestra el análisis calculado sin redacción de IA.`;
+    }
+  } else {
+    avisoIa = 'La IA no está configurada; se muestra el análisis calculado.';
+  }
 
-  return new Response(stream, { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+  return NextResponse.json({
+    ...report,
+    diagnostico,
+    posiciones: report.posiciones.map(p => ({ ...p, analisis: analisis.get(p.ticker) ?? '' })),
+    modelo,
+    avisoIa,
+  });
 }
 
-async function analizar(items: PortfolioInput[], usdClp: number | null) {
-  // Valorizar cada posición con su precio actual (si el cliente lo trae) y consolidar en CLP
-  const rows = items.map(i => {
-    const precio = i.precio_actual ?? i.precio_compra;
-    const valor = i.cantidad * precio;
-    const valorCLP = i.moneda === 'CLP' ? valor : usdClp ? valor * usdClp : null;
-    const pnl = i.precio_compra > 0 && i.precio_actual ? (i.precio_actual / i.precio_compra - 1) * 100 : null;
-    return { ...i, precio, valorCLP, pnl };
-  });
-  const totalCLP = rows.every(r => r.valorCLP !== null)
-    ? rows.reduce((s, r) => s + (r.valorCLP as number), 0)
-    : null;
+function buildPrompt(r: AdvisorReport): string {
+  const s = r.resumen;
+  const lineas = r.posiciones.map(p => [
+    `- ${p.ticker}${p.nombre ? ` (${p.nombre})` : ''}: DECISIÓN ${p.accion}`,
+    `peso ${pct(p.peso)}`,
+    `P&L desde compra ${pct(p.pnl)}`,
+    `6m ${pct(p.ret6m)}`,
+    `12m ${pct(p.ret1y)}`,
+    `volatilidad ${pct(p.vol, 0)}`,
+    `beta vs ${p.benchmark} ${p.beta?.toFixed(2) ?? 'N/D'}`,
+    `RSI ${p.rsi?.toFixed(0) ?? 'N/D'}`,
+    `stop ${p.stop !== null ? `${fmtMoney(p.stop, p.moneda)} (${pct(p.stopDist)})` : 'N/D'}`,
+    `motivos: ${p.motivos.join(' ')}`,
+  ].join(' | ')).join('\n');
 
-  const fmt = (n: number, moneda: string) => moneda === 'CLP'
-    ? `$${Math.round(n).toLocaleString('es-CL')} CLP`
-    : `$${n.toFixed(2)} USD`;
+  return `Eres un asesor de inversiones chileno que explica a un cliente no experto el informe de su portafolio.
+Todas las cifras y decisiones ya fueron calculadas con precios reales. Tu trabajo es SOLO redactarlas con claridad.
 
-  const posiciones = rows.map(r => {
-    const peso = totalCLP && r.valorCLP !== null ? ` | peso ${(r.valorCLP / totalCLP * 100).toFixed(1)}%` : '';
-    const pnl = r.pnl !== null ? ` | P&L ${r.pnl >= 0 ? '+' : ''}${r.pnl.toFixed(1)}%` : '';
-    return `- ${r.ticker}: ${r.cantidad} acciones | compra ${fmt(r.precio_compra, r.moneda)} | actual ${fmt(r.precio, r.moneda)}${pnl}${peso}`;
-  }).join('\n');
-
-  const prompt = `Eres el economista jefe de un family office chileno y analizas un portafolio real de un cliente.
-${totalCLP ? `Valor total: $${Math.round(totalCLP).toLocaleString('es-CL')} CLP${usdClp ? ` (dólar a $${usdClp.toFixed(2)})` : ''}.` : ''}
+Portafolio: valor ${fmtMoney(s.valorCLP, 'CLP')} CLP, resultado desde la compra ${pct(s.pnlPct)}, ${pct(s.pesoUSD, 0)} en dólares.
+Riesgo (últimos 12 meses con las posiciones actuales): volatilidad ${pct(s.vol)}, caída máxima ${pct(s.maxDD)}, rentabilidad ${pct(s.ret1y)}, Sharpe ${s.sharpe?.toFixed(2) ?? 'N/D'}, perfil ${s.perfil ?? 'N/D'}. Tasa libre de riesgo (TPM) ${pct(r.tasaLibreRiesgo)}.
+Hallazgos:
+${r.hallazgos.map(h => `- [${h.nivel}] ${h.titulo}. ${h.detalle}`).join('\n')}
 
 Posiciones:
-${posiciones}
+${lineas}
 
-Instrucciones:
-- Basa tu análisis en estos datos y en tu conocimiento general de cada empresa, sector y país. NO inventes valores de RSI, MACD, soportes ni resistencias: no tienes esos datos.
-- "diagnostico": concentración por sector, país y moneda; los 2-3 riesgos principales; y una sugerencia concreta de diversificación o cobertura. Máximo 100 palabras.
-- "recomendaciones": exactamente una por cada ticker listado, en el mismo orden.
-  - "accion": una de ${ACCIONES.join(', ')}.
-  - "stop_loss": un precio concreto en la moneda del activo, por debajo del precio actual, con su distancia porcentual. Ej: "$95.20 USD (-8%)".
-  - "analisis": entre 40 y 70 palabras, justificando la acción con el P&L, el peso en el portafolio y los fundamentos del negocio.`;
-
-  const { text, model } = await generateText(prompt, { schema: responseSchema, speed: 'fast' });
-
-  let data: { diagnostico?: unknown; recomendaciones?: unknown };
-  try {
-    data = JSON.parse(text);
-  } catch {
-    console.error('AI JSON Parse Error:', text.slice(0, 500));
-    throw new Error('La IA devolvió una respuesta inválida.');
-  }
-
-  // Solo aceptamos recomendaciones bien formadas y para tickers que el usuario realmente tiene
-  const tickers = new Set(items.map(i => i.ticker));
-  const recomendaciones = (Array.isArray(data.recomendaciones) ? data.recomendaciones : [])
-    .filter((r): r is Recomendacion =>
-      typeof r?.ticker === 'string' && tickers.has(r.ticker.toUpperCase()) &&
-      typeof r.accion === 'string' && typeof r.stop_loss === 'string' && typeof r.analisis === 'string')
-    .map(r => ({ ...r, ticker: r.ticker.toUpperCase() }));
-
-  if (typeof data.diagnostico !== 'string' || !data.diagnostico.trim() || recomendaciones.length === 0) {
-    throw new Error('La IA devolvió un análisis incompleto.');
-  }
-
-  return {
-    diagnostico: data.diagnostico,
-    recomendaciones,
-    generado: new Date().toISOString(),
-    modelo: model,
-  };
+Reglas:
+- No cambies ninguna DECISIÓN ni inventes cifras, noticias, precios objetivo ni indicadores que no estén arriba.
+- Español de Chile, claro y directo, sin jerga innecesaria.
+- "diagnostico": 90 a 130 palabras. Qué tan sano está el portafolio, sus 2 o 3 problemas principales y qué haría primero.
+- "posiciones": una por cada ticker, en el mismo orden. "analisis": 35 a 60 palabras que expliquen la decisión con los números de sus motivos y digan qué haría el cliente en concreto.`;
 }

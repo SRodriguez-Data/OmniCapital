@@ -1,15 +1,13 @@
 import { NextResponse } from 'next/server';
-import YahooFinance from 'yahoo-finance2';
+import { dailyHistory, FX_TICKER } from '@/lib/marketData';
+import { TICKER_RE } from '@/lib/validation';
 
-const yahooFinance = new YahooFinance();
-
-// Cache simple en memoria para evitar saturar Yahoo Finance
-const historyCache = new Map<string, { timestamp: number, data: { date: Date; close: number | null }[] }>();
-const CACHE_TTL = 1000 * 60 * 60; // 1 hora
 const MAX_TICKERS = 60;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-// Devuelve el precio de cierre diario de cada ticker de los últimos 2 años.
-// El valor del portafolio se calcula en el cliente (necesita fechas de compra y tipo de cambio).
+// Devuelve el cierre diario de cada ticker y el dólar (CLP por USD) de cada día, desde la compra más
+// antigua (mínimo 2 años, máximo 10).
+// El valor del portafolio se calcula en el cliente (necesita fechas de compra y cantidades).
 export async function POST(request: Request) {
   try {
     const { items } = await request.json();
@@ -18,61 +16,43 @@ export async function POST(request: Request) {
       return NextResponse.json([]);
     }
 
-    const tickers = Array.from(new Set(items.map((i: { ticker: unknown }) => String(i.ticker))));
-    if (tickers.length > MAX_TICKERS) {
-      return NextResponse.json({ error: `Máximo ${MAX_TICKERS} activos` }, { status: 400 });
+    const tickers = Array.from(new Set(items.map((i: { ticker: unknown }) => String(i.ticker).trim().toUpperCase())));
+    if (tickers.length > MAX_TICKERS || tickers.some(t => !TICKER_RE.test(t))) {
+      return NextResponse.json({ error: `Tickers inválidos (máximo ${MAX_TICKERS})` }, { status: 400 });
     }
 
-    const startDate = new Date();
-    startDate.setFullYear(startDate.getFullYear() - 2);
-    const period1 = startDate.toISOString().split('T')[0];
+    const purchaseDates = items
+      .map((i: { purchase_date?: unknown }) => i.purchase_date)
+      .filter((d: unknown): d is string => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d))
+      .sort();
+    const sinceOldest = purchaseDates.length ? Math.ceil((Date.now() - new Date(purchaseDates[0]).getTime()) / DAY_MS) : 0;
+    const days = Math.min(10 * 365, Math.max(2 * 365, sinceOldest) + 5);
 
-    const pricesByDate: Record<string, Record<string, number>> = {};
+    const [histories, fx] = await Promise.all([
+      Promise.all(tickers.map(t => dailyHistory(t, days))),
+      dailyHistory(FX_TICKER, days),
+    ]);
+
     const allDates = new Set<string>();
-
-    await Promise.all(tickers.map(async (ticker) => {
-      try {
-        const cacheKey = `${ticker}-${period1}`;
-        let historical: { date: Date; close: number | null }[] = [];
-
-        const cached = historyCache.get(cacheKey);
-        if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-          historical = cached.data;
-        } else {
-          const res = await yahooFinance.chart(ticker, { period1, interval: '1d' });
-          historical = res.quotes;
-          historyCache.set(cacheKey, { timestamp: Date.now(), data: historical });
-        }
-
-        historical.forEach((row) => {
-          if (!row.date || row.close === null || row.close === undefined) return;
-          const d = new Date(row.date).toISOString().split('T')[0];
-          allDates.add(d);
-          if (!pricesByDate[d]) pricesByDate[d] = {};
-          pricesByDate[d][ticker] = row.close;
-        });
-      } catch (err) {
-        console.error(`Error fetching history for ${ticker}:`, err);
-      }
-    }));
-
+    histories.forEach(h => h?.dates.forEach(d => allDates.add(d)));
     const sortedDates = Array.from(allDates).sort();
     if (sortedDates.length === 0) {
       return NextResponse.json([]);
     }
 
-    const lastKnownPrice: Record<string, number> = {};
-    for (const date of sortedDates) {
-      for (const ticker of tickers) {
-        if (pricesByDate[date][ticker] !== undefined) {
-          lastKnownPrice[ticker] = pricesByDate[date][ticker];
-        } else if (lastKnownPrice[ticker] !== undefined) {
-          pricesByDate[date][ticker] = lastKnownPrice[ticker];
-        }
-      }
-    }
-
-    const portfolioHistory = sortedDates.map(date => ({ date, prices: pricesByDate[date] }));
+    // Se arrastra el último precio conocido en los feriados de cada mercado
+    const last: Record<string, number> = {};
+    let lastFx: number | undefined;
+    const portfolioHistory = sortedDates.map(date => {
+      const prices: Record<string, number> = {};
+      tickers.forEach((t, i) => {
+        const close = histories[i]?.series.get(date);
+        if (close !== undefined) last[t] = close;
+        if (last[t] !== undefined) prices[t] = last[t];
+      });
+      lastFx = fx?.series.get(date) ?? lastFx;
+      return { date, prices, fx: lastFx ?? null };
+    });
 
     return NextResponse.json(portfolioHistory);
   } catch (error) {

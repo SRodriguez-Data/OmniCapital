@@ -8,10 +8,17 @@ import SymbolSearchModal from './SymbolSearchModal';
 interface BacktestResult {
   ticker: string; // el ticker simulado (puede diferir del que está seleccionado ahora en el formulario)
   chartData: { date: string; Estrategia: number; SP500: number }[];
-  metrics: { targetReturn: number; benchmarkReturn: number; finalTargetValue: number; finalBenchmarkValue: number; maxDrawdown: number };
+  benchmark: string;
+  desde: string;
+  totalReturn: boolean;
+  metrics: {
+    targetReturn: number; benchmarkReturn: number; finalTargetValue: number; finalBenchmarkValue: number;
+    maxDrawdown: number; benchmarkMaxDrawdown: number;
+    targetCagr: number | null; benchmarkCagr: number | null; targetVol: number | null; benchmarkVol: number | null;
+  };
 }
 
-// El benchmark se simula con el mismo capital y en la misma moneda que el activo (sin efecto cambiario)
+// El índice se simula con el mismo capital y en la misma moneda que el activo (sin efecto cambiario)
 function formatCurrency(val: number, isCLP: boolean, withDecimals = false) {
   if (isCLP) {
     return `CLP$ ${val.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
@@ -98,8 +105,8 @@ export default function BacktestTab() {
           <div>
             <h2 className="text-lg font-sans font-bold tracking-tight text-zinc-900 dark:text-[#e4e4e7] uppercase tracking-wider">Máquina del Tiempo (Backtesting)</h2>
             <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans">
-              Viaja al pasado. Simula qué hubiera pasado si invertías tu capital en un activo vs el S&P 500.
-              Ambos con retorno total (dividendos reinvertidos).
+              Viaja al pasado. Simula qué hubiera pasado si invertías tu capital en un activo vs el índice de su mercado
+              (S&P 500 para EE.UU. con dividendos reinvertidos, IPSA para Chile).
             </p>
           </div>
         </div>
@@ -176,7 +183,7 @@ export default function BacktestTab() {
               <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans font-medium mt-1">{formatCurrency(result.metrics.finalTargetValue, resultIsCLP)}</p>
             </div>
             <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 rounded text-center">
-              <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase mb-1">Rendimiento S&P 500</p>
+              <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase mb-1">Rendimiento {result.benchmark}</p>
               <p className={`text-2xl font-bold font-sans tracking-tight ${result.metrics.benchmarkReturn >= 0 ? 'text-[#60a5fa]' : 'text-[#f87171]'}`}>
                 {result.metrics.benchmarkReturn >= 0 ? '+' : ''}{result.metrics.benchmarkReturn.toFixed(2)}%
               </p>
@@ -195,6 +202,26 @@ export default function BacktestTab() {
               </p>
             </div>
           </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {([
+              ['Rentabilidad anual (CAGR)', result.metrics.targetCagr, result.metrics.benchmarkCagr, true],
+              ['Volatilidad anual', result.metrics.targetVol, result.metrics.benchmarkVol, false],
+              ['Caída máxima', -result.metrics.maxDrawdown / 100, -result.metrics.benchmarkMaxDrawdown / 100, false],
+            ] as [string, number | null, number | null, boolean][]).map(([label, a, b, signed]) => (
+              <div key={label} className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 rounded">
+                <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] uppercase mb-2">{label}</p>
+                <div className="flex justify-between font-mono text-sm">
+                  <span className="text-[#d946ef]">{result.ticker}: {a === null ? 'N/D' : `${signed && a >= 0 ? '+' : ''}${(a * 100).toFixed(1)}%`}</span>
+                  <span className="text-[#60a5fa]">{result.benchmark}: {b === null ? 'N/D' : `${signed && b >= 0 ? '+' : ''}${(b * 100).toFixed(1)}%`}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-zinc-500 dark:text-[#71717a] font-mono">
+            Simulación desde {result.desde} (primer día con datos de ambos).{' '}
+            {result.totalReturn ? 'Retorno total: incluye dividendos reinvertidos.' : 'Retorno de precio: no incluye dividendos. IPSA medido con el ETF It Now IPSA.'}
+          </p>
 
           {/* Chart */}
           <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 rounded h-[400px]">
@@ -238,7 +265,7 @@ export default function BacktestTab() {
                 <Area 
                   type="monotone" 
                   dataKey="SP500" 
-                  name="S&P 500"
+                  name={result.benchmark}
                   stroke="#60a5fa" 
                   strokeWidth={2}
                   fillOpacity={1} 

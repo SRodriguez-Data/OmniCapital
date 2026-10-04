@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { aiConfigured, generateText } from '@/lib/ai';
 import { TICKER_RE } from '@/lib/validation';
 import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
+import { dailyHistory, liveQuotes } from '@/lib/marketData';
 
 // Caché en memoria del resumen de IA por ticker: evita gastar cuota de IA en búsquedas repetidas
 const aiCache = new Map<string, { timestamp: number; text: string }>();
@@ -19,35 +20,21 @@ export async function GET(request: Request) {
   }
 
   try {
-    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=2y`;
-    
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      },
-      next: { revalidate: 60 } // Cache for 60 seconds
-    });
+    // Historial confiable (base del minero para Chile, Yahoo para el resto) y precio en vivo
+    const [history, quotes] = await Promise.all([dailyHistory(ticker, 2 * 365), liveQuotes([ticker])]);
 
-    if (!res.ok) {
-      return NextResponse.json({ error: 'Fallo al obtener datos de Yahoo Finance' }, { status: 502 });
-    }
-
-    const data = await res.json();
-    const result = data?.chart?.result?.[0];
-
-    if (!result || !result.indicators?.quote?.[0]?.close) {
+    if (!history) {
       return NextResponse.json({ error: 'Ticker no encontrado o sin datos históricos' }, { status: 404 });
     }
 
-    const rawCloses = result.indicators.quote[0].close as (number | null)[];
-    const closes = rawCloses.filter((c): c is number => c !== null);
-
+    const closes = history.closes;
     if (closes.length < 20) {
       return NextResponse.json({ error: 'No hay suficientes datos históricos (mínimo 20 días)' }, { status: 400 });
     }
 
-    const meta = result.meta;
-    const currentPrice = meta.regularMarketPrice || closes[closes.length - 1];
+    const live = quotes.get(ticker);
+    const meta = { symbol: ticker, longName: live?.name, shortName: undefined as string | undefined, currency: live?.currency ?? (ticker.endsWith('.SN') ? 'CLP' : 'USD') };
+    const currentPrice = live?.price || closes[closes.length - 1];
     
     // Calculate Bollinger Bands (20 days)
     const last20 = closes.slice(-20);

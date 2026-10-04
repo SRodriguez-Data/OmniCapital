@@ -6,24 +6,34 @@ import { usePortfolio } from '../context/PortfolioContext';
 
 interface RebalanceRecommendation {
   ticker: string;
+  nombre?: string;
   origen: 'EN_CARTERA' | 'OPORTUNIDAD';
+  accion: 'AUMENTAR' | 'MANTENER' | 'REDUCIR';
   sharesToBuy: number;
   price: number;
   expectedCost: number;
+  pesoAntes: number;
+  pesoDespues: number;
   rationale: string;
 }
 
 interface RebalanceResult {
   recommendations: RebalanceRecommendation[];
+  excluidos: { ticker: string; motivo: string }[];
   currency: 'USD' | 'CLP';
   budget: number;
   totalCost: number;
+  resumen: string | null;
+  modelo: string | null;
 }
+
+const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 
 export default function SizingTab() {
   const { items } = usePortfolio();
   const [budget, setBudget] = useState('');
   const [currency, setCurrency] = useState<'USD' | 'CLP'>('USD');
+  const [fraccionar, setFraccionar] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<RebalanceResult | null>(null);
@@ -44,7 +54,7 @@ export default function SizingTab() {
       const res = await fetch('/api/rebalance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ budget: Number(budget), currency, items })
+        body: JSON.stringify({ budget: Number(budget), currency, fraccionar, items })
       });
 
       const data = await res.json();
@@ -73,7 +83,7 @@ export default function SizingTab() {
               Optimizador de Rebalanceo IA <Sparkles className="w-4 h-4 text-[#d946ef]" />
             </h2>
             <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans">
-              La IA propone cómo repartir tu nuevo capital entre tu portafolio y las oportunidades del escáner. Los costos se recalculan con precios reales y nunca superan tu presupuesto.
+              Reparte tu nuevo capital sin vender nada: cada activo recibe un peso objetivo según su riesgo (menos volatilidad, más peso) y la señal de tu informe, y se compra solo lo que está bajo ese objetivo. Precios reales; nunca supera tu presupuesto.
             </p>
           </div>
         </div>
@@ -105,6 +115,11 @@ export default function SizingTab() {
               </select>
             </div>
           </div>
+
+          <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-[#a1a1aa] cursor-pointer select-none">
+            <input type="checkbox" checked={fraccionar} onChange={e => setFraccionar(e.target.checked)} className="accent-[#60a5fa]" />
+            Permitir fracciones de acciones de EE.UU. (Racional y la mayoría de los corredores lo permiten; las chilenas siempre van enteras)
+          </label>
 
           <button 
             type="submit"
@@ -140,7 +155,8 @@ export default function SizingTab() {
                     <th className="px-6 py-3 font-medium text-right">Cantidad</th>
                     <th className="px-6 py-3 font-medium text-right">Precio Actual</th>
                     <th className="px-6 py-3 font-medium text-right">Costo</th>
-                    <th className="px-6 py-3 font-medium">Justificación IA</th>
+                    <th className="px-6 py-3 font-medium text-right">Peso</th>
+                    <th className="px-6 py-3 font-medium">Por qué</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-200 dark:divide-[#27272a]">
@@ -151,17 +167,19 @@ export default function SizingTab() {
                         {rec.origen === 'OPORTUNIDAD' && (
                           <span className="ml-2 text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-fuchsia-100 dark:bg-fuchsia-900/30 text-fuchsia-700 dark:text-fuchsia-300">Nueva</span>
                         )}
+                        {rec.nombre && <p className="text-[11px] font-normal text-zinc-500 dark:text-[#71717a] max-w-[180px] truncate">{rec.nombre}</p>}
                       </td>
-                      <td className="px-6 py-4 font-mono text-[#34d399] text-right">+{rec.sharesToBuy}</td>
+                      <td className="px-6 py-4 font-mono text-[#34d399] text-right">+{rec.sharesToBuy.toLocaleString('es-CL', { maximumFractionDigits: 4 })}</td>
                       <td className="px-6 py-4 font-mono text-zinc-600 dark:text-[#a1a1aa] text-right">{fmt(rec.price, result.currency)}</td>
                       <td className="px-6 py-4 font-mono text-zinc-600 dark:text-[#a1a1aa] text-right">{fmt(rec.expectedCost, result.currency)}</td>
+                      <td className="px-6 py-4 font-mono text-zinc-600 dark:text-[#a1a1aa] text-right whitespace-nowrap">{pct(rec.pesoAntes)} → {pct(rec.pesoDespues)}</td>
                       <td className="px-6 py-4 text-zinc-600 dark:text-[#a1a1aa] text-xs">{rec.rationale}</td>
                     </tr>
                   ))}
                   {recommendations.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="px-6 py-8 text-center text-zinc-500 dark:text-[#71717a] font-mono">
-                        No se sugirieron compras. Quizás el capital es insuficiente para adquirir acciones completas.
+                      <td colSpan={6} className="px-6 py-8 text-center text-zinc-500 dark:text-[#71717a] font-mono">
+                        No se sugirieron compras: el capital no alcanza para una acción completa de los activos elegidos. Prueba con un monto mayor o permite fracciones.
                       </td>
                     </tr>
                   )}
@@ -170,6 +188,22 @@ export default function SizingTab() {
             </div>
           </div>
           
+          {result.resumen && (
+            <div className="bg-blue-50 dark:bg-blue-900/10 border-l-4 border-l-blue-500 border-y border-r border-blue-200 dark:border-blue-900/30 p-4 rounded-md">
+              <p className="text-sm text-blue-900 dark:text-blue-100 leading-relaxed">{result.resumen}</p>
+              {result.modelo && <p className="text-[10px] font-mono text-blue-600/70 dark:text-blue-400/60 mt-2 uppercase">Redactado por IA ({result.modelo}) · el plan es calculado</p>}
+            </div>
+          )}
+
+          {result.excluidos.length > 0 && (
+            <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 rounded text-xs text-zinc-600 dark:text-[#a1a1aa]">
+              <p className="font-mono uppercase text-zinc-500 dark:text-[#71717a] mb-2">No se compran</p>
+              <ul className="space-y-1">
+                {result.excluidos.map(e => <li key={e.ticker}><span className="font-bold text-zinc-900 dark:text-[#e4e4e7]">{e.ticker}</span>: {e.motivo}</li>)}
+              </ul>
+            </div>
+          )}
+
           <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 text-xs text-zinc-500 dark:text-[#71717a] font-mono text-center">
             Total Asignado: <span className="text-zinc-900 dark:text-[#e4e4e7] font-bold">{fmt(result.totalCost, result.currency)}</span> de {fmt(result.budget, result.currency)} · Sobrante: {fmt(result.budget - result.totalCost, result.currency)}
           </div>

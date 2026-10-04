@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import YahooFinance from 'yahoo-finance2';
-
-const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
+import { yahooFinance, withTimeout } from '@/lib/marketData';
 
 export async function GET() {
   try {
@@ -10,7 +8,7 @@ export async function GET() {
     const results = await Promise.all(
       tickers.map(async (ticker) => {
         try {
-          const quote = await yahooFinance.quote(ticker);
+          const quote = await withTimeout(yahooFinance.quote(ticker), 8000, `Yahoo ${ticker}`);
           return {
             symbol: ticker,
             price: quote.regularMarketPrice || 0,

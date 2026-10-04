@@ -5,20 +5,16 @@ import { AreaChart, Area, ResponsiveContainer, YAxis, XAxis, Tooltip } from 'rec
 
 export type TimePeriod = '1S' | '1M' | '3M' | '6M' | 'YTD' | '1A' | 'TOTAL';
 
-export default function AssetSparkline({ ticker, purchaseDate, period = 'TOTAL' }: { ticker: string, purchaseDate: string, period?: TimePeriod }) {
+export default function AssetSparkline({ ticker, purchaseDate, period = 'TOTAL' }: { ticker: string, purchaseDate?: string | null, period?: TimePeriod }) {
   const [data, setData] = useState<{ date: string; price: number }[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function fetchData() {
-      if (!purchaseDate) {
-        setLoading(false);
-        return;
-      }
-
       try {
-        // Obtenemos un historial de 1 año como mínimo para poder filtrar periodos cortos
-        const res = await fetch(`/api/portfolio/asset-history?ticker=${encodeURIComponent(ticker)}&purchase_date=${purchaseDate}`);
+        // Desde la fecha de compra; sin fecha conocida, los últimos 2 años
+        const since = purchaseDate ? `&purchase_date=${purchaseDate}` : '';
+        const res = await fetch(`/api/portfolio/asset-history?ticker=${encodeURIComponent(ticker)}${since}`);
         if (res.ok) {
           const history = await res.json();
           setData(history);
@@ -33,7 +29,7 @@ export default function AssetSparkline({ ticker, purchaseDate, period = 'TOTAL' 
   }, [ticker, purchaseDate]);
 
   if (loading) return <div className="h-32 flex items-center justify-center text-xs font-mono text-zinc-500">Cargando gráfico...</div>;
-  if (data.length === 0) return <div className="h-32 flex items-center justify-center text-xs font-mono text-zinc-500">Sin datos desde la fecha de compra</div>;
+  if (data.length === 0) return <div className="h-32 flex items-center justify-center text-xs font-mono text-zinc-500">Sin datos de precios para este activo</div>;
 
   let filteredData = data;
   if (period !== 'TOTAL' && data.length > 0) {

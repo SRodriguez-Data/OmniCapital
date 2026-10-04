@@ -1,33 +1,116 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Info, RefreshCw, ShieldAlert } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
-import { fetchUsdClp } from '@/lib/fx';
 
-interface Recommendation {
+type Accion = 'AUMENTAR' | 'MANTENER' | 'REDUCIR';
+
+interface Posicion {
   ticker: string;
-  accion: string;
-  stop_loss: string;
+  nombre?: string;
+  moneda: 'USD' | 'CLP';
+  precio: number;
+  valorCLP: number;
+  peso: number;
+  pnl: number | null;
+  ret6m: number | null;
+  ret1y: number | null;
+  vol: number | null;
+  beta: number | null;
+  benchmark: string;
+  rsi: number | null;
+  stop: number | null;
+  stopDist: number | null;
+  stopActivado: boolean;
+  accion: Accion;
+  motivos: string[];
   analisis: string;
 }
 
-interface AiData {
-  fecha: string;
+interface Hallazgo { nivel: 'alerta' | 'atencion' | 'ok'; titulo: string; detalle: string }
+
+interface Informe {
+  generado: string;
+  usdClp: number;
+  tasaLibreRiesgo: number;
+  resumen: {
+    valorCLP: number;
+    costoCLP: number;
+    pnlCLP: number;
+    pnlPct: number | null;
+    pesoUSD: number;
+    vol: number | null;
+    maxDD: number | null;
+    ret1y: number | null;
+    sharpe: number | null;
+    var95: number | null;
+    var95CLP: number | null;
+    perfil: string | null;
+  };
+  hallazgos: Hallazgo[];
   diagnostico: string;
-  recomendaciones: Recommendation[];
+  posiciones: Posicion[];
+  modelo: string | null;
+  avisoIa: string | null;
 }
 
-const CACHE_PREFIX = 'quantum_diagnostico_';
+const CACHE_PREFIX = 'omnicapital_informe_v2_';
+
+const pct = (x: number | null, digits = 1, sign = false) =>
+  x === null || x === undefined ? 'N/D' : `${sign && x >= 0 ? '+' : ''}${(x * 100).toFixed(digits)}%`;
+const clp = (n: number) => `$${Math.round(n).toLocaleString('es-CL')}`;
+const money = (n: number, moneda: 'USD' | 'CLP') => moneda === 'CLP'
+  ? clp(n)
+  : `US$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const tone = (x: number | null) => (x === null ? 'text-zinc-500' : x >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400');
+
+const ACCION_ESTILO: Record<Accion, { label: string; box: string; badge: string }> = {
+  AUMENTAR: {
+    label: '🟢 AUMENTAR',
+    box: 'border-emerald-500/40 bg-emerald-50/40 dark:bg-emerald-950/10',
+    badge: 'border-emerald-500/50 text-emerald-700 dark:text-emerald-400',
+  },
+  MANTENER: {
+    label: '🟡 MANTENER',
+    box: 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/30',
+    badge: 'border-amber-500/50 text-amber-700 dark:text-amber-400',
+  },
+  REDUCIR: {
+    label: '🔴 REDUCIR',
+    box: 'border-red-500/40 bg-red-50/40 dark:bg-red-950/10',
+    badge: 'border-red-500/50 text-red-700 dark:text-red-400',
+  },
+};
+
+function Kpi({ label, value, sub, valueClass = '' }: { label: string; value: string; sub?: string; valueClass?: string }) {
+  return (
+    <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-lg p-4">
+      <p className="text-[10px] font-mono text-zinc-500 dark:text-[#a1a1aa] uppercase tracking-wider mb-1">{label}</p>
+      <p className={`text-xl font-bold font-sans text-zinc-900 dark:text-[#fafafa] ${valueClass}`}>{value}</p>
+      {sub && <p className="text-[11px] text-zinc-500 dark:text-[#a1a1aa] mt-1">{sub}</p>}
+    </div>
+  );
+}
+
+function Metric({ label, value, className = '' }: { label: string; value: string; className?: string }) {
+  return (
+    <div>
+      <p className="text-[10px] font-mono text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{label}</p>
+      <p className={`text-sm font-mono font-semibold text-zinc-900 dark:text-zinc-100 ${className}`}>{value}</p>
+    </div>
+  );
+}
 
 export default function RecommendationsTab() {
   const { items } = usePortfolio();
-  const [data, setData] = useState<AiData | null>(null);
+  const [data, setData] = useState<Informe | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [abiertos, setAbiertos] = useState<Record<string, boolean>>({});
 
-  // El diagnóstico se cachea por sesión según la composición del portafolio,
-  // para no gastar cuota de IA cada vez que se cambia de pestaña.
-  const cacheKey = CACHE_PREFIX + JSON.stringify(items.map(i => [i.ticker, i.cantidad]).sort());
+  // Se cachea por sesión según la composición del portafolio y el día, para no gastar cuota de IA
+  const cacheKey = CACHE_PREFIX + new Date().toISOString().slice(0, 10) + JSON.stringify(items.map(i => [i.ticker, i.cantidad, i.precio_compra]).sort());
 
   const generate = useCallback(async (force: boolean) => {
     if (items.length === 0) {
@@ -49,16 +132,8 @@ export default function RecommendationsTab() {
     }
 
     try {
-      // Precios reales y dólar del día, para que la IA analice valores de mercado y no solo costos
-      const symbols = Array.from(new Set(items.map(i => i.ticker))).join(',');
-      const [pricesRes, usdClp] = await Promise.all([
-        fetch(`/api/portfolio/live?symbols=${encodeURIComponent(symbols)}`).then(r => r.ok ? r.json() : {}).catch(() => ({})),
-        fetchUsdClp(),
-      ]);
-      const prices: Record<string, number> = pricesRes;
-
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120000);
+      const timeoutId = setTimeout(() => controller.abort(), 90000);
       const res = await fetch('/api/portfolio/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -68,23 +143,20 @@ export default function RecommendationsTab() {
             cantidad: i.cantidad,
             precio_compra: i.precio_compra,
             moneda: i.moneda,
-            precio_actual: prices[i.ticker],
+            purchase_date: i.purchase_date || null,
           })),
-          usdClp,
         }),
         signal: controller.signal,
       }).finally(() => clearTimeout(timeoutId));
 
-      // La ruta responde en streaming: si la IA falla después de empezar, el error llega con status 200
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || json.error) throw new Error(json.error || `Error ${res.status} al generar el diagnóstico`);
+      if (!res.ok || json.error) throw new Error(json.error || `Error ${res.status} al generar el informe`);
 
-      const result: AiData = { fecha: json.generado, diagnostico: json.diagnostico, recomendaciones: json.recomendaciones };
-      setData(result);
-      try { sessionStorage.setItem(cacheKey, JSON.stringify(result)); } catch { /* sin caché */ }
+      setData(json);
+      try { sessionStorage.setItem(cacheKey, JSON.stringify(json)); } catch { /* sin caché */ }
     } catch (e: unknown) {
       const aborted = e instanceof DOMException && e.name === 'AbortError';
-      setError(aborted ? 'La IA tardó demasiado en responder. Intenta de nuevo.' : e instanceof Error ? e.message : 'Error desconocido');
+      setError(aborted ? 'El análisis tardó demasiado. Intenta de nuevo.' : e instanceof Error ? e.message : 'Error desconocido');
     } finally {
       setLoading(false);
     }
@@ -95,7 +167,6 @@ export default function RecommendationsTab() {
     generate(false);
   }, [generate]);
 
-  // Si no hay items en el portafolio, no mostrar diagnóstico fantasma
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-zinc-500 dark:text-zinc-400 font-mono border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 rounded">
@@ -107,98 +178,142 @@ export default function RecommendationsTab() {
     );
   }
 
-  if (loading) return <div className="text-center p-12 font-mono text-zinc-600 dark:text-zinc-400">La IA está analizando tu portafolio (puede tardar hasta un minuto)...</div>;
-
-  function renderAiData(aiData: AiData) {
+  if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="text-center p-12 font-mono text-zinc-600 dark:text-zinc-400">
+        Calculando riesgo, tendencias y stops con precios reales, y redactando el informe (puede tardar hasta un minuto)...
+      </div>
+    );
+  }
 
-        <div className="bg-blue-50 dark:bg-blue-900/10 border-l-4 border-l-blue-500 border-y border-r border-blue-200 dark:border-blue-900/30 p-5 rounded-md shadow-sm">
-          <h3 className="text-xs font-sans font-bold tracking-tight text-blue-700 dark:text-blue-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-            <span className="text-lg">🤖</span> Diagnóstico General de Mi Portafolio
-          </h3>
-          <p className="text-sm font-sans text-blue-900 dark:text-blue-100 leading-relaxed">
-            {aiData.diagnostico}
-          </p>
-          <p className="text-[10px] font-mono text-blue-600/70 dark:text-blue-400/60 mt-4 uppercase">
-            Generado por IA: {new Date(aiData.fecha).toLocaleString()} · No constituye asesoría financiera
+  if (error || !data) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 px-4 text-red-600 dark:text-red-400 font-mono border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/10 rounded text-center max-w-5xl mx-auto">
+        <p className="text-lg mb-2">⚠️ Informe no disponible</p>
+        <p className="text-sm max-w-lg">{error || 'Sin datos.'}</p>
+        <button onClick={() => generate(true)} className="mt-4 text-xs font-bold underline hover:no-underline">Reintentar</button>
+      </div>
+    );
+  }
+
+  const r = data.resumen;
+  const porAccion = (a: Accion) => data.posiciones.filter(p => p.accion === a).map(p => p.ticker);
+
+  return (
+    <div className="space-y-6 max-w-6xl mx-auto">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-sans font-bold text-zinc-900 dark:text-zinc-100">Informe de tu portafolio</h2>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+            {new Date(data.generado).toLocaleString('es-CL')} · Dólar ${data.usdClp.toLocaleString('es-CL', { maximumFractionDigits: 2 })} · TPM {pct(data.tasaLibreRiesgo)}
           </p>
         </div>
+        <button
+          onClick={() => generate(true)}
+          className="bg-[#60a5fa] hover:bg-[#3b82f6] text-white px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-colors flex items-center gap-2 w-fit"
+        >
+          <RefreshCw className="w-3.5 h-3.5" /> Actualizar informe
+        </button>
+      </div>
 
-        <div className="grid grid-cols-1 gap-4">
-          {aiData.recomendaciones.map((rec, i) => {
-          let borderColor = 'border-zinc-200 dark:border-zinc-800';
-          let bgColor = 'bg-white dark:bg-zinc-900/30';
-          let headerColor = 'text-zinc-900 dark:text-zinc-100';
+      {/* KPIs del portafolio, todo consolidado en pesos */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <Kpi label="Valor total" value={clp(r.valorCLP)} sub={`${pct(r.pesoUSD, 0)} en dólares`} />
+        <Kpi label="Resultado desde compra" value={pct(r.pnlPct, 1, true)} valueClass={tone(r.pnlPct)} sub={`${r.pnlCLP >= 0 ? '+' : '-'}${clp(Math.abs(r.pnlCLP))} en pesos`} />
+        <Kpi label="Rentabilidad 12 meses" value={pct(r.ret1y, 1, true)} valueClass={tone(r.ret1y)} sub={r.sharpe !== null ? `Sharpe ${r.sharpe.toFixed(2)}` : undefined} />
+        <Kpi label="Volatilidad anual" value={pct(r.vol)} sub={r.perfil ? `Perfil ${r.perfil}` : undefined} />
+        <Kpi label="Caída máxima 12m" value={r.maxDD !== null ? `-${pct(r.maxDD)}` : 'N/D'} valueClass="text-red-600 dark:text-red-400" />
+        <Kpi label="Pérdida en un mal día" value={r.var95CLP !== null ? `-${clp(r.var95CLP)}` : 'N/D'} sub={r.var95 !== null ? `VaR 95%: ${pct(r.var95, 2)}` : undefined} />
+      </div>
 
-          const act = rec.accion.toUpperCase();
-          if (act.includes('BUY') || act.includes('🟢')) {
-            borderColor = 'border-emerald-500/50 dark:border-emerald-500/30';
-            bgColor = 'bg-emerald-50/30 dark:bg-emerald-950/10';
-            headerColor = 'text-emerald-700 dark:text-emerald-400';
-          } else if (act.includes('SELL') || act.includes('🔴')) {
-            borderColor = 'border-red-500/50 dark:border-red-500/30';
-            bgColor = 'bg-red-50/30 dark:bg-red-950/10';
-            headerColor = 'text-red-700 dark:text-red-400';
-          } else if (act.includes('HOLD') || act.includes('🟡')) {
-            borderColor = 'border-amber-500/50 dark:border-amber-500/30';
-            bgColor = 'bg-amber-50/30 dark:bg-amber-950/10';
-            headerColor = 'text-amber-700 dark:text-amber-400';
-          }
+      {/* Hallazgos calculados */}
+      <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-lg divide-y divide-zinc-200 dark:divide-[#27272a]">
+        {data.hallazgos.map((h, i) => (
+          <div key={i} className="flex gap-3 p-4">
+            {h.nivel === 'alerta' ? <ShieldAlert className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+              : h.nivel === 'atencion' ? <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+              : <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />}
+            <div>
+              <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{h.titulo}</p>
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">{h.detalle}</p>
+            </div>
+          </div>
+        ))}
+      </div>
 
+      {/* Diagnóstico redactado */}
+      <div className="bg-blue-50 dark:bg-blue-900/10 border-l-4 border-l-blue-500 border-y border-r border-blue-200 dark:border-blue-900/30 p-5 rounded-md">
+        <h3 className="text-xs font-bold text-blue-700 dark:text-blue-400 uppercase tracking-widest mb-3">Diagnóstico del asesor</h3>
+        <p className="text-sm text-blue-900 dark:text-blue-100 leading-relaxed">{data.diagnostico}</p>
+        <div className="flex flex-wrap gap-x-6 gap-y-1 mt-4 text-xs font-mono">
+          <span className="text-emerald-700 dark:text-emerald-400">AUMENTAR: {porAccion('AUMENTAR').join(', ') || '—'}</span>
+          <span className="text-amber-700 dark:text-amber-400">MANTENER: {porAccion('MANTENER').join(', ') || '—'}</span>
+          <span className="text-red-700 dark:text-red-400">REDUCIR: {porAccion('REDUCIR').join(', ') || '—'}</span>
+        </div>
+        {data.avisoIa && (
+          <p className="flex items-center gap-1.5 text-[11px] text-amber-700 dark:text-amber-400 mt-3"><Info className="w-3.5 h-3.5" /> {data.avisoIa}</p>
+        )}
+      </div>
+
+      {/* Una tarjeta por activo */}
+      <div className="grid grid-cols-1 gap-4">
+        {data.posiciones.map(p => {
+          const estilo = ACCION_ESTILO[p.accion];
+          const abierto = abiertos[p.ticker];
           return (
-            <div key={i} className={`border ${borderColor} ${bgColor} rounded-xl p-5 flex flex-col md:flex-row gap-6 shadow-sm dark:shadow-none hover:shadow-md transition-shadow`}>
-
-              {/* Left Column: Ticker & Action */}
-              <div className="md:w-1/4 flex flex-col justify-center items-start border-b md:border-b-0 md:border-r border-zinc-200 dark:border-zinc-800/60 pb-5 md:pb-0 md:pr-5">
-                <h4 className="font-mono font-bold text-2xl text-zinc-900 dark:text-zinc-100">{rec.ticker}</h4>
-                <div className={`mt-3 font-sans font-bold text-sm px-4 py-1.5 border rounded-md shadow-sm ${borderColor} ${headerColor} bg-white dark:bg-zinc-950`}>
-                  {rec.accion}
+            <div key={p.ticker} className={`border ${estilo.box} rounded-xl p-5`}>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div className="flex items-center gap-4">
+                  <div>
+                    <h4 className="font-mono font-bold text-xl text-zinc-900 dark:text-zinc-100">{p.ticker}</h4>
+                    {p.nombre && <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-[260px] truncate">{p.nombre}</p>}
+                  </div>
+                  <span className={`font-bold text-xs px-3 py-1.5 border rounded-md bg-white dark:bg-zinc-950 ${estilo.badge}`}>{estilo.label}</span>
+                </div>
+                <div className="flex gap-6 text-right">
+                  <Metric label="Peso" value={pct(p.peso)} />
+                  <Metric label="Valor" value={clp(p.valorCLP)} />
                 </div>
               </div>
 
-              {/* Right Column: Stop Loss & Analysis */}
-              <div className="md:w-3/4 flex flex-col justify-center space-y-4">
-                <div>
-                  <h5 className="text-[10px] font-mono text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-1">🛡️ Stop Loss</h5>
-                  <p className="text-sm font-sans font-medium text-zinc-900 dark:text-zinc-100 bg-white/50 dark:bg-zinc-950/30 inline-block px-3 py-1 rounded-sm border border-zinc-200 dark:border-zinc-800">
-                    {rec.stop_loss}
-                  </p>
-                </div>
-                <div>
-                  <h5 className="text-[10px] font-mono text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-1">🧠 Análisis</h5>
-                  <p className="text-sm font-sans text-zinc-700 dark:text-zinc-300 leading-relaxed">
-                    {rec.analisis}
-                  </p>
-                </div>
+              <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-8 gap-3 mt-4 pt-4 border-t border-zinc-200 dark:border-zinc-800">
+                <Metric label="Precio" value={money(p.precio, p.moneda)} />
+                <Metric label="P&L compra" value={pct(p.pnl, 1, true)} className={tone(p.pnl)} />
+                <Metric label="6 meses" value={pct(p.ret6m, 1, true)} className={tone(p.ret6m)} />
+                <Metric label="12 meses" value={pct(p.ret1y, 1, true)} className={tone(p.ret1y)} />
+                <Metric label="Volatilidad" value={pct(p.vol, 0)} />
+                <Metric label={`Beta ${p.benchmark}`} value={p.beta !== null ? p.beta.toFixed(2) : 'N/D'} />
+                <Metric label="RSI 14" value={p.rsi !== null ? p.rsi.toFixed(0) : 'N/D'} />
+                <Metric
+                  label={p.stopActivado ? 'Stop (activado)' : 'Stop sugerido'}
+                  value={p.stop !== null ? `${money(p.stop, p.moneda)} (${pct(p.stopDist)})` : 'N/D'}
+                  className={p.stopActivado ? 'text-red-600 dark:text-red-400' : ''}
+                />
               </div>
+
+              {p.analisis && <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed mt-4">{p.analisis}</p>}
+
+              <button
+                onClick={() => setAbiertos(prev => ({ ...prev, [p.ticker]: !prev[p.ticker] }))}
+                className="flex items-center gap-1 text-[11px] font-mono text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 mt-3"
+              >
+                {abierto ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />} Por qué esta decisión
+              </button>
+              {abierto && (
+                <ul className="list-disc pl-5 mt-2 space-y-1 text-xs text-zinc-600 dark:text-zinc-400">
+                  {p.motivos.map((m, i) => <li key={i}>{m}</li>)}
+                </ul>
+              )}
             </div>
           );
         })}
       </div>
-    </div>
-    );
-  }
 
-  return (
-    <div className="space-y-6 max-w-5xl mx-auto">
-      <div className="flex justify-end">
-        <button
-          onClick={() => generate(true)}
-          className="bg-[#60a5fa] hover:bg-[#3b82f6] text-white px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-colors flex items-center gap-2"
-        >
-          🔄 Re-generar Diagnóstico
-        </button>
-      </div>
-      {error ? (
-        <div className="flex flex-col items-center justify-center py-16 px-4 text-red-600 dark:text-red-400 font-mono border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/10 rounded text-center">
-          <p className="text-lg mb-2">⚠️ Diagnóstico no disponible</p>
-          <p className="text-sm max-w-lg">{error}</p>
-          <button onClick={() => generate(true)} className="mt-4 text-xs font-bold underline hover:no-underline">
-            Reintentar
-          </button>
-        </div>
-      ) : data ? renderAiData(data) : null}
+      <p className="text-[11px] text-zinc-500 dark:text-zinc-500 leading-relaxed">
+        Cómo se calcula: precios diarios de Yahoo Finance del último año. Tendencia por medias móviles de 50 y 200 días, impulso por la rentabilidad de 6 meses,
+        RSI de 14 días, y stop &quot;chandelier&quot; (máximo de 22 días menos 3 veces el movimiento diario promedio). El riesgo del portafolio se mide en pesos con tus
+        cantidades actuales y el dólar de cada día. {data.modelo ? `Redacción: ${data.modelo}.` : ''} Es una herramienta de apoyo y no constituye asesoría financiera personalizada.
+      </p>
     </div>
   );
 }

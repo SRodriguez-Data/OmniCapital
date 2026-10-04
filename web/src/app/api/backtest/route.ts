@@ -1,41 +1,34 @@
 import { NextResponse } from 'next/server';
-import YahooFinance from 'yahoo-finance2';
+import { yahooFinance, dailyHistory, withTimeout, BENCH_CL } from '@/lib/marketData';
+import { annualVol, maxDrawdown, returns } from '@/lib/quant';
 
-const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
+interface Point { date: string; price: number }
 
-async function fetchHistoricalData(ticker: string, years: number, interval: '1d' | '1wk' | '1mo') {
-  const period2 = new Date();
+// adjclose incorpora dividendos y splits: para EE.UU. el backtest mide retorno total
+async function yahooAdjusted(ticker: string, years: number): Promise<Point[]> {
   const period1 = new Date();
-  period1.setFullYear(period2.getFullYear() - years);
-
-  const result = await yahooFinance.chart(ticker, {
-    period1: period1,
-    period2: period2,
-    interval: interval
-  });
-
-  if (!result || !result.quotes || result.quotes.length === 0) {
-    throw new Error(`No hay datos disponibles para ${ticker}`);
+  period1.setFullYear(period1.getFullYear() - years);
+  const result = await withTimeout(yahooFinance.chart(ticker, { period1, interval: '1d' }), 15000, `Yahoo ${ticker}`);
+  const out: Point[] = [];
+  for (const q of result?.quotes ?? []) {
+    const price = q.adjclose ?? q.close;
+    if (q.date && price !== null && price !== undefined) out.push({ date: new Date(q.date).toISOString().slice(0, 10), price });
   }
-
-  const cleanData = [];
-  for (const quote of result.quotes) {
-    // adjclose incorpora dividendos y splits: el backtest mide retorno total, no solo precio
-    const price = quote.adjclose ?? quote.close;
-    if (price !== null && price !== undefined) {
-      cleanData.push({
-        date: quote.date.toISOString().split('T')[0],
-        timestamp: quote.date.getTime() / 1000,
-        price
-      });
-    }
-  }
-
-  return cleanData;
+  if (out.length === 0) throw new Error(`No hay datos disponibles para ${ticker}`);
+  return out;
 }
 
-// S&P 500 Total Return: incluye dividendos reinvertidos, comparable con adjclose del activo
-const BENCHMARK = '^SP500TR';
+// Chile: cierres de la base del minero (Yahoo congela el historial chileno); retorno de precio
+async function closes(ticker: string, years: number): Promise<Point[]> {
+  const h = await dailyHistory(ticker, years * 365 + 5);
+  if (!h) throw new Error(`No hay datos disponibles para ${ticker}`);
+  return h.dates.map(date => ({ date, price: h.series.get(date)! }));
+}
+
+// Muestreo semanal para periodos largos: el gráfico queda liviano y las métricas casi no cambian
+function weekly(points: Point[]): Point[] {
+  return points.filter((_, i) => i % 5 === 0 || i === points.length - 1);
+}
 
 export async function POST(request: Request) {
   try {
@@ -54,88 +47,51 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Los años deben estar entre 1 y 30' }, { status: 400 });
     }
 
-    const interval = years > 2 ? '1wk' : '1d';
+    // Cada activo se compara con el índice de su mercado y en su propia moneda
+    const chileno = ticker.endsWith('.SN');
+    const benchmark = chileno ? { ticker: BENCH_CL, nombre: 'IPSA' } : { ticker: '^SP500TR', nombre: 'S&P 500' };
+    const [targetData, benchmarkData] = await Promise.all(chileno
+      ? [closes(ticker, years), closes(benchmark.ticker, years)]
+      : [yahooAdjusted(ticker, years), yahooAdjusted(benchmark.ticker, years)]);
 
-    const [targetData, benchmarkData] = await Promise.all([
-      fetchHistoricalData(ticker, years, interval),
-      fetchHistoricalData(BENCHMARK, years, interval)
-    ]);
-
-    if (targetData.length === 0 || benchmarkData.length === 0) {
-      return NextResponse.json({ error: 'No se encontraron suficientes datos históricos' }, { status: 400 });
-    }
-
-    // Align dates
-    // Create a map of benchmark dates to prices
     const benchmarkMap = new Map(benchmarkData.map(d => [d.date, d.price]));
-
-    const chartData = [];
-    let initialTargetPrice = 0;
-    let initialBenchmarkPrice = 0;
-
-    // Find the first date where both have data to set baseline
-    for (const d of targetData) {
-      if (benchmarkMap.has(d.date)) {
-        initialTargetPrice = d.price;
-        initialBenchmarkPrice = benchmarkMap.get(d.date)!;
-        break;
-      }
+    const aligned = targetData.filter(d => benchmarkMap.has(d.date));
+    if (aligned.length < 20) {
+      return NextResponse.json({ error: 'No se encontraron suficientes datos históricos comunes con el índice' }, { status: 400 });
     }
 
-    if (initialTargetPrice === 0 || initialBenchmarkPrice === 0) {
-      return NextResponse.json({ error: 'No se pudieron alinear las fechas de ambos activos' }, { status: 400 });
-    }
+    const t0 = aligned[0].price;
+    const b0 = benchmarkMap.get(aligned[0].date)!;
+    const target = aligned.map(d => capital * d.price / t0);
+    const bench = aligned.map(d => capital * benchmarkMap.get(d.date)! / b0);
 
-    // Calculate portfolio values
-    // Target shares bought at day 0
-    const targetShares = capital / initialTargetPrice;
-    // Benchmark shares bought at day 0
-    const benchmarkShares = capital / initialBenchmarkPrice;
+    const sampled = new Set((years > 2 ? weekly(aligned) : aligned).map(d => d.date));
+    const chartData = aligned
+      .map((d, i) => ({ date: d.date, Estrategia: Number(target[i].toFixed(2)), SP500: Number(bench[i].toFixed(2)) }))
+      .filter(d => sampled.has(d.date));
 
-    let maxDrawdown = 0;
-    let peak = capital;
-
-    for (const d of targetData) {
-      if (benchmarkMap.has(d.date)) {
-        const currentTargetValue = d.price * targetShares;
-        const currentBenchmarkValue = benchmarkMap.get(d.date)! * benchmarkShares;
-
-        // Drawdown calculation
-        if (currentTargetValue > peak) {
-          peak = currentTargetValue;
-        }
-        const drawdown = (peak - currentTargetValue) / peak;
-        if (drawdown > maxDrawdown) {
-          maxDrawdown = drawdown;
-        }
-
-        chartData.push({
-          date: d.date,
-          Estrategia: Number(currentTargetValue.toFixed(2)),
-          SP500: Number(currentBenchmarkValue.toFixed(2))
-        });
-      }
-    }
-
-    if (chartData.length === 0) {
-      return NextResponse.json({ error: 'Error procesando la serie de tiempo' }, { status: 500 });
-    }
-
-    const finalTargetValue = chartData[chartData.length - 1].Estrategia;
-    const finalBenchmarkValue = chartData[chartData.length - 1].SP500;
-
-    const targetReturn = ((finalTargetValue - capital) / capital) * 100;
-    const benchmarkReturn = ((finalBenchmarkValue - capital) / capital) * 100;
+    const yearsElapsed = (new Date(aligned.at(-1)!.date).getTime() - new Date(aligned[0].date).getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+    const cagr = (final: number) => (yearsElapsed > 0.5 ? (final / capital) ** (1 / yearsElapsed) - 1 : null);
+    const finalTargetValue = target.at(-1)!;
+    const finalBenchmarkValue = bench.at(-1)!;
 
     return NextResponse.json({
       chartData,
+      benchmark: benchmark.nombre,
+      desde: aligned[0].date,
+      totalReturn: !chileno, // en Chile es solo retorno de precio (sin dividendos)
       metrics: {
-        targetReturn,
-        benchmarkReturn,
+        targetReturn: (finalTargetValue / capital - 1) * 100,
+        benchmarkReturn: (finalBenchmarkValue / capital - 1) * 100,
         finalTargetValue,
         finalBenchmarkValue,
-        maxDrawdown: maxDrawdown * 100
-      }
+        maxDrawdown: (maxDrawdown(target) ?? 0) * 100,
+        benchmarkMaxDrawdown: (maxDrawdown(bench) ?? 0) * 100,
+        targetCagr: cagr(finalTargetValue),
+        benchmarkCagr: cagr(finalBenchmarkValue),
+        targetVol: annualVol(returns(target)),
+        benchmarkVol: annualVol(returns(bench)),
+      },
     });
 
   } catch (err: unknown) {

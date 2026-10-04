@@ -143,7 +143,7 @@ export default function Home() {
           onClick={() => setActiveTab('CALCULADORA')}
           className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors border-l border-zinc-200 dark:border-[#27272a] ${activeTab === 'CALCULADORA' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-amber-500 text-amber-600 dark:text-amber-400' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
         >
-          <Calculator className="w-4 h-4" /> [06] Optimizador IA
+          <Calculator className="w-4 h-4" /> [06] Optimizador
         </button>
         <button 
           onClick={() => setActiveTab('BACKTEST')}

@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import YahooFinance from 'yahoo-finance2';
-
-const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
+import { yahooFinance, withTimeout } from '@/lib/marketData';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
@@ -60,7 +58,7 @@ export async function POST(req: Request) {
           const purchase = item.purchase_date ? new Date(item.purchase_date) : null;
           const period1 = purchase && !isNaN(purchase.getTime()) && purchase < oneYearAgo ? purchase : oneYearAgo;
 
-          const chart = await yahooFinance.chart(item.ticker, { period1, interval: '1mo', events: 'div' });
+          const chart = await withTimeout(yahooFinance.chart(item.ticker, { period1, interval: '1mo', events: 'div' }), 10000, `Yahoo ${item.ticker}`);
           const price = chart.meta.regularMarketPrice as number | undefined;
           const dividends = chart.events?.dividends || [];
 

@@ -34,6 +34,13 @@ interface TopOpportunity {
   deuda: string | number;
 }
 
+// Escaneos antiguos del bot guardaron el dividend yield multiplicado dos veces por 100 ("346.00%" en vez de 3,46%)
+function normalizeYield(divStr?: string): string {
+  const value = parseFloat(String(divStr ?? '').replace('%', ''));
+  if (!Number.isFinite(value)) return 'N/A';
+  return `${(value > 25 ? value / 100 : value).toFixed(2)}%`;
+}
+
 export default function TopOportunidadesTab() {
   const { items } = usePortfolio();
   const [oportunidades, setOportunidades] = useState<TopOpportunity[]>([]);
@@ -80,7 +87,7 @@ export default function TopOportunidadesTab() {
               distancia_ema200: c.distancia_ema200,
               score: c.score,
               pe: c.pe || 'N/A',
-              div_str: c.div_str || '0.00%',
+              div_str: normalizeYield(c.div_str),
               deuda: c.deuda || 'N/A'
             }));
           }
