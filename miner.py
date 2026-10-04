@@ -68,7 +68,9 @@ def obtener_universo_masivo() -> list[str]:
         "NVO", "SAP", "SHEL", "UL", "SNY", "BP", "DEO", "BTI", "GSK", "SAN", 
         "BBVA", "ING", "ASML", "CRH", "FLUT", "RELX", "HEINY", "RACE",
         "MELI", "PBR", "VALE", "NU", "ITUB", "AMX", "BBD", "BSBR", "FMX", "BAK", 
-        "VOO", "SCHD", "HDV", "QQQ", "VT", "EEM", "VEA", "VUG", "VTV", "VNQ", "IYR", "FTEC"
+        "VOO", "SCHD", "HDV", "QQQ", "VT", "EEM", "VEA", "VUG", "VTV", "VNQ", "IYR", "FTEC",
+        # Series de referencia para la web (no son acciones): dólar en pesos e índices de comparación
+        "CLP=X", "^GSPC", "^SP500TR"
     ]
     tickers_finales.extend(activos_fijos)
     logging.info(f"✅ Activos fijos cargados ({len(activos_fijos)} activos).")
@@ -153,6 +155,50 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     return out
 
+DIAS_A_CORREGIR = 7
+COLUMNAS_PRECIO = ["open", "high", "low", "close", "volume"]
+
+def historial_congelado(df: pd.DataFrame) -> bool:
+    """Yahoo a veces congela el historial de las acciones chilenas: repite el mismo cierre por semanas
+    (incluido el último día). Guardar eso arruinaría la base, así que se detecta antes."""
+    ultimos = df["close"].tail(6)
+    return len(ultimos) == 6 and ultimos.nunique() == 1
+
+def fila_desde_cotizacion(ticker: str):
+    """Con el historial congelado, la cotización de Yahoo (regularMarketPrice y su hora) sigue al día:
+    se arma la fila de ese día sobre el historial guardado en Supabase y se recalculan los indicadores."""
+    info = yf.Ticker(ticker).info
+    precio, hora = info.get("regularMarketPrice"), info.get("regularMarketTime")
+    if not precio or not hora:
+        return None
+    zona = info.get("exchangeTimezoneName") or "UTC"
+    fecha = pd.Timestamp(hora, unit="s", tz="UTC").tz_convert(zona).strftime("%Y-%m-%d")
+    filas = supabase.table("precios_historicos").select("date, open, high, low, close, volume")         .eq("ticker", ticker).order("date", desc=True).limit(400).execute().data
+    if not filas:
+        return None
+    base = pd.DataFrame(filas)
+    base["date"] = base["date"].str[:10]
+    base = base[base["date"] != fecha].sort_values("date")
+    hoy = {"date": fecha, "open": info.get("regularMarketOpen"), "high": info.get("regularMarketDayHigh"),
+           "low": info.get("regularMarketDayLow"), "close": float(precio), "volume": info.get("regularMarketVolume")}
+    df = pd.concat([base, pd.DataFrame([hoy])], ignore_index=True)
+    df[COLUMNAS_PRECIO] = df[COLUMNAS_PRECIO].astype(float)
+    fila = compute_indicators(df).iloc[-1].replace({np.nan: None}).to_dict()
+    fila["ticker"] = ticker
+    if fila.get("volume") is not None:
+        fila["volume"] = int(fila["volume"])
+    supabase.table("precios_historicos").delete().eq("ticker", ticker).eq("date", fecha).execute()
+    return fila
+
+def reescribir_ultimos_dias(ticker: str, df: pd.DataFrame, max_date: str) -> pd.DataFrame:
+    """Devuelve las filas a insertar. Si el minero corrió con el mercado abierto, el precio de ese momento
+    quedó guardado como cierre: por eso se borran y vuelven a escribir los últimos días con el cierre oficial."""
+    desde = (pd.Timestamp(max_date) - pd.Timedelta(days=DIAS_A_CORREGIR)).strftime("%Y-%m-%d")
+    recientes = df[df["date"] > desde]
+    if not recientes.empty:
+        supabase.table("precios_historicos").delete().eq("ticker", ticker).gt("date", desde).execute()
+    return recientes
+
 def run_miner(modo_incremental=True):
     if not supabase:
         logging.error("❌ Faltan credenciales de Supabase en .env")
@@ -166,10 +212,13 @@ def run_miner(modo_incremental=True):
     exitos = 0
     fallos = 0
     sin_cambios = 0
+    congelados = 0
 
     for ticker in TICKERS_A_MINAR:
         try:
-            df = yf.download(ticker, period=periodo, interval="1d", progress=False, multi_level_index=False)
+            # Cierre real (sin ajustar por dividendos): es el que se compara con el precio en vivo.
+            # Con auto_adjust=True la carga inicial quedaba ajustada y lo agregado después no.
+            df = yf.download(ticker, period=periodo, interval="1d", progress=False, multi_level_index=False, auto_adjust=False)
             if df.empty:
                 fallos += 1
                 continue
@@ -183,20 +232,32 @@ def run_miner(modo_incremental=True):
                 nombre_base = str(c[0]) if isinstance(c, tuple) else str(c)
                 columnas_limpias.append(nombre_base.lower().replace(" ", "_"))
             df.columns = columnas_limpias
-            
+            df = df.drop(columns=["adj_close"], errors="ignore")  # la tabla guarda solo el cierre real
+
+            if modo_incremental and historial_congelado(df):
+                fila = fila_desde_cotizacion(ticker)
+                if fila:
+                    supabase.table("precios_historicos").insert([fila]).execute()
+                    congelados += 1
+                    logging.warning(f"{ticker}: historial de Yahoo congelado; se guardó el cierre del {fila['date']} desde la cotización.")
+                else:
+                    sin_cambios += 1
+                time.sleep(0.5)
+                continue
+
             # PRE-CÁLCULO MATEMÁTICO
             df = compute_indicators(df)
             
             # Limpiar NaNs para JSON serialization
             df = df.replace({float('nan'): None})
-            df['date'] = df['date'].astype(str)
+            df['date'] = df['date'].astype(str).str[:10]
             
             if modo_incremental:
                 try:
                     res = supabase.table("precios_historicos").select("date").eq("ticker", ticker).order("date", desc=True).limit(1).execute()
                     if res.data and len(res.data) > 0:
-                        max_date = res.data[0]['date']
-                        df = df[df['date'] > max_date]
+                        max_date = res.data[0]['date'][:10]
+                        df = reescribir_ultimos_dias(ticker, df, max_date)
                 except Exception as e:
                     logging.warning(f"No se pudo obtener max_date para {ticker}: {e}")
 
@@ -214,6 +275,8 @@ def run_miner(modo_incremental=True):
             logging.error(f"Error en {ticker}: {e}")
             fallos += 1
 
+    if congelados:
+        logging.warning(f"⚠️ {congelados} activos con historial congelado en Yahoo se completaron desde la cotización.")
     logging.info(f"🚀 Minería Data Warehouse (Supabase) finalizada. Actualizados: {exitos}, Al día (sin cambios): {sin_cambios}, Fallos: {fallos}.")
 
 if __name__ == "__main__":

@@ -231,6 +231,9 @@ def run_serverless_screener():
         
         if rsi is None or pvc_ema200 is None:
             continue
+        # Índices (^GSPC) y monedas (CLP=X) se guardan como referencia, no son oportunidades de compra
+        if ticker.startswith('^') or '=' in ticker:
+            continue
             
         volumen_nominal = volumen * close
         if ticker.endswith(".SN") and volumen_nominal < 450_000_000:
