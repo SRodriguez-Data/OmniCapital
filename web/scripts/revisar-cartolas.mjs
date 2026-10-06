@@ -4,34 +4,71 @@
 //   movimientos.csv   todos los movimientos con fecha (compras, ventas, dividendos, comisiones, aportes...)
 //   posiciones.csv    posiciones actuales con su fecha de compra y costo promedio
 //
-// Uso (desde web/):  node scripts/revisar-cartolas.mjs [fecha de hoy YYYY-MM-DD]
+// Uso (desde web/):  node scripts/revisar-cartolas.mjs [fecha de hoy YYYY-MM-DD] [--clave=XXXX]
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
-import { textoDePdf, parseCartolaText } from '../src/lib/CartolaParser.ts';
+import { cartolaConClave, textoDePdf, parseCartolaText } from '../src/lib/CartolaParser.ts';
 import { construirLibro, formatoMonto, tickerYahoo, valorizarHoy } from '../src/lib/LibroInversiones.ts';
 import YahooFinance from 'yahoo-finance2';
 
 const RAIZ = path.resolve(import.meta.dirname, '../../Cartolas');
 const MUESTRAS = path.join(RAIZ, 'muestras');
 const SALIDA = path.join(RAIZ, 'revision');
-const hoy = process.argv[2] ?? new Date().toISOString().slice(0, 10);
+const hoy = process.argv.slice(2).find(a => /^\d{4}-\d{2}-\d{2}$/.test(a)) ?? new Date().toISOString().slice(0, 10);
+const clave = process.argv.find(a => a.startsWith('--clave='))?.slice('--clave='.length);
 
 const archivos = fs.readdirSync(MUESTRAS, { recursive: true })
-  .filter(f => f.toLowerCase().endsWith('.pdf') && !f.startsWith('_texto'))
+  .filter(f => f.toLowerCase().endsWith('.pdf') && !f.startsWith('_')) // _texto, _duplicados, _con_clave
   .sort();
 
 const resultados = [];
 for (const rel of archivos) {
-  const doc = await pdfjs.getDocument({ data: new Uint8Array(fs.readFileSync(path.join(MUESTRAS, rel))), verbosity: 0 }).promise;
-  const r = parseCartolaText(await textoDePdf(doc), path.basename(rel));
+  let r;
+  try {
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(fs.readFileSync(path.join(MUESTRAS, rel))), password: clave, verbosity: 0 }).promise;
+    r = parseCartolaText(await textoDePdf(doc), path.basename(rel));
+  } catch (e) {
+    if (e?.name !== 'PasswordException') throw e;
+    r = cartolaConClave(path.basename(rel), !!clave);
+  }
   resultados.push(r);
   const tipos = {};
   for (const m of r.movimientos) tipos[m.tipo] = (tipos[m.tipo] ?? 0) + 1;
   console.log(`${r.cuenta.padEnd(13)} ${r.tipoDoc.padEnd(11)} ${(r.hasta ?? '?').padEnd(10)} ${path.basename(rel).slice(0, 48).padEnd(48)} ${JSON.stringify(tipos)}${r.foto ? ` foto:${r.foto.posiciones.length}pos caja:${r.foto.caja}` : ''}`);
 }
 
-const libro = construirLibro(resultados, hoy);
+// Texto extraído antes de que se perdiera algún PDF (Cartolas/recuperadas/**/*.txt): se usa solo para
+// cuentas y meses que no tienen su PDF, para no perder esos movimientos mientras se recupera el archivo
+const RECUPERADAS = path.join(RAIZ, 'recuperadas');
+if (fs.existsSync(RECUPERADAS)) {
+  const cubiertos = new Set(resultados.map(r => `${r.cuenta}|${r.hasta}`));
+  for (const rel of fs.readdirSync(RECUPERADAS, { recursive: true }).filter(f => f.endsWith('.txt')).sort()) {
+    const r = parseCartolaText(fs.readFileSync(path.join(RECUPERADAS, rel), 'utf8'), `${path.basename(rel, '.txt')} (texto recuperado)`);
+    if (r.desconocido || r.sinTexto || cubiertos.has(`${r.cuenta}|${r.hasta}`)) continue;
+    cubiertos.add(`${r.cuenta}|${r.hasta}`);
+    resultados.push(r);
+    console.log(`${r.cuenta.padEnd(13)} ${r.tipoDoc.padEnd(11)} ${(r.hasta ?? '?').padEnd(10)} ← texto recuperado: ${rel}`);
+  }
+}
+
+let libro = construirLibro(resultados, hoy);
+const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'], validation: { logErrors: false }, versionCheck: false });
+
+// Meses con cartola resumida: se buscan en Yahoo los dividendos de lo que había en la cuenta para desglosarlos
+if (libro.sinDetalle.length > 0) {
+  const desde = new Date(Date.parse(libro.sinDetalle.map(p => p.desde).sort()[0]) - 10 * 86400000).toISOString().slice(0, 10);
+  const externos = {};
+  for (const t of [...new Set(libro.sinDetalle.flatMap(p => p.tickers))]) {
+    try {
+      const c = await yf.chart(t, { period1: desde, interval: '1d', events: 'div' });
+      externos[t] = (c.events?.dividends ?? []).map(d => ({ fecha: new Date(d.date).toISOString().slice(0, 10), monto: d.amount }));
+    } catch (e) {
+      console.log(`(sin dividendos de Yahoo para ${t}: ${e.message})`);
+    }
+  }
+  libro = construirLibro(resultados, hoy, externos);
+}
 const fmt = (n, moneda) => (n === undefined ? '—' : formatoMonto(n, moneda));
 const pct = n => (n === undefined ? '—' : `${(n * 100).toFixed(2)}%`);
 const fecha = f => (f ? `${f.slice(8, 10)}-${f.slice(5, 7)}-${f.slice(0, 4)}` : '—');
@@ -49,7 +86,6 @@ if (libro.dolar) md.push('', `Dólar de referencia: $${libro.dolar.valor.toLocal
 
 // Valorización a hoy con precios de Yahoo (si hay internet)
 try {
-  const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'], validation: { logErrors: false }, versionCheck: false });
   const simbolos = [...new Set(libro.posiciones.map(p => tickerYahoo(p.ticker, p.moneda))), 'CLP=X'];
   const precios = {};
   for (const q of await yf.quote(simbolos)) if (q.regularMarketPrice) precios[q.symbol] = q.regularMarketPrice;
@@ -75,7 +111,7 @@ md.push('', '## Duplicados', '');
 if (libro.duplicados.length === 0) md.push('- Ninguno.');
 for (const d of libro.duplicados) md.push(`- (${d.tipo}) ${d.texto}`);
 md.push('', '## Cuadratura mes a mes', '');
-for (const c of libro.conciliaciones) md.push(`- ${c.ok ? '✅' : '❌'} ${c.cuenta} ${fecha(c.fecha)} (${c.archivo})${c.ok ? '' : `: ${c.diferencias.join(' ')}`}`);
+for (const c of libro.conciliaciones) md.push(`- ${c.ok ? '✅' : '❌'} ${c.cuenta} ${fecha(c.fecha)} (${c.archivo})${c.estimado ? ' — caja cuadrada con dividendos y comisión estimados (cartola resumida)' : ''}${c.ok ? '' : `: ${c.diferencias.join(' ')}`}`);
 
 md.push('', '## Posiciones actuales', '');
 md.push('| Cuenta | Activo | Cantidad | Costo promedio | Costo total | Desde | Dividendos cobrados | Precio cartola | Valor cartola |');
@@ -89,7 +125,7 @@ fs.mkdirSync(SALIDA, { recursive: true });
 fs.writeFileSync(path.join(SALIDA, 'informe.md'), md.join('\n'), 'utf8');
 fs.writeFileSync(path.join(SALIDA, 'movimientos.csv'), '﻿' + csv([
   ['fecha', 'fecha_liquidacion', 'cuenta', 'tipo', 'ticker', 'cantidad', 'precio', 'monto', 'moneda', 'deducido', 'detalle', 'archivo'],
-  ...libro.movimientos.map(m => [m.fecha, m.fechaLiquidacion, m.cuenta, m.tipo, m.ticker, m.cantidad, m.precio, m.montoIncluido ?? m.monto, m.moneda, m.implicito ? 'si' : '', m.detalle, m.archivo]),
+  ...libro.movimientos.map(m => [m.fecha, m.fechaLiquidacion, m.cuenta, m.tipo, m.ticker, m.cantidad, m.precio, m.montoIncluido ?? m.monto, m.moneda, m.estimado ? 'estimado' : m.implicito ? 'si' : '', m.detalle, m.archivo]),
 ]), 'utf8');
 fs.writeFileSync(path.join(SALIDA, 'posiciones.csv'), '﻿' + csv([
   ['cuenta', 'ticker', 'cantidad', 'costo_total', 'costo_promedio', 'moneda', 'desde', 'fecha_aproximada', 'dividendos_cobrados'],

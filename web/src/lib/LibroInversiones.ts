@@ -30,6 +30,7 @@ export interface Conciliacion {
   archivo: string;
   ok: boolean;
   diferencias: string[];
+  estimado?: boolean; // la caja se cuadró con dividendos y comisión estimados (cartola resumida)
 }
 
 export interface PosicionCuenta {
@@ -76,8 +77,29 @@ export interface ResumenCuenta {
   tir?: number;               // tasa interna de retorno anual, según las fechas de cada aporte y retiro
 }
 
+// Mes en que el broker solo entregó un resumen y la caja cambió sin detalle
+export interface PeriodoSinDetalle {
+  cuenta: string;
+  desde: string;
+  hasta: string;
+  tickers: string[];   // tickers de Yahoo de lo que había en la cuenta, para buscar sus dividendos
+  explicado: boolean;  // se pudo desglosar en dividendos y comisión estimados
+}
+
+// Dividendos por acción de fuentes externas (Yahoo), por ticker de Yahoo: fecha ex-dividendo y monto
+export type DividendosExternos = Record<string, { fecha: string; monto: number }[]>;
+
+// Qué meses tiene cada cuenta (para ver de un vistazo qué cartolas faltan)
+export type EstadoMes = 'completa' | 'resumen' | 'parcial' | 'falta' | 'certificado';
+export interface CoberturaCuenta {
+  cuenta: string;
+  meses: { mes: string; estado: EstadoMes; archivo?: string }[];
+}
+
 export interface LibroInversiones {
   movimientos: MovimientoLibro[];
+  sinDetalle: PeriodoSinDetalle[];
+  cobertura: CoberturaCuenta[];
   cuentas: ResumenCuenta[];
   posiciones: PosicionCuenta[];
   alertas: Alerta[];
@@ -145,7 +167,11 @@ export function tir(flujos: { fecha: string; monto: number }[]): number | undefi
   return (lo + hi) / 2;
 }
 
-export function construirLibro(resultados: ResultadoCartola[], hoy = new Date().toISOString().slice(0, 10)): LibroInversiones {
+export function construirLibro(
+  resultados: ResultadoCartola[],
+  hoy = new Date().toISOString().slice(0, 10),
+  dividendosExternos: DividendosExternos = {},
+): LibroInversiones {
   const alertas: Alerta[] = [];
   const duplicados: Duplicado[] = [];
   const conciliaciones: Conciliacion[] = [];
@@ -153,13 +179,14 @@ export function construirLibro(resultados: ResultadoCartola[], hoy = new Date().
   // 1. Archivos que no se pudieron leer o no se reconocen
   for (const r of resultados) {
     if (r.sinTexto) alertas.push({ nivel: 'error', texto: `${r.archivo}: el PDF no tiene texto (parece escaneado). No se pudo leer.` });
+    else if (r.conClave) alertas.push({ nivel: 'error', texto: `${r.archivo}: ${r.avisos[0]}` });
     else if (r.desconocido) alertas.push({ nivel: 'error', texto: `${r.archivo}: ${r.avisos[0] ?? 'formato de cartola no reconocido; se omitió.'}` });
   }
 
   // 2. Cartolas repetidas: misma cuenta y mismo período (aunque el archivo se llame distinto)
   const docs: ResultadoCartola[] = [];
   const porPeriodo = new Map<string, ResultadoCartola>();
-  for (const r of resultados.filter(x => !x.sinTexto && !x.desconocido)) {
+  for (const r of resultados.filter(x => !x.sinTexto && !x.desconocido && !x.conClave)) {
     const clave = `${r.cuenta}|${r.tipoDoc}|${r.desde ?? ''}|${r.hasta ?? ''}`;
     const previa = porPeriodo.get(clave);
     if (previa) {
@@ -197,6 +224,18 @@ export function construirLibro(resultados: ResultadoCartola[], hoy = new Date().
     }
   }
 
+  // Dividendo por acción de cada pago visto en cualquier cuenta (sirve para estimar los meses sin detalle:
+  // un mismo fondo paga lo mismo por cuota en BTG que en Vector)
+  const pagosPorAccion = new Map<string, { fecha: string; porAccion: number; cuenta: string }[]>();
+  for (const m of movimientos) {
+    if (m.tipo !== 'DIVIDENDO' || !m.ticker || !m.precio) continue;
+    const lista = pagosPorAccion.get(m.ticker) ?? [];
+    if (!lista.some(x => x.fecha === m.fecha && Math.abs(x.porAccion - m.precio!) < 1e-6)) lista.push({ fecha: m.fecha, porAccion: m.precio, cuenta: m.cuenta });
+    pagosPorAccion.set(m.ticker, lista);
+  }
+  const sinDetalle: PeriodoSinDetalle[] = [];
+  const cobertura: CoberturaCuenta[] = [];
+
   // 4. Por cuenta: cobertura, faltantes y cuadratura contra las fotos de cada cartola
   const cuentas = [...new Set(docs.map(d => d.cuenta))];
   const sinteticos: Movimiento[] = [];
@@ -211,9 +250,23 @@ export function construirLibro(resultados: ResultadoCartola[], hoy = new Date().
 
     // Meses sin cartola
     const mensuales = docsCuenta.filter(d => d.tipoDoc !== 'CERTIFICADO' && d.hasta);
+    const certificado = docsCuenta.find(d => d.tipoDoc === 'CERTIFICADO' && d.desde && d.hasta);
+    if (certificado) {
+      cobertura.push({ cuenta, meses: mesesEntre(certificado.desde!.slice(0, 7), certificado.hasta!.slice(0, 7)).map(mes => ({ mes, estado: 'certificado', archivo: certificado.archivo })) });
+    }
     if (mensuales.length > 0) {
       const meses = new Set(mensuales.map(d => d.hasta!.slice(0, 7)));
       const orden = [...meses].sort();
+      const hastaMes = orden[orden.length - 1] > ultimoMesCerrado ? orden[orden.length - 1] : ultimoMesCerrado;
+      cobertura.push({
+        cuenta,
+        meses: mesesEntre(orden[0], hastaMes).map(mes => {
+          const delMes = mensuales.filter(d => d.hasta!.startsWith(mes));
+          const doc = delMes.find(d => d.tipoDoc === 'MENSUAL') ?? delMes.find(d => d.tipoDoc === 'RESUMEN') ?? delMes[0];
+          const estado: EstadoMes = !doc ? 'falta' : doc.tipoDoc === 'RESUMEN' ? 'resumen' : doc.tipoDoc === 'PARCIAL' ? 'parcial' : 'completa';
+          return { mes, estado, archivo: doc?.archivo };
+        }),
+      });
       const faltan = mesesEntre(orden[0], orden[orden.length - 1]).filter(m => !meses.has(m));
       for (const m of faltan) alertas.push({ nivel: 'faltante', cuenta, texto: `${cuenta}: falta la cartola de ${nombreMes(m)}.` });
       const ultimo = orden[orden.length - 1];
@@ -233,9 +286,11 @@ export function construirLibro(resultados: ResultadoCartola[], hoy = new Date().
       const enPeriodoCaja = (m: Movimiento) => { const f = fechaCaja(m, foto); return f > desde && f <= foto.fecha; };
       const delPeriodo = [...movsCuenta, ...sinteticos.filter(s => s.cuenta === cuenta)];
       const diferencias: string[] = [];
+      let cajaEstimada = false;
       const huecoPrevio = anterior ? mesesEntre(siguienteMes(anterior.foto.fecha.slice(0, 7)), foto.fecha.slice(0, 7)).length > 1 : false;
-      const motivo = !anterior ? 'inicial' : doc.tipoDoc === 'RESUMEN' ? 'resumen' : huecoPrevio ? 'hueco' : 'error';
-      const fechaAjuste = !anterior ? diaAnterior(doc.desde ?? foto.fecha) : foto.fecha;
+      // Primera cartola: lo que no explican los movimientos ya estaba antes, salvo que la cuenta haya partido el mes en cero
+      const motivo = !anterior ? (foto.valorInicial === 0 ? 'entrada' : 'inicial') : doc.tipoDoc === 'RESUMEN' ? 'resumen' : huecoPrevio ? 'hueco' : 'error';
+      const fechaAjuste = motivo === 'inicial' ? diaAnterior(doc.desde ?? foto.fecha) : foto.fecha;
 
       // Títulos
       const tickers = new Set([...foto.posiciones.map(p => p.ticker), ...(anterior?.foto.posiciones.map(p => p.ticker) ?? []),
@@ -254,6 +309,10 @@ export function construirLibro(resultados: ResultadoCartola[], hoy = new Date().
           sinteticos.push({ cuenta, fecha: fechaAjuste, tipo: 'SALDO_INICIAL', ticker, cantidad: diff, precio: costo !== undefined ? costo / diff : enFoto?.precio,
             monto: 0, moneda: pos?.moneda ?? moneda, archivo: doc.archivo, implicito: true,
             detalle: `${fmtCant(diff)} ${ticker} que ya estaban en la cuenta antes del ${fechaCorta(doc.desde ?? foto.fecha)}${costo === undefined ? ' (costo de compra no informado)' : ''}` });
+        } else if (motivo === 'entrada' && diff > 0) {
+          sinteticos.push({ cuenta, fecha: fechaAjuste, tipo: 'NO_INFORMADO', ticker, cantidad: diff, precio: 0, monto: 0, moneda: pos?.moneda ?? moneda,
+            archivo: doc.archivo, implicito: true, detalle: `Entraron ${fmtCant(diff)} ${ticker} sin compra ni cargo en la caja (probable acción de regalo): costo $0` });
+          alertas.push({ nivel: 'aviso', cuenta, texto: `${cuenta} ${nombreMes(foto.fecha.slice(0, 7))}: aparecieron ${fmtCant(diff)} ${ticker} sin ninguna compra ni cargo en la caja, y la cuenta empezó el mes en $0. Lo más probable es que sea una acción de regalo (promoción de bienvenida): quedó registrada con costo $0.` });
         } else {
           diferencias.push(`${ticker}: la cartola informa ${fmtCant(ahora)} pero los movimientos llevan a ${fmtCant(antes + flujo)} (diferencia ${fmtCant(diff)}).`);
           sinteticos.push({ cuenta, fecha: fechaAjuste, tipo: 'NO_INFORMADO', ticker, cantidad: diff, precio: enFoto?.precio, monto: 0, moneda: pos?.moneda ?? moneda,
@@ -271,19 +330,36 @@ export function construirLibro(resultados: ResultadoCartola[], hoy = new Date().
             sinteticos.push({ cuenta, fecha: fechaAjuste, tipo: 'SALDO_INICIAL', monto: diff, moneda, archivo: doc.archivo, implicito: true,
               detalle: `Caja que ya había antes del ${fechaCorta(doc.desde ?? foto.fecha)}` });
           } else {
+            const mes = nombreMes(foto.fecha.slice(0, 7));
             const txt = motivo === 'resumen'
-              ? `${cuenta} ${nombreMes(foto.fecha.slice(0, 7))}: la cartola es un resumen de 1 página sin detalle de movimientos, y la caja ${diff > 0 ? 'subió' : 'bajó'} ${formatoMonto(Math.abs(diff), moneda)} sin explicación (probablemente dividendos y comisiones). Descarga la cartola completa de ese mes.`
+              ? `${cuenta} ${mes}: el broker solo entrega un resumen de 1 página, sin el detalle de movimientos. La caja ${diff > 0 ? 'subió' : 'bajó'} ${formatoMonto(Math.abs(diff), moneda)} en el mes (dividendos menos comisiones, normalmente): quedó registrado como "sin detalle".`
               : motivo === 'hueco'
                 ? `${cuenta}: entre ${fechaCorta(anterior!.foto.fecha)} y ${fechaCorta(foto.fecha)} la caja cambió ${formatoMonto(diff, moneda)} sin movimientos que lo expliquen (falta una cartola).`
-                : `${cuenta} ${nombreMes(foto.fecha.slice(0, 7))}: la caja no cuadra por ${formatoMonto(diff, moneda)}.`;
+                : motivo === 'entrada'
+                  ? `${cuenta} ${mes}: la caja cambió ${formatoMonto(diff, moneda)} sin movimientos que lo expliquen.`
+                  : '';
             diferencias.push(`Caja: la cartola informa ${formatoMonto(foto.caja, moneda)} pero los movimientos llevan a ${formatoMonto(antes + flujo, moneda)}.`);
-            alertas.push({ nivel: motivo === 'error' ? 'error' : 'faltante', cuenta, texto: txt });
-            sinteticos.push({ cuenta, fecha: fechaAjuste, tipo: 'NO_INFORMADO', monto: diff, moneda, archivo: doc.archivo, implicito: true,
-              detalle: motivo === 'resumen' ? `Movimientos de caja de ${nombreMes(foto.fecha.slice(0, 7))} no detallados (cartola resumida)` : 'Diferencia de caja sin movimiento que la explique' });
+            const estimacion = motivo === 'resumen' && anterior
+              ? estimarMesSinDetalle(cuenta, anterior.foto, foto, diff, movsCuenta, pagosPorAccion, dividendosExternos, doc.archivo)
+              : undefined;
+            if (motivo === 'resumen' && anterior) {
+              sinDetalle.push({ cuenta, desde: anterior.foto.fecha, hasta: foto.fecha, explicado: !!estimacion,
+                tickers: anterior.foto.posiciones.map(p => tickerYahoo(p.ticker, p.moneda)) });
+            }
+            if (estimacion) {
+              diferencias.pop(); // la diferencia de caja quedó explicada
+              cajaEstimada = true;
+              sinteticos.push(...estimacion.movimientos);
+              alertas.push({ nivel: 'info', cuenta, texto: `${cuenta} ${nombreMes(foto.fecha.slice(0, 7))}: el broker solo entrega un resumen de 1 página. La caja ${diff > 0 ? 'subió' : 'bajó'} ${formatoMonto(Math.abs(diff), moneda)} y se explica con ${estimacion.resumen}. Quedaron como movimientos estimados.` });
+            } else {
+              if (txt) alertas.push({ nivel: motivo === 'hueco' ? 'faltante' : 'aviso', cuenta, texto: txt });
+              sinteticos.push({ cuenta, fecha: fechaAjuste, tipo: 'NO_INFORMADO', monto: diff, moneda, archivo: doc.archivo, implicito: true,
+                detalle: motivo === 'resumen' ? `Movimientos de caja de ${nombreMes(foto.fecha.slice(0, 7))} no detallados (cartola resumida)` : 'Diferencia de caja sin movimiento que la explique' });
+            }
           }
         }
       }
-      if (motivo !== 'inicial') conciliaciones.push({ cuenta, fecha: foto.fecha, archivo: doc.archivo, ok: diferencias.length === 0, diferencias });
+      if (motivo !== 'inicial' && motivo !== 'entrada') conciliaciones.push({ cuenta, fecha: foto.fecha, archivo: doc.archivo, ok: diferencias.length === 0, diferencias, estimado: cajaEstimada });
       if (diferencias.length > 0 && motivo === 'error') {
         alertas.push({ nivel: 'error', cuenta, texto: `${cuenta} al ${fechaCorta(foto.fecha)} no cuadra: ${diferencias.join(' ')}` });
       }
@@ -337,7 +413,7 @@ export function construirLibro(resultados: ResultadoCartola[], hoy = new Date().
     const k = `${m.cuenta}|${m.ticker}`;
     let e = estados.get(k);
     if (!e) {
-      e = { cuenta: m.cuenta, ticker: m.ticker!, moneda: m.moneda, cantidad: 0, costo: 0, costoConocido: true, fechaCompra: m.fecha, fechaCompraAproximada: false, compras: [], dividendos: 0, monedaDividendos: m.moneda };
+      e = { cuenta: m.cuenta, ticker: m.ticker!, moneda: m.monedaActivo ?? m.moneda, cantidad: 0, costo: 0, costoConocido: true, fechaCompra: m.fecha, fechaCompraAproximada: false, compras: [], dividendos: 0, monedaDividendos: m.moneda };
       estados.set(k, e);
     }
     return e;
@@ -349,7 +425,8 @@ export function construirLibro(resultados: ResultadoCartola[], hoy = new Date().
     switch (m.tipo) {
       case 'COMPRA': {
         abrir(m.fecha, false);
-        const costo = m.monto !== 0 ? -m.monto : (m.cantidad ?? 0) * (m.precio ?? 0);
+        const otraMoneda = !!m.monedaActivo && m.monedaActivo !== m.moneda;
+        const costo = m.monto !== 0 && !otraMoneda ? -m.monto : (m.cantidad ?? 0) * (m.precio ?? 0);
         e.cantidad += m.cantidad ?? 0;
         e.costo += costo;
         e.compras.push({ fecha: m.fecha, cantidad: m.cantidad ?? 0, precio: costo / (m.cantidad || 1) });
@@ -365,7 +442,8 @@ export function construirLibro(resultados: ResultadoCartola[], hoy = new Date().
       case 'VENTA': {
         const cantidad = Math.min(m.cantidad ?? 0, e.cantidad);
         const promedio = e.cantidad > 0 ? e.costo / e.cantidad : 0;
-        const recibido = m.monto !== 0 ? m.monto : (m.cantidad ?? 0) * (m.precio ?? 0);
+        const otraMoneda = !!m.monedaActivo && m.monedaActivo !== m.moneda;
+        const recibido = m.monto !== 0 && !otraMoneda ? m.monto : (m.cantidad ?? 0) * (m.precio ?? 0);
         if (e.costoConocido) realizada.set(m.cuenta, (realizada.get(m.cuenta) ?? 0) + recibido - promedio * cantidad);
         e.cantidad -= cantidad;
         e.costo -= promedio * cantidad;
@@ -397,6 +475,7 @@ export function construirLibro(resultados: ResultadoCartola[], hoy = new Date().
         break;
       }
       case 'NO_INFORMADO':
+        if (m.cantidad && m.cantidad > 0) abrir(m.fecha, true);
         if (m.cantidad) {
           const promedio = e.cantidad > 0 ? e.costo / e.cantidad : m.precio ?? 0;
           e.cantidad += m.cantidad;
@@ -470,11 +549,49 @@ export function construirLibro(resultados: ResultadoCartola[], hoy = new Date().
 
   const conDolar = docs.filter(d => d.dolar && d.hasta).sort((a, b) => b.hasta!.localeCompare(a.hasta!))[0];
   return {
-    movimientos: libroMovs, cuentas: resumenes, posiciones, duplicados, conciliaciones,
+    movimientos: libroMovs, cuentas: resumenes, posiciones, duplicados, conciliaciones, sinDetalle, cobertura,
     alertas: alertas.sort((a, b) => ['error', 'faltante', 'aviso', 'info'].indexOf(a.nivel) - ['error', 'faltante', 'aviso', 'info'].indexOf(b.nivel)),
     dolar: conDolar ? { valor: conDolar.dolar!, fecha: conDolar.hasta! } : undefined,
     generado: hoy,
   };
+}
+
+// Desglosa el cambio de caja de un mes con cartola resumida: dividendos de lo que había en la cuenta (por
+// acción, según otra cartola del mismo instrumento o según Yahoo) y, lo que sobra, la comisión del mes.
+// Solo se acepta si lo que sobra se parece a una comisión normal de la cuenta; si no, no se estima nada.
+function estimarMesSinDetalle(
+  cuenta: string, inicio: FotoCartera, fin: FotoCartera, diferencia: number, movsCuenta: Movimiento[],
+  pagosPorAccion: Map<string, { fecha: string; porAccion: number; cuenta: string }[]>, externos: DividendosExternos, archivo: string,
+): { movimientos: Movimiento[]; resumen: string } | undefined {
+  const moneda = movsCuenta[0]?.moneda ?? 'CLP';
+  const dividendos: Movimiento[] = [];
+  for (const p of inicio.posiciones) {
+    // Pagos vistos en otra cartola (exactos) o, si no hay, eventos de Yahoo (fecha ex-dividendo)
+    const propios = (pagosPorAccion.get(p.ticker) ?? []).filter(x => x.cuenta !== cuenta && x.fecha > inicio.fecha && x.fecha <= fin.fecha);
+    const yahoo = (externos[tickerYahoo(p.ticker, p.moneda)] ?? [])
+      .filter(x => x.fecha > diaAnterior(diaAnterior(inicio.fecha)) && x.fecha <= diaAnterior(diaAnterior(fin.fecha)))
+      .map(x => ({ fecha: x.fecha, porAccion: x.monto, cuenta: 'Yahoo Finance' }));
+    for (const pago of propios.length > 0 ? propios : yahoo) {
+      const monto = Math.round(p.cantidad * pago.porAccion);
+      if (monto <= 0) continue;
+      dividendos.push({ cuenta, fecha: pago.fecha, tipo: 'DIVIDENDO', ticker: p.ticker, precio: pago.porAccion, monto, moneda, archivo, implicito: true, estimado: true,
+        detalle: `Estimado: ${fmtCant(p.cantidad)} × ${pago.porAccion.toLocaleString('es-CL', { maximumFractionDigits: 6 })} por acción (${pago.cuenta === 'Yahoo Finance' ? 'dividendo informado por Yahoo Finance' : `mismo pago en tu cuenta ${pago.cuenta}`}); la cartola resumida no lo detalla` });
+    }
+  }
+  const comision = diferencia - dividendos.reduce((s, d) => s + d.monto, 0);
+  const cobros = movsCuenta.filter(m => m.tipo === 'COMISION' && m.monto < 0 && /MENSUAL/i.test(m.detalle)).map(m => -m.monto);
+  const tipica = cobros.length > 0 ? cobros.reduce((s, c) => s + c, 0) / cobros.length : undefined;
+  if (comision > tolCaja(moneda) || (tipica !== undefined ? -comision > 2.5 * tipica : true)) return undefined;
+  const movimientos = [...dividendos];
+  if (-comision > tolCaja(moneda)) {
+    movimientos.push({ cuenta, fecha: fin.fecha, tipo: 'COMISION', monto: Math.round(comision), moneda, archivo, implicito: true, estimado: true,
+      detalle: `Estimado: comisión del mes (lo que queda de la diferencia de caja después de los dividendos)${tipica ? `; la comisión mensual promedio de la cuenta es ${formatoMonto(tipica, moneda)}` : ''}` });
+  }
+  const porTicker = new Map<string, number>();
+  for (const d of dividendos) porTicker.set(d.ticker!, (porTicker.get(d.ticker!) ?? 0) + d.monto);
+  const partes = [...porTicker].map(([t, m]) => `dividendos de ${t} (${formatoMonto(m, moneda)})`);
+  if (-comision > tolCaja(moneda)) partes.push(`${partes.length ? 'menos ' : ''}la comisión del mes (${formatoMonto(-comision, moneda)})`);
+  return { movimientos, resumen: partes.join(', ').replace(/, (menos [^,]+)$/, ' $1') };
 }
 
 // --- Para el portafolio de la app (precios de Yahoo) ------------------------------------------------

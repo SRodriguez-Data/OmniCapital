@@ -4,7 +4,7 @@ import { usePortfolio, type PortfolioItem } from '../context/PortfolioContext';
 import { parsePdfToCartola, type Moneda, type ResultadoCartola, type TipoMovimiento } from '@/lib/CartolaParser';
 import {
   construirLibro, formatoMonto, posicionesParaPortafolio, tickerYahoo, valorizarHoy,
-  type LibroInversiones, type ValorHoy,
+  type DividendosExternos, type EstadoMes, type LibroInversiones, type ValorHoy,
 } from '@/lib/LibroInversiones';
 import { supabase } from '@/lib/supabase';
 
@@ -19,7 +19,7 @@ const leerLibroGuardado = (): LibroInversiones | null => {
     const raw = typeof window !== 'undefined' ? localStorage.getItem(CLAVE_LIBRO) : null;
     const libro = raw ? (JSON.parse(raw) as LibroInversiones) : null;
     // Un libro guardado por una versión anterior de la página se descarta
-    return libro && Array.isArray(libro.cuentas) && Array.isArray(libro.movimientos) && Array.isArray(libro.conciliaciones) ? libro : null;
+    return libro && [libro.cuentas, libro.movimientos, libro.conciliaciones, libro.cobertura].every(Array.isArray) ? libro : null;
   } catch {
     return null;
   }
@@ -38,12 +38,22 @@ const NOMBRE_TIPO: Record<TipoMovimiento, string> = {
   SALDO_INICIAL: 'Saldo previo', NO_INFORMADO: 'Sin detalle',
 };
 
+const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+const ESTADO_MES: Record<EstadoMes, { clase: string; texto: string }> = {
+  completa: { clase: 'bg-emerald-500/80 text-white', texto: 'cartola completa' },
+  certificado: { clase: 'bg-emerald-500/80 text-white', texto: 'incluido en el certificado' },
+  resumen: { clase: 'bg-sky-500/70 text-white', texto: 'solo resumen de 1 página (movimientos estimados)' },
+  parcial: { clase: 'bg-amber-400/80 text-zinc-900', texto: 'cartola parcial (hasta una fecha del mes)' },
+  falta: { clase: 'bg-red-500/80 text-white', texto: 'falta la cartola' },
+};
+
 const tarjeta = 'bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl p-6 shadow-sm dark:shadow-none transition-colors duration-300';
 const th = 'px-3 py-2 uppercase tracking-wider';
 const td = 'px-3 py-2';
 
 export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTabProps) {
   const [files, setFiles] = useState<File[]>([]);
+  const [clave, setClave] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [libro, setLibro] = useState<LibroInversiones | null>(leerLibroGuardado);
   const [hoy, setHoy] = useState<{ valores: ValorHoy[]; dolar?: number } | null>(null);
@@ -92,8 +102,17 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
     try {
       // PROCESAR 100% EN EL NAVEGADOR: los PDFs nunca salen de tu computador
       const parsed: ResultadoCartola[] = [];
-      for (const file of files) parsed.push(await parsePdfToCartola(file));
-      const nuevo = construirLibro(parsed, hoyISO());
+      for (const file of files) parsed.push(await parsePdfToCartola(file, clave));
+      let nuevo = construirLibro(parsed, hoyISO());
+      // Meses con cartola resumida: con los dividendos por acción de Yahoo se estima qué pasó con la caja
+      if (nuevo.sinDetalle.length > 0) {
+        const simbolos = [...new Set(nuevo.sinDetalle.flatMap(p => p.tickers))];
+        const desde = new Date(Date.parse(nuevo.sinDetalle.map(p => p.desde).sort()[0]) - 10 * 86400000).toISOString().slice(0, 10);
+        try {
+          const res = await fetch(`/api/dividends/events?symbols=${encodeURIComponent(simbolos.join(','))}&desde=${desde}`);
+          if (res.ok) nuevo = construirLibro(parsed, hoyISO(), (await res.json()) as DividendosExternos);
+        } catch { /* sin conexión: los meses resumidos quedan como "sin detalle" */ }
+      }
       if (nuevo.movimientos.length === 0 && nuevo.posiciones.length === 0) {
         throw new Error('No se encontraron movimientos ni posiciones en las cartolas subidas.');
       }
@@ -224,6 +243,19 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
             SELECCIONAR ARCHIVOS
           </button>
         </div>
+        <div className="mt-4 flex flex-col md:flex-row md:items-center gap-2 text-xs font-mono">
+          <input
+            type="password"
+            value={clave}
+            onChange={e => setClave(e.target.value)}
+            autoComplete="off"
+            placeholder="Clave de los PDF protegidos (opcional)"
+            className="md:w-72 bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-[#27272a] rounded px-3 py-2 text-zinc-700 dark:text-[#e4e4e7]"
+          />
+          <span className="text-zinc-500 dark:text-[#a1a1aa]">
+            BTG y XTB envían las cartolas con clave: escríbela aquí y no necesitas desbloquearlas en otra página. Se usa solo en tu navegador y no se guarda.
+          </span>
+        </div>
 
         {files.length > 0 && (
           <div className="mt-6">
@@ -349,6 +381,28 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
           {/* ALERTAS */}
           <div className={tarjeta}>
             <h3 className="text-lg font-bold text-zinc-900 dark:text-[#e4e4e7] mb-4 font-sans">Revisión de las cartolas</h3>
+            {libro.cobertura.length > 0 && (
+              <div className="mb-5 overflow-x-auto">
+                <table className="text-[10px] font-mono border-separate border-spacing-0.5">
+                  <tbody>
+                    {libro.cobertura.map(c => (
+                      <tr key={c.cuenta}>
+                        <td className="pr-2 whitespace-nowrap text-zinc-600 dark:text-[#a1a1aa]">{c.cuenta}</td>
+                        {c.meses.map((m, i) => (
+                          <td key={m.mes} title={`${c.cuenta} ${MESES_CORTOS[Number(m.mes.slice(5, 7)) - 1]} ${m.mes.slice(0, 4)}: ${ESTADO_MES[m.estado].texto}${m.archivo ? `\n${m.archivo}` : ''}`}
+                            className={`w-9 h-6 text-center rounded ${ESTADO_MES[m.estado].clase}`}>
+                            {MESES_CORTOS[Number(m.mes.slice(5, 7)) - 1]}{(i === 0 || m.mes.slice(5, 7) === '01') && <span className="block text-[8px] leading-none">{m.mes.slice(2, 4)}</span>}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="mt-1 text-[10px] font-mono text-zinc-500 dark:text-[#a1a1aa]">
+                  Verde: cartola completa · Celeste: solo resumen (movimientos estimados) · Amarillo: parcial · Rojo: falta. Pasa el mouse por un mes para ver el archivo.
+                </p>
+              </div>
+            )}
             <div className="space-y-3 text-xs font-mono">
               {alertasPorNivel('error').map((a, i) => (
                 <p key={`e${i}`} className="flex gap-2 text-red-700 dark:text-red-400"><AlertCircle className="w-4 h-4 flex-shrink-0" />{a.texto}</p>
@@ -376,7 +430,7 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
                 </summary>
                 <ul className="mt-2 space-y-1 text-[11px] font-mono text-zinc-600 dark:text-[#a1a1aa]">
                   {libro.conciliaciones.map((c, i) => (
-                    <li key={i}>{c.ok ? '✅' : '❌'} {c.cuenta} al {fecha(c.fecha)}{c.ok ? '' : `: ${c.diferencias.join(' ')}`}</li>
+                    <li key={i}>{c.ok ? '✅' : '❌'} {c.cuenta} al {fecha(c.fecha)}{c.estimado ? ' (caja cuadrada con dividendos y comisión estimados: cartola resumida)' : ''}{c.ok ? '' : `: ${c.diferencias.join(' ')}`}</li>
                   ))}
                 </ul>
               </details>
@@ -457,7 +511,7 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
           <div className={tarjeta}>
             <h3 className="text-lg font-bold text-zinc-900 dark:text-[#e4e4e7] mb-2 font-sans">Libro de movimientos ({libro.movimientos.length})</h3>
             <p className="text-xs font-mono text-zinc-500 dark:text-[#a1a1aa] mb-4">
-              Todo lo que dicen las cartolas, con fecha: compras, ventas, dividendos, impuestos retenidos, comisiones, aportes y retiros. Lo marcado como &quot;deducido&quot; no viene como línea propia en la cartola.
+              Todo lo que dicen las cartolas, con fecha: compras, ventas, dividendos, impuestos retenidos, comisiones, aportes y retiros. &quot;Deducido&quot;: no viene como línea propia en la cartola pero se desprende de ella. &quot;Estimado&quot;: calculado para un mes en que el broker solo entrega un resumen.
             </p>
             <div className="flex flex-wrap gap-2 mb-4 text-xs font-mono">
               <select value={filtroCuenta} onChange={e => { setFiltroCuenta(e.target.value); setLimite(100); }} className="bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-[#27272a] rounded px-2 py-1.5 text-zinc-700 dark:text-[#e4e4e7]">
@@ -491,7 +545,9 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
                       <tr key={m.id} className="hover:bg-zinc-50 dark:hover:bg-[#09090b]">
                         <td className={td}>{fecha(m.fecha)}{m.fechaLiquidacion && m.fechaLiquidacion !== m.fecha && <span className="block text-[10px] text-zinc-400">liq. {fecha(m.fechaLiquidacion)}</span>}</td>
                         <td className={td}>{m.cuenta}</td>
-                        <td className={td}>{NOMBRE_TIPO[m.tipo]}{m.implicito && <span className="ml-1 text-[10px] text-amber-600 dark:text-amber-400">deducido</span>}</td>
+                        <td className={td}>{NOMBRE_TIPO[m.tipo]}{m.estimado
+                          ? <span className="ml-1 text-[10px] text-sky-600 dark:text-sky-400">estimado</span>
+                          : m.implicito && <span className="ml-1 text-[10px] text-amber-600 dark:text-amber-400">deducido</span>}</td>
                         <td className={`${td} font-bold`}>{m.ticker ?? ''}</td>
                         <td className={`${td} text-right`}>{m.cantidad !== undefined ? fmtCantidad(m.cantidad) : ''}</td>
                         <td className={`${td} text-right`}>{m.precio !== undefined && m.tipo !== 'SPLIT' ? fmt(m.precio, m.moneda) : ''}</td>

@@ -38,7 +38,9 @@ export interface Movimiento {
   detalle: string;            // glosa original de la cartola
   archivo: string;
   implicito?: boolean;        // deducido (no viene como línea propia en la cartola)
+  estimado?: boolean;         // calculado con datos externos (ej. dividendo por acción de Yahoo): no es cifra del broker
   montoIncluido?: number;     // gasto ya descontado en otra línea (ej. comisión dentro del monto de una venta)
+  monedaActivo?: Moneda;      // moneda del precio cuando el activo cotiza en otra moneda que la caja (XTB: acciones en USD, caja en CLP)
 }
 
 export interface PosicionFoto {
@@ -78,6 +80,7 @@ export interface ResultadoCartola {
   dolar?: number;          // dólar observado que informa la cartola a la fecha de corte
   avisos: string[];
   sinTexto?: boolean;      // PDF escaneado: no se puede leer sin OCR
+  conClave?: boolean;      // PDF protegido y sin la clave correcta
   desconocido?: boolean;   // formato no soportado
 }
 
@@ -131,13 +134,21 @@ export async function textoDePdf(doc: PdfDocumento): Promise<string> {
   return paginas.join('\n\n');
 }
 
-export async function parsePdfToCartola(file: File): Promise<ResultadoCartola> {
+// Cartola de un PDF que no se pudo abrir por tener clave
+export const cartolaConClave = (archivo: string, conClaveDada: boolean): ResultadoCartola => ({
+  archivo, broker: 'Desconocido', cuenta: 'Desconocido', moneda: 'CLP', tipoDoc: 'MENSUAL', movimientos: [], conClave: true,
+  avisos: [conClaveDada ? 'la clave ingresada no abre este PDF.' : 'el PDF tiene clave: ingrésala para poder leerlo.'],
+});
+
+// `clave`: la de los PDF protegidos (BTG y XTB suelen venir con clave). No sale del navegador.
+export async function parsePdfToCartola(file: File, clave?: string): Promise<ResultadoCartola> {
   try {
     const pdfjsLib = await import('pdfjs-dist');
     pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
-    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer(), password: clave || undefined }).promise;
     return parseCartolaText(await textoDePdf(pdf), file.name);
   } catch (err) {
+    if ((err as { name?: string })?.name === 'PasswordException') return cartolaConClave(file.name, !!clave);
     console.error('PDF parse error:', err);
     throw new Error(`Error procesando ${file.name} en el navegador.`);
   }
@@ -155,6 +166,8 @@ const numUS = (s: string) => {
   return neg ? -v : v;
 };
 const redondear = (n: number, d = 2) => Math.round(n * 10 ** d) / 10 ** d;
+// XTB escribe las cantidades a veces con coma ("1,00000") y a veces con punto ("1.00000")
+const numXTB = (s: string) => (s.includes(',') ? numCL(s) : parseFloat(s));
 
 const MESES: Record<string, string> = {
   ENERO: '01', FEBRERO: '02', MARZO: '03', ABRIL: '04', MAYO: '05', JUNIO: '06', JULIO: '07',
@@ -245,7 +258,8 @@ function parseDriveWealth(lineas: string[], archivo: string): ResultadoCartola {
       const precio = numeros[numeros.length - 2];
       r.movimientos.push(mov({ tipo: tipo === 'BUY' ? 'COMPRA' : 'VENTA', ticker, cantidad, precio }));
     } else if (tipo === 'DIV' || tipo === 'DIVM') {
-      r.movimientos.push(mov({ tipo: 'DIVIDENDO', ticker }));
+      const porAccion = resto.match(/DIV:[A-Z.]+\(([\d.]+)\/sh\)/)?.[1];
+      r.movimientos.push(mov({ tipo: 'DIVIDENDO', ticker, precio: porAccion ? parseFloat(porAccion) : undefined }));
     } else if (tipo === 'DIVNRA' || tipo === 'INTNRA') {
       if (monto !== 0) r.movimientos.push(mov({ tipo: 'IMPUESTO', ticker: tipo === 'DIVNRA' ? ticker : undefined }));
     } else if (tipo === 'SLIP' || tipo === 'INT') {
@@ -380,8 +394,8 @@ function parseVector(texto: string, lineas: string[], archivo: string): Resultad
     const mov: Movimiento = { cuenta: r.cuenta, fecha: fechaDMY(fMov), fechaLiquidacion: fechaDMY(fLiq), tipo: 'APORTE', monto, moneda: 'CLP', detalle, archivo };
 
     if (/^(COMPRA|VENTA) (ACCIONES|FONDOS)/.test(glosa)) continue; // la operación viene en Detalle de Transacciones
-    const div = glosa.match(/^DIV;(\d{2}-\d{2}-\d{4});([A-Z][A-Z0-9-]*)/);
-    if (div) r.movimientos.push({ ...mov, tipo: 'DIVIDENDO', ticker: div[2] });
+    const div = glosa.match(/^DIV;(\d{2}-\d{2}-\d{4});([A-Z][A-Z0-9-]*)(?:;(\d+(?:,\d+)?))?/);
+    if (div) r.movimientos.push({ ...mov, tipo: 'DIVIDENDO', ticker: div[2], precio: div[3] ? numCL(div[3]) : undefined });
     else if (/COMISI[OÓ]N/i.test(glosa)) r.movimientos.push({ ...mov, tipo: 'COMISION' });
     else if (/Anulaci[oó]n de Factura/i.test(glosa)) r.movimientos.push({ ...mov, tipo: 'COMISION', detalle: `${detalle} (reverso de un cobro)` });
     else if (/ajuste decimales/i.test(glosa)) r.movimientos.push({ ...mov, tipo: 'COMISION', detalle: `${detalle} (redondeo de la comisión)` });
@@ -469,7 +483,7 @@ function parseBTG(texto: string, lineas: string[], archivo: string): ResultadoCa
     if (/^Dividendo$/i.test(tipo)) {
       const ticker = nemo(instrumento);
       if (!ticker) r.avisos.push(`Dividendo del ${fMov} de "${instrumento}" sin nemotécnico conocido.`);
-      r.movimientos.push({ ...base, tipo: 'DIVIDENDO', ticker });
+      r.movimientos.push({ ...base, tipo: 'DIVIDENDO', ticker, precio: unidades ? numCL(unidades[2]) : undefined });
     } else if (/^(Compra|Venta)$/i.test(tipo)) {
       const ticker = nemo(instrumento);
       const op = operaciones.find(o => o.ticker === ticker && o.fecha === base.fecha && (!unidades || Math.abs((o.cantidad ?? 0) - numCL(unidades[1])) < 1e-6));
@@ -526,18 +540,37 @@ function parseXTB(texto: string, lineas: string[], archivo: string): ResultadoCa
   if (cuenta) { r.numeroCuenta = cuenta[1]; r.moneda = cuenta[2] as Moneda; }
   const efectivo = texto.match(/Balance de efectivo al final del periodo\s*\n\s*(-?[\d.]+,\d{2})\s+(-?[\d.]+,\d{2})/);
 
+  // Órdenes ejecutadas (compras y ventas, enteras o fraccionarias): de aquí sale el ticker de cada operación,
+  // porque la línea de caja solo dice "OPEN BUY 0.0386 @ 279.17"
+  const ordenes: { ticker: string; moneda: Moneda; volumen: number; fecha: string; precio: number }[] = [];
+  for (const m of texto.matchAll(/^\d+\s+\d{6,}\s+([A-Z0-9]+)\.[A-Z]{2}\s+.+?\s+(USD|CLP)\s+\S+\s+(\d+(?:[.,]\d+)?)\s+\w+\s+(\d{2}-\d{2}-\d{4})\s+(\d+(?:[.,]\d+)?)/gm)) {
+    ordenes.push({ ticker: m[1], moneda: m[2] as Moneda, volumen: numXTB(m[3]), fecha: fechaDMY(m[4]), precio: numXTB(m[5]) });
+  }
+
   let suma = 0;
-  let dividendos = 0;
+  const dividendos: Movimiento[] = [];
   for (const l of lineas) {
     const m = l.match(/^\d+\s+(\d{2}\.\d{2}\.\d{4})\s+([A-Za-z][A-Za-z ]*?)\s+(-?[\d.]*\d,\d{2})\s+(CLP|USD)\s*(.*)$/);
     if (!m) continue;
     const [, f, tipoTxt, montoTxt, moneda, comentario] = m;
-    const monto = numCL(montoTxt);
+    const t = tipoTxt.toLowerCase();
+    // Las compras vienen con monto positivo aunque sacan plata de la caja
+    const monto = t.includes('purchase') ? -Math.abs(numCL(montoTxt)) : t.includes('sale') ? Math.abs(numCL(montoTxt)) : numCL(montoTxt);
     suma += monto;
     const ticker = comentario.match(/^([A-Z0-9]+)\.[A-Z]{2}\b/)?.[1];
     const base: Movimiento = { cuenta: r.cuenta, fecha: fechaDMY(f), tipo: 'APORTE', monto, moneda: moneda as Moneda, detalle: `${tipoTxt} ${comentario}`.trim(), archivo, ticker };
-    const t = tipoTxt.toLowerCase();
-    if (t.includes('dividend')) { dividendos += monto; r.movimientos.push({ ...base, tipo: 'DIVIDENDO' }); }
+    const orden = comentario.match(/(?:OPEN|CLOSE)\s+(BUY|SELL)\s+([\d.]+)\s+@\s+([\d.]+)/);
+    if (orden && (t.includes('purchase') || t.includes('sale'))) {
+      const cantidad = parseFloat(orden[2]);
+      const precio = parseFloat(orden[3]);
+      const o = ordenes.find(x => x.fecha === base.fecha && Math.abs(x.volumen - cantidad) < 1e-6) ?? ordenes.find(x => Math.abs(x.volumen - cantidad) < 1e-6);
+      if (!o) { r.avisos.push(`Operación del ${f} (${comentario}) sin instrumento identificable: revisar a mano.`); continue; }
+      r.movimientos.push({ ...base, tipo: orden[1] === 'BUY' ? 'COMPRA' : 'VENTA', ticker: o.ticker, cantidad, precio, monedaActivo: o.moneda });
+    } else if (t.includes('dividend')) {
+      const d: Movimiento = { ...base, tipo: 'DIVIDENDO' };
+      dividendos.push(d);
+      r.movimientos.push(d);
+    }
     else if (t.includes('tax') || t.includes('withholding')) r.movimientos.push({ ...base, tipo: 'IMPUESTO' });
     else if (t.includes('commission') || t.includes('fee')) r.movimientos.push({ ...base, tipo: 'COMISION' });
     else if (t.includes('deposit')) r.movimientos.push({ ...base, ticker: undefined });
@@ -545,16 +578,22 @@ function parseXTB(texto: string, lineas: string[], archivo: string): ResultadoCa
     else r.avisos.push(`Operación XTB "${tipoTxt}" del ${f} (${comentario}) no soportada todavía: revisar a mano.`);
   }
 
+  // XTB descuenta la retención de impuestos de los dividendos sin listarla: se deduce del saldo de caja
   if (efectivo && r.hasta) {
     const inicio = numCL(efectivo[1]);
     const fin = numCL(efectivo[2]);
     const diferencia = redondear(fin - inicio - suma);
     if (Math.abs(diferencia) >= 0.01) {
-      const tasa = dividendos > 0 ? -diferencia / dividendos : 0;
-      if (diferencia < 0 && dividendos > 0 && (Math.abs(tasa - 0.3) < 0.005 || Math.abs(tasa - 0.15) < 0.005)) {
-        r.movimientos.push({ cuenta: r.cuenta, fecha: r.movimientos.find(x => x.tipo === 'DIVIDENDO')!.fecha, tipo: 'IMPUESTO', monto: diferencia, moneda: r.moneda, archivo, implicito: true,
-          ticker: r.movimientos.find(x => x.tipo === 'DIVIDENDO')?.ticker,
-          detalle: `Retención del ${Math.round(tasa * 100)}% sobre el dividendo: la cartola no la detalla, se deduce del saldo de caja` });
+      const bruto = dividendos.reduce((s, d) => s + d.monto, 0);
+      const tasa = bruto > 0 ? -diferencia / bruto : 0;
+      if (diferencia < 0 && bruto > 0 && (Math.abs(tasa - 0.3) < 0.005 || Math.abs(tasa - 0.15) < 0.005)) {
+        let resto = diferencia;
+        dividendos.forEach((d, i) => {
+          const monto = i === dividendos.length - 1 ? redondear(resto) : redondear(-d.monto * tasa);
+          resto -= monto;
+          r.movimientos.push({ cuenta: r.cuenta, fecha: d.fecha, tipo: 'IMPUESTO', monto, moneda: r.moneda, archivo, implicito: true, ticker: d.ticker,
+            detalle: `Retención del ${Math.round(tasa * 100)}% sobre el dividendo de ${d.ticker}: la cartola no la detalla, se deduce del saldo de caja` });
+        });
       } else {
         r.avisos.push(`La caja cambió ${diferencia} ${r.moneda} más de lo que explican los movimientos listados.`);
       }
@@ -563,8 +602,8 @@ function parseXTB(texto: string, lineas: string[], archivo: string): ResultadoCa
 
   // Custodia (acciones completas y derechos fraccionados)
   const posiciones: PosicionFoto[] = [];
-  for (const m of texto.matchAll(/^\d+\s+([A-Z0-9]+)\.[A-Z]{2}\s+.+?\s+[A-Z]{2}[A-Z0-9]{9}\d\s+.+?\s+([\d.]*\d,\d+)\s+([\d.]+)\s+(USD|CLP)$/gm)) {
-    const cantidad = numCL(m[2]);
+  for (const m of texto.matchAll(/^\d+\s+([A-Z0-9]+)\.[A-Z]{2}\s+.+?\s+[A-Z]{2}[A-Z0-9]{9}\d\s+.+?\s+(\d+(?:[.,]\d+)?)\s+([\d.]+)\s+(USD|CLP)$/gm)) {
+    const cantidad = numXTB(m[2]);
     const valor = parseFloat(m[3]);
     const previa = posiciones.find(p => p.ticker === m[1]);
     if (previa) { previa.cantidad += cantidad; previa.valor = (previa.valor ?? 0) + valor; }
@@ -577,7 +616,6 @@ function parseXTB(texto: string, lineas: string[], archivo: string): ResultadoCa
       caja: efectivo ? numCL(efectivo[2]) : undefined, cajaInicial: efectivo ? numCL(efectivo[1]) : undefined,
       valorTotal: valores?.final, valorInicial: valores?.inicial,
     };
-    if (posiciones.length > 0) r.avisos.push('La cartola de XTB no informa el precio de compra de las posiciones.');
   }
   return r;
 }
