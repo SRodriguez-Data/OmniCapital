@@ -4,12 +4,16 @@ import numpy as np
 import time
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import urllib.request 
 import requests
 from io import StringIO
 from dotenv import load_dotenv
 from supabase import create_client, Client
+try:
+    from yfinance.data import YfData  # sesión de yfinance (cookie y crumb de Yahoo) para pedir quoteSummary
+except ImportError:
+    YfData = None
 
 load_dotenv()
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -21,10 +25,13 @@ else:
     supabase = None
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+# Sin el detalle de cada consulta HTTP: los registros de GitHub Actions quedan más legibles
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-def obtener_universo_masivo() -> list[str]:
-    """Extrae S&P 500, Nasdaq 100 y activos personalizados."""
+def obtener_universo_masivo() -> tuple[list[str], list[str]]:
+    """Extrae S&P 500, Nasdaq 100, activos personalizados y los de los portafolios de la web.
+    Devuelve (universo completo, activos que además necesitan fundamentales guardados)."""
     logging.info("🌐 Recopilando universo de activos globales...")
     tickers_finales = []
     
@@ -69,16 +76,35 @@ def obtener_universo_masivo() -> list[str]:
         "BBVA", "ING", "ASML", "CRH", "FLUT", "RELX", "HEINY", "RACE",
         "MELI", "PBR", "VALE", "NU", "ITUB", "AMX", "BBD", "BSBR", "FMX", "BAK", 
         "VOO", "SCHD", "HDV", "QQQ", "VT", "EEM", "VEA", "VUG", "VTV", "VNQ", "IYR", "FTEC",
-        # Series de referencia para la web (no son acciones): dólar en pesos e índices de comparación
-        "CLP=X", "^GSPC", "^SP500TR"
+        "ACWI",
+        # Series de referencia para la web (no son acciones): dólar en pesos, índices de comparación y el
+        # contexto de mercado del asesor (volatilidad, tasa a 10 años y cobre)
+        "CLP=X", "^GSPC", "^SP500TR", "^VIX", "^TNX", "HG=F"
     ]
     tickers_finales.extend(activos_fijos)
     logging.info(f"✅ Activos fijos cargados ({len(activos_fijos)} activos).")
     
+    # Lo que tienen los usuarios en la web, para que el asesor lea todo desde la base. Solo se registra
+    # cuántos son: los registros de GitHub Actions de un repositorio público los puede ver cualquiera.
+    de_portafolios = tickers_de_portafolios()
+    tickers_finales.extend(de_portafolios)
+    logging.info(f"✅ Activos de los portafolios de la web: {len(de_portafolios)}.")
+
     lista_limpia = list(set(tickers_finales))
     lista_limpia.sort()
     logging.info(f"🎯 Universo total consolidado: {len(lista_limpia)} activos únicos.")
-    return lista_limpia
+    return lista_limpia, sorted(set(activos_fijos) | set(de_portafolios))
+
+def tickers_de_portafolios() -> list[str]:
+    """Tickers de los portafolios de todos los usuarios (la clave secreta salta RLS)."""
+    if not supabase:
+        return []
+    try:
+        filas = supabase.table("mi_portafolio").select("ticker").execute().data or []
+        return sorted({f["ticker"].strip().upper() for f in filas if f.get("ticker")})
+    except Exception as e:
+        logging.warning(f"No se pudieron leer los portafolios: {e}")
+        return []
 
 def _get_slope(y):
     if len(y) < 20: return np.nan
@@ -199,6 +225,87 @@ def reescribir_ultimos_dias(ticker: str, df: pd.DataFrame, max_date: str) -> pd.
         supabase.table("precios_historicos").delete().eq("ticker", ticker).gt("date", desde).execute()
     return recientes
 
+TOLERANCIA_CIERRE = 0.003
+
+def historial_desalineado(ticker: str, df: pd.DataFrame) -> bool:
+    """La base guarda el cierre real (sin ajustar por dividendos), que es el que la web ajusta con la tabla de
+    dividendos. La carga inicial quedó ajustada y un split cambia todo el historial de Yahoo: si los cierres
+    guardados en algunas fechas de muestra no calzan con los recién descargados, hay que reescribir el ticker."""
+    if len(df) < 120:
+        return False
+    muestras = df.iloc[[len(df) // 5, len(df) // 2, len(df) - 60]]
+    filas = supabase.table("precios_historicos").select("date, close").eq("ticker", ticker) \
+        .in_("date", muestras["date"].tolist()).execute().data or []
+    guardado = {f["date"][:10]: f["close"] for f in filas}
+    for fecha, cierre in zip(muestras["date"], muestras["close"]):
+        g = guardado.get(fecha)
+        if g and cierre and abs(float(g) / float(cierre) - 1) > TOLERANCIA_CIERRE:
+            return True
+    return False
+
+def inicio_congelado(df: pd.DataFrame) -> str:
+    """Fecha desde la que Yahoo repite el mismo cierre: lo anterior es historia válida."""
+    ultimo = df["close"].iloc[-1]
+    i = len(df) - 1
+    while i > 0 and df["close"].iloc[i - 1] == ultimo:
+        i -= 1
+    return df["date"].iloc[i]
+
+def reescribir_historial(ticker: str, df: pd.DataFrame, hasta: str | None = None):
+    """Borra y vuelve a escribir el historial del ticker (o solo lo anterior a `hasta`)."""
+    borrar = supabase.table("precios_historicos").delete().eq("ticker", ticker)
+    if hasta:
+        borrar = borrar.lt("date", hasta)
+        df = df[df["date"] < hasta]
+    borrar.execute()
+    records = df.to_dict(orient="records")
+    for i in range(0, len(records), 500):
+        supabase.table("precios_historicos").insert(records[i:i + 500]).execute()
+
+def guardar_dividendos(ticker: str, df: pd.DataFrame):
+    """Dividendos por acción (fecha ex-dividendo, en la moneda del activo) y la marca de que se revisaron:
+    una tabla vacía no distingue 'no paga dividendos' de 'nadie los consultó'."""
+    if ticker.startswith("^") or "=" in ticker or "dividends" not in df.columns:
+        return
+    pagos = df[df["dividends"].fillna(0) > 0]
+    filas = [{"ticker": ticker, "fecha": f, "monto": float(m)} for f, m in zip(pagos["date"], pagos["dividends"])]
+    if filas:
+        supabase.table("dividendos").upsert(filas, on_conflict="ticker,fecha").execute()
+    supabase.table("series_meta").upsert({"ticker": ticker, "dividendos_revisados": datetime.now(timezone.utc).isoformat()}).execute()
+
+MODULOS_FUNDAMENTALES = "summaryDetail,defaultKeyStatistics,financialData,assetProfile,fundProfile,topHoldings,price"
+
+def guardar_fundamentales(tickers: list[str]):
+    """Valoración, rentabilidad, analistas y composición de ETFs: el mismo quoteSummary de Yahoo que lee la web,
+    guardado una vez al día para que no lo descargue cada vez que parte una instancia nueva."""
+    if YfData is None:
+        logging.warning("Esta versión de yfinance no expone YfData: no se guardan fundamentales.")
+        return
+    hace = (datetime.now(timezone.utc) - timedelta(hours=20)).isoformat()
+    al_dia = {f["ticker"] for f in (supabase.table("fundamentales").select("ticker").gte("actualizado", hace).execute().data or [])}
+    pendientes = [t for t in tickers if t not in al_dia and not t.startswith("^") and "=" not in t]
+    datos_yahoo = YfData()
+    guardados = fallos = 0
+    for ticker in pendientes:
+        try:
+            r = datos_yahoo.get_raw_json(f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker}",
+                                         params={"modules": MODULOS_FUNDAMENTALES, "formatted": "false", "corsDomain": "finance.yahoo.com"})
+            resultado = ((r or {}).get("quoteSummary") or {}).get("result") or []
+            if not resultado:
+                fallos += 1
+                continue
+            datos = resultado[0]
+            perfil = datos.get("assetProfile") or {}
+            # Del perfil solo sirven sector, industria y país (el resto es texto largo y ejecutivos)
+            datos["assetProfile"] = {k: perfil[k] for k in ("sector", "industry", "country") if perfil.get(k)}
+            supabase.table("fundamentales").upsert({"ticker": ticker, "actualizado": datetime.now(timezone.utc).isoformat(), "datos": datos}).execute()
+            guardados += 1
+        except Exception as e:
+            fallos += 1
+            logging.warning(f"Sin fundamentales de {ticker}: {str(e)[:120]}")
+        time.sleep(0.4)
+    logging.info(f"📚 Fundamentales: {guardados} actualizados, {len(al_dia)} ya al día, {fallos} sin datos.")
+
 def run_miner(modo_incremental=True):
     if not supabase:
         logging.error("❌ Faltan credenciales de Supabase en .env")
@@ -207,18 +314,19 @@ def run_miner(modo_incremental=True):
     periodo = "5y"
     logging.info(f"⛏️ Minero Cuantitativo V2 (Supabase): {'INCREMENTAL' if modo_incremental else 'HISTÓRICO'}")
     
-    TICKERS_A_MINAR = obtener_universo_masivo()
+    TICKERS_A_MINAR, CON_FUNDAMENTALES = obtener_universo_masivo()
     
     exitos = 0
     fallos = 0
     sin_cambios = 0
     congelados = 0
+    reescritos = 0
 
     for ticker in TICKERS_A_MINAR:
         try:
             # Cierre real (sin ajustar por dividendos): es el que se compara con el precio en vivo.
             # Con auto_adjust=True la carga inicial quedaba ajustada y lo agregado después no.
-            df = yf.download(ticker, period=periodo, interval="1d", progress=False, multi_level_index=False, auto_adjust=False)
+            df = yf.download(ticker, period=periodo, interval="1d", progress=False, multi_level_index=False, auto_adjust=False, actions=True)
             if df.empty:
                 fallos += 1
                 continue
@@ -232,9 +340,33 @@ def run_miner(modo_incremental=True):
                 nombre_base = str(c[0]) if isinstance(c, tuple) else str(c)
                 columnas_limpias.append(nombre_base.lower().replace(" ", "_"))
             df.columns = columnas_limpias
-            df = df.drop(columns=["adj_close"], errors="ignore")  # la tabla guarda solo el cierre real
+            df['date'] = df['date'].astype(str).str[:10]
+            try:
+                guardar_dividendos(ticker, df)
+            except Exception as e:
+                logging.warning(f"{ticker}: no se guardaron los dividendos: {str(e)[:120]}")
+            # La tabla guarda solo el cierre real; dividendos y splits van aparte
+            df = df.drop(columns=["adj_close", "dividends", "stock_splits", "capital_gains"], errors="ignore")
+            df = df[df["close"].notna()]
 
-            if modo_incremental and historial_congelado(df):
+            congelado = modo_incremental and historial_congelado(df)
+            if modo_incremental:
+                # Lo congelado no sirve para comparar ni para reescribir: solo la historia anterior
+                corte = inicio_congelado(df) if congelado else None
+                valido = df[df["date"] < corte] if corte else df
+                try:
+                    if historial_desalineado(ticker, valido):
+                        reescribir_historial(ticker, compute_indicators(df).replace({float('nan'): None}), hasta=corte)
+                        reescritos += 1
+                        logging.info(f"{ticker}: historial guardado distinto al cierre real de Yahoo (carga ajustada o split); reescrito.")
+                        if not congelado:
+                            exitos += 1
+                            time.sleep(0.5)
+                            continue
+                except Exception as e:
+                    logging.warning(f"{ticker}: no se pudo revisar el historial guardado: {str(e)[:120]}")
+
+            if congelado:
                 fila = fila_desde_cotizacion(ticker)
                 if fila:
                     supabase.table("precios_historicos").insert([fila]).execute()
@@ -250,7 +382,6 @@ def run_miner(modo_incremental=True):
             
             # Limpiar NaNs para JSON serialization
             df = df.replace({float('nan'): None})
-            df['date'] = df['date'].astype(str).str[:10]
             
             if modo_incremental:
                 try:
@@ -277,7 +408,14 @@ def run_miner(modo_incremental=True):
 
     if congelados:
         logging.warning(f"⚠️ {congelados} activos con historial congelado en Yahoo se completaron desde la cotización.")
+    if reescritos:
+        logging.info(f"🔁 {reescritos} historiales reescritos con el cierre real.")
     logging.info(f"🚀 Minería Data Warehouse (Supabase) finalizada. Actualizados: {exitos}, Al día (sin cambios): {sin_cambios}, Fallos: {fallos}.")
+
+    try:
+        guardar_fundamentales(CON_FUNDAMENTALES)
+    except Exception as e:
+        logging.error(f"Error guardando fundamentales: {e}")
 
 if __name__ == "__main__":
     run_miner(modo_incremental=True)

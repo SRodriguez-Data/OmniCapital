@@ -1,4 +1,5 @@
 import { yahooFinance, withTimeout, yahooRequest } from './marketData';
+import { supabase } from './supabase';
 
 // Datos fundamentales de Yahoo Finance (gratis): valoración, calidad, crecimiento, dividendos y consenso de
 // analistas para acciones; costo, sectores y principales posiciones para ETFs. Yahoo mezcla monedas en algunas
@@ -71,11 +72,29 @@ const RECOMENDACION: Record<string, string> = {
 
 const MODULOS = ['summaryDetail', 'defaultKeyStatistics', 'financialData', 'assetProfile', 'fundProfile', 'topHoldings', 'price'] as const;
 
+// Lo que se usa del quoteSummary de Yahoo. El minero diario guarda ese mismo objeto en la tabla fundamentales
+interface Resumen {
+  price?: { quoteType?: string; longName?: string | null; shortName?: string | null; regularMarketPrice?: number };
+  summaryDetail?: { trailingPE?: number; forwardPE?: number; dividendYield?: number; yield?: number; marketCap?: number; payoutRatio?: number };
+  defaultKeyStatistics?: { forwardPE?: number; priceToBook?: number; enterpriseToEbitda?: number; annualReportExpenseRatio?: number };
+  financialData?: {
+    currentPrice?: number; returnOnEquity?: number; profitMargins?: number; debtToEquity?: number; revenueGrowth?: number;
+    earningsGrowth?: number; numberOfAnalystOpinions?: number; targetMeanPrice?: number; recommendationKey?: string;
+  };
+  assetProfile?: { sector?: string; industry?: string; country?: string };
+  fundProfile?: { categoryName?: string | null; feesExpensesInvestment?: { annualReportExpenseRatio?: number } };
+  topHoldings?: { sectorWeightings?: object[]; holdings?: { symbol: string; holdingName?: string; holdingPercent: number }[] };
+}
+
 async function cargar(ticker: string): Promise<Fundamentales | null> {
   const s = await withTimeout(
     yahooFinance.quoteSummary(ticker, { modules: [...MODULOS] }, yahooRequest()),
     10000, `Yahoo fundamentales ${ticker}`,
   );
+  return desdeResumen(ticker, s as Resumen);
+}
+
+function desdeResumen(ticker: string, s: Resumen): Fundamentales {
   const sd = s.summaryDetail, ks = s.defaultKeyStatistics, fd = s.financialData, ap = s.assetProfile, fp = s.fundProfile, th = s.topHoldings;
   const quoteType = s.price?.quoteType;
   const chile = FONDOS_CHILE[ticker];
@@ -116,7 +135,7 @@ async function cargar(ticker: string): Promise<Fundamentales | null> {
     f.categoria = fp?.categoryName || undefined;
     const sectores: Record<string, number> = {};
     for (const w of th?.sectorWeightings ?? []) {
-      for (const [k, v] of Object.entries(w)) if (typeof v === 'number' && v > 0) sectores[sectorEnEspanol(k) ?? k] = (sectores[sectorEnEspanol(k) ?? k] ?? 0) + v;
+      for (const [k, v] of Object.entries(w) as [string, unknown][]) if (typeof v === 'number' && v > 0) sectores[sectorEnEspanol(k) ?? k] = (sectores[sectorEnEspanol(k) ?? k] ?? 0) + v;
     }
     if (Object.keys(sectores).length) f.sectores = sectores;
     const principales = (th?.holdings ?? [])
@@ -130,10 +149,29 @@ async function cargar(ticker: string): Promise<Fundamentales | null> {
 // Caché por instancia: los fundamentales cambian una vez por trimestre
 const TTL = 12 * 60 * 60 * 1000;
 const cache = new Map<string, { at: number; data: Fundamentales | null }>();
+const AL_DIA_BASE = 3 * 24 * 60 * 60 * 1000;
+
+// Los que guardó el minero: los de los últimos días se usan tal cual; los más antiguos quedan de respaldo por si
+// Yahoo no responde (los fundamentales cambian poco de una semana a otra)
+async function desdeBase(tickers: string[]): Promise<{ alDia: Map<string, Fundamentales>; antiguos: Map<string, Fundamentales> }> {
+  const alDia = new Map<string, Fundamentales>(), antiguos = new Map<string, Fundamentales>();
+  if (tickers.length === 0) return { alDia, antiguos };
+  try {
+    const { data, error } = await supabase.from('fundamentales').select('ticker, actualizado, datos').in('ticker', tickers);
+    if (error) throw error;
+    for (const r of data ?? []) {
+      const f = desdeResumen(r.ticker, r.datos as Resumen);
+      (Date.now() - new Date(r.actualizado).getTime() < AL_DIA_BASE ? alDia : antiguos).set(r.ticker, f);
+    }
+  } catch (e) {
+    console.warn('Sin fundamentales guardados:', e instanceof Error ? e.message.slice(0, 120) : e);
+  }
+  return { alDia, antiguos };
+}
 
 export async function fundamentales(tickers: string[], concurrencia = 6): Promise<Map<string, Fundamentales>> {
   const out = new Map<string, Fundamentales>();
-  const pendientes = tickers.filter(t => {
+  let pendientes = tickers.filter(t => {
     const hit = cache.get(t);
     if (hit && Date.now() - hit.at < TTL) {
       if (hit.data) out.set(t, hit.data);
@@ -141,6 +179,12 @@ export async function fundamentales(tickers: string[], concurrencia = 6): Promis
     }
     return !t.startsWith('^') && !t.includes('=');
   });
+  const { alDia, antiguos } = await desdeBase(pendientes);
+  for (const [t, f] of alDia) {
+    cache.set(t, { at: Date.now(), data: f });
+    out.set(t, f);
+  }
+  pendientes = pendientes.filter(t => !alDia.has(t));
   // Pocas consultas a la vez: Yahoo limita (HTTP 429) cuando llegan muchas juntas
   let i = 0;
   await Promise.all(Array.from({ length: Math.min(concurrencia, pendientes.length) }, async () => {
@@ -154,8 +198,13 @@ export async function fundamentales(tickers: string[], concurrencia = 6): Promis
           if (f) out.set(t, f);
           break;
         } catch (e) {
-          if (intento === 1) console.warn(`Sin fundamentales de ${t}:`, e instanceof Error ? e.message.slice(0, 120) : e);
-          else await new Promise(r => setTimeout(r, 1500));
+          if (intento === 0) {
+            await new Promise(r => setTimeout(r, 1500));
+            continue;
+          }
+          console.warn(`Sin fundamentales de ${t} en Yahoo:`, e instanceof Error ? e.message.slice(0, 120) : e);
+          const respaldo = antiguos.get(t);
+          if (respaldo) out.set(t, respaldo);
         }
       }
     }

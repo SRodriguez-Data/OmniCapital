@@ -131,7 +131,7 @@ ${general}
 Hallazgos:
 ${r.hallazgos.map(h => `- [${h.nivel}] ${h.titulo}. ${h.detalle}`).join('\n')}
 
-Plan estratégico calculado:
+${r.perfilInversionista ? `Perfil del inversionista: ${r.perfilInversionista.nivel} (lo declaró en un cuestionario; respétalo en el tono).\n` : ''}Plan estratégico calculado:
 ${r.estrategia.map(e => `- ${e}`).join('\n')}
 
 Posiciones (técnico | fundamental | riesgo | decisión):

@@ -27,7 +27,7 @@ const translations: Record<Language, Record<string, string>> = {
     'login.welcome': 'Plataforma de Gestión Patrimonial',
     'login.button': 'Ingresar',
     'login.register_button': 'Crear Cuenta',
-    'login.demo': 'Modo Jurado (Demo)',
+    'login.demo': 'Modo demo',
     'login.cartola': 'Probar Extractor (Sin Login)',
     // Tabs
     'tab.data_warehouse': '[00] BASE DE DATOS',
@@ -55,7 +55,7 @@ const translations: Record<Language, Record<string, string>> = {
     'login.welcome': 'Wealth Management Platform',
     'login.button': 'Sign In',
     'login.register_button': 'Create Account',
-    'login.demo': 'Jury Mode (Demo)',
+    'login.demo': 'Demo mode',
     'login.cartola': 'Test Extractor (No Login)',
     // Tabs
     'tab.data_warehouse': '[00] DATA WAREHOUSE',

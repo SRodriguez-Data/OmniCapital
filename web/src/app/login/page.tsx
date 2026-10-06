@@ -181,7 +181,7 @@ export default function LoginPage() {
             onClick={handleDemoLogin}
             className="w-full flex items-center justify-center gap-2 bg-zinc-100 dark:bg-[#27272a] hover:bg-zinc-200 dark:hover:bg-[#3f3f46] text-zinc-900 dark:text-white p-3 rounded-lg text-sm font-bold font-mono transition-colors"
           >
-            ENTRAR COMO JURADO (DEMO)
+            ENTRAR EN MODO DEMO
           </button>
           
           <button

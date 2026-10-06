@@ -33,7 +33,8 @@ export async function POST(req: Request) {
   const valido = Array.isArray(pos) && pos.length > 0 && pos.length <= MAX_ITEMS
     && pos.every(p => typeof p?.ticker === 'string' && TICKER_RE.test(p.ticker) && ACCIONES.has(p.accion)
       && Array.isArray(p.motivos) && p.tecnico && p.fundamental && p.riesgo)
-    && informe.resumen && informe.exposicion && Array.isArray(informe.hallazgos) && Array.isArray(informe.estrategia);
+    && informe.resumen && informe.exposicion && Array.isArray(informe.hallazgos) && Array.isArray(informe.estrategia)
+    && (!informe.perfilInversionista || ['conservador', 'moderado', 'agresivo'].includes(informe.perfilInversionista.nivel));
   if (!valido) return NextResponse.json({ error: 'Informe inválido.' }, { status: 400 });
 
   return NextResponse.json(await redactar(informe, 50000));

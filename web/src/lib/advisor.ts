@@ -9,6 +9,7 @@ import {
 } from './marketData';
 import { ETF_CONOCIDOS, FONDOS_CHILE, fundamentales, type Fundamentales, type TipoActivo } from './fundamentals';
 import { contextoMercado, type ContextoMercado } from './mercado';
+import { adecuacion, type Adecuacion, type PerfilInversionista } from './perfil';
 
 // Motor de recomendaciones: todas las cifras salen de datos reales (precios ajustados por dividendos,
 // fundamentales y consenso de analistas de Yahoo Finance) y las decisiones de reglas explícitas en cuatro
@@ -127,6 +128,7 @@ export interface AdvisorReport {
   posiciones: AssetReport[];
   candidatos: AssetReport[];
   avisosDatos: string[];
+  perfilInversionista: (Adecuacion & { perfil: PerfilInversionista }) | null;
 }
 
 // Covarianza anual en pesos de los activos con historial completo (portafolio y candidatos)
@@ -383,6 +385,7 @@ function decidir(a: {
 export async function buildAdvisorReport(
   items: HoldingInput[],
   candidatos: string[] = [],
+  inversionista: PerfilInversionista | null = null,
 ): Promise<AdvisorReport & { modelo: RiskModel }> {
   const positions = groupByTicker(items);
   const extras: Position[] = [...new Set(candidatos)]
@@ -708,6 +711,23 @@ export async function buildAdvisorReport(
       if (!a.diversificado && (a.beta ?? 1) > 1.2) frenar(a, `El mercado está en modo defensivo y este activo amplifica sus movimientos (beta ${a.beta!.toFixed(2)}): espera que mejore antes de aumentar.`);
     }
   }
+  // 8. Perfil del inversionista: plazo y tolerancia a caídas, que la cartera no muestra por sí sola
+  const ajuste = inversionista ? adecuacion(inversionista) : null;
+  if (inversionista && ajuste) {
+    for (const a of posiciones) {
+      if (inversionista.horizonte === 'menos_1') {
+        frenar(a, 'Necesitas este dinero en menos de un año: en ese plazo la bolsa puede estar abajo justo cuando lo necesites. Lo que vayas a usar pronto va mejor en ahorro sin riesgo.');
+      } else if (ajuste.plazoCorto && !a.diversificado) {
+        frenar(a, 'Necesitas este dinero en 1 a 3 años: para ese plazo no conviene aumentar acciones individuales; si aportas, que sea en fondos diversificados o renta fija.');
+      }
+      if (vol !== null && vol > ajuste.volMaxima && a.vol !== null && a.vol > vol) {
+        frenar(a, `Tu cartera ya es más volátil (${pct(vol)} anual) de lo que corresponde a tu perfil ${ajuste.nivel} (hasta ${pct(ajuste.volMaxima, 0)}), y este activo lo es aún más (${pct(a.vol, 0)}): aumentarlo te aleja de tu perfil.`);
+      }
+      if (inversionista.experiencia === 'principiante' && a.accion === 'AUMENTAR' && !a.diversificado) {
+        a.motivos.push('Como estás empezando, conviene que la mayor parte de tus aportes vaya a fondos diversificados y que las acciones individuales sean montos pequeños.');
+      }
+    }
+  }
 
   const perfil = vol === null ? null : vol < 0.08 ? 'conservador' : vol < 0.15 ? 'moderado' : vol < 0.22 ? 'moderado-agresivo' : 'agresivo';
   const sinFecha = base.filter(b => b.sinFecha);
@@ -740,11 +760,12 @@ export async function buildAdvisorReport(
     resumen,
     mercado,
     exposicion,
-    estrategia: planEstrategico(resumen, posiciones, exposicion, mercado, gemelosEnCartera),
-    hallazgos: buildFindings(resumen, posiciones, exposicion, gemelosEnCartera, rf, mercado),
+    estrategia: planEstrategico(resumen, posiciones, exposicion, mercado, gemelosEnCartera, inversionista, ajuste),
+    hallazgos: buildFindings(resumen, posiciones, exposicion, gemelosEnCartera, rf, mercado, inversionista, ajuste),
     posiciones,
     candidatos: evaluados,
     avisosDatos,
+    perfilInversionista: inversionista && ajuste ? { ...ajuste, perfil: inversionista } : null,
     modelo,
   };
 }
@@ -815,8 +836,27 @@ function calcularExposicion(
 
 function planEstrategico(
   r: PortfolioSummary, pos: AssetReport[], ex: Exposicion, mercado: ContextoMercado | null, gemelos: { a: string; b: string; corr: number }[],
+  perfil: PerfilInversionista | null, ajuste: Adecuacion | null,
 ): string[] {
   const plan: string[] = [];
+  // Lo que va antes de cualquier compra: deudas caras, colchón y plazo
+  if (perfil && ajuste) {
+    if (perfil.deudaCara) plan.push('Antes de invertir más, paga tus deudas caras (tarjetas, líneas de crédito, créditos de consumo): sus intereses superan lo que razonablemente rinde la bolsa, así que pagarlas es la inversión más rentable y sin riesgo.');
+    if (perfil.fondoEmergencia !== 'si') plan.push(`${perfil.fondoEmergencia === 'no' ? 'Arma' : 'Completa'} primero un fondo de emergencia de 3 a 6 meses de gastos en algo líquido y sin riesgo (cuenta de ahorro, depósito a plazo o fondo money market): así una emergencia no te obliga a vender en medio de una caída.`);
+    if (perfil.horizonte === 'menos_1') {
+      plan.push('Necesitas este dinero en menos de un año: lo que vayas a usar en ese plazo debería estar fuera de la bolsa (depósito a plazo o fondo money market). Empieza por lo que tiene señal REDUCIR y considera comisiones e impuestos al vender.');
+    } else if (ajuste.plazoCorto) {
+      plan.push('Necesitas este dinero en 1 a 3 años, un plazo corto para la bolsa: ve pasando gradualmente a renta fija lo que vas a necesitar y deja los aportes nuevos en fondos diversificados.');
+    }
+    if (r.vol !== null && r.vol > ajuste.volMaxima) {
+      plan.push(`Tu cartera tiene una volatilidad de ${pct(r.vol)} anual, más de lo que corresponde a tu perfil ${ajuste.nivel} (hasta ${pct(ajuste.volMaxima, 0)}): dirige los próximos aportes a fondos diversificados${ajuste.nivel === 'conservador' ? ' y a renta fija' : ''} en vez de a las acciones más volátiles.`);
+    }
+    if (r.maxDD !== null && r.maxDD > ajuste.caidaTolerable) {
+      plan.push(`Con tus pesos actuales, en los últimos ${r.ventanaAnios} años tu cartera habría caído hasta ${pct(r.maxDD, 0)} desde un máximo, más de lo que dices tolerar (${pct(ajuste.caidaTolerable, 0)}). Si una caída así te llevaría a vender, conviene bajar el riesgo ahora y no en medio de la caída.`);
+    }
+    if (perfil.objetivo === 'preservar') plan.push('Tu objetivo es cuidar lo que tienes: una cartera de acciones puede caer 30% o más en una crisis. Una parte en renta fija (depósitos, fondos de deuda) amortigua esas caídas.');
+  }
+  const antesDeComprar = plan.length > 0;
   if (mercado) {
     plan.push(mercado.regimen === 'favorable'
       ? 'Contexto favorable: mantén tu exposición y aprovecha los retrocesos para aportar en lo que tiene señal AUMENTAR.'
@@ -825,7 +865,7 @@ function planEstrategico(
         : 'Contexto mixto: sé selectivo. Aporta en partes (por ejemplo, en 2 o 3 meses) y prioriza fondos diversificados y empresas con buenos fundamentales.');
   }
   const reducir = pos.filter(a => a.accion === 'REDUCIR');
-  if (reducir.length) plan.push(`Revisa primero ${reducir.map(a => `${a.ticker} (${a.motivos[0]?.replace(/[.:].*$/, '').toLowerCase()})`).join('; ')}: tienen señal REDUCIR.`);
+  if (reducir.length) plan.push(`Revisa primero ${reducir.map(a => `${a.ticker} (${a.motivos[0]?.replace(/[.:].*$/, '').toLowerCase()})`).join('; ')}: ${reducir.length > 1 ? 'tienen' : 'tiene'} señal REDUCIR.`);
   const sector = ex.sectores[0];
   if (sector && sector.peso > LIMITE_SECTOR && sector.nombre !== 'Fondos sin detalle') {
     plan.push(`${sector.nombre} pesa ${pct(sector.peso, 0)} de tu patrimonio contando lo que hay dentro de tus fondos: no sumes más de ese sector y dirige los próximos aportes a otros.`);
@@ -838,6 +878,10 @@ function planEstrategico(
   }
   const aumentar = pos.filter(a => a.accion === 'AUMENTAR').sort((a, b) => (a.conviccion === 'alta' ? 0 : a.conviccion === 'media' ? 1 : 2) - (b.conviccion === 'alta' ? 0 : b.conviccion === 'media' ? 1 : 2) || b.puntaje - a.puntaje);
   if (aumentar.length) plan.push(`Para tus próximos aportes, en orden de convicción: ${aumentar.slice(0, 5).map(a => `${a.ticker} (${a.conviccion})`).join(', ')}.`);
+  if (perfil?.aporteMensual && aumentar.length) {
+    const destinos = aumentar.slice(0, 3);
+    plan.push(`${antesDeComprar ? 'Una vez resuelto lo anterior, tu' : 'Tu'} aporte de ${fmtMoney(perfil.aporteMensual, 'CLP')} al mes puede ir a ${destinos.map(a => a.ticker).join(', ')}${destinos.length > 1 ? ` (unos ${fmtMoney(perfil.aporteMensual / destinos.length, 'CLP')} en cada uno, o uno distinto cada mes para pagar menos comisiones)` : ''}. El plan de compra con nuevo capital lo calcula en detalle.`);
+  }
   if (gemelos.length) {
     const top = [...gemelos].sort((a, b) => b.corr - a.corr).slice(0, 3);
     plan.push(`Simplifica: ${top.map(p => `${p.a} y ${p.b}`).join('; ')} se mueven casi igual. Concentra las compras en uno de cada par.`);
@@ -848,7 +892,7 @@ function planEstrategico(
   if (caros.length) plan.push(`Revisa el costo de ${caros.map(a => `${a.ticker} (${pct(a.fundamentales!.gastoAnual!, 2)} anual)`).join(', ')}: hay fondos equivalentes más baratos.`);
   const dividendoRiesgo = pos.filter(a => (a.fundamentales?.payout ?? 0) > 1);
   if (dividendoRiesgo.length) plan.push(`${dividendoRiesgo.map(a => a.ticker).join(', ')} reparte${dividendoRiesgo.length > 1 ? 'n' : ''} más dividendos de lo que gana${dividendoRiesgo.length > 1 ? 'n' : ''}: no cuentes con ese dividendo a futuro.`);
-  if (r.perfil === 'agresivo') plan.push('Tu cartera es de perfil agresivo (volatilidad sobre 22% anual): asegúrate de tener un fondo de emergencia aparte, fuera de la bolsa.');
+  if (!perfil && r.perfil === 'agresivo') plan.push('Tu cartera es de perfil agresivo (volatilidad sobre 22% anual): asegúrate de tener un fondo de emergencia aparte, fuera de la bolsa.');
   return plan;
 }
 
@@ -856,8 +900,23 @@ function planEstrategico(
 
 function buildFindings(
   r: PortfolioSummary, pos: AssetReport[], ex: Exposicion, gemelos: { a: string; b: string; corr: number }[], rf: number, mercado: ContextoMercado | null,
+  perfil: PerfilInversionista | null, ajuste: Adecuacion | null,
 ): Hallazgo[] {
   const out: Hallazgo[] = [];
+
+  if (perfil && ajuste) {
+    const masVolatil = r.vol !== null && r.vol > ajuste.volMaxima;
+    const caeMas = r.maxDD !== null && r.maxDD > ajuste.caidaTolerable;
+    const partes = [`Para un perfil ${ajuste.nivel}, lo razonable es una volatilidad de hasta ${pct(ajuste.volMaxima, 0)} anual y caídas que no superen lo que dices tolerar (${pct(ajuste.caidaTolerable, 0)}).`];
+    if (r.vol !== null) partes.push(`Tu cartera: volatilidad de ${pct(r.vol)}${r.maxDD !== null ? ` y una caída máxima de ${pct(r.maxDD, 0)} en los últimos ${r.ventanaAnios} años` : ''}.`);
+    if (ajuste.plazoCorto) partes.push('Además necesitas el dinero antes de 3 años, un plazo corto para la bolsa.');
+    const desalineado = masVolatil || caeMas || ajuste.plazoCorto;
+    out.push({
+      nivel: desalineado ? 'alerta' : 'ok',
+      titulo: desalineado ? `Tu cartera tiene más riesgo del que corresponde a tu perfil ${ajuste.nivel}` : `Tu cartera calza con tu perfil ${ajuste.nivel}`,
+      detalle: partes.join(' '),
+    });
+  }
 
   if (mercado) {
     out.push({ nivel: mercado.regimen === 'favorable' ? 'ok' : mercado.regimen === 'defensivo' ? 'alerta' : 'atencion', titulo: mercado.titulo, detalle: mercado.lecturas.slice(0, 3).join(' ') });

@@ -3,6 +3,7 @@ import { aiConfigured } from '@/lib/ai';
 import { parsePortfolioItems } from '@/lib/validation';
 import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 import { buildAdvisorReport } from '@/lib/advisor';
+import { parsePerfil } from '@/lib/perfil';
 
 // Node (no Edge): necesita yahoo-finance2. Descarga 3 años de precios, dividendos, fundamentales y contexto de
 // mercado de todos los activos; la primera vez en una instancia nueva puede tardar más de un minuto.
@@ -16,7 +17,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
   }
 
-  let body: { items?: unknown };
+  let body: { items?: unknown; perfil?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -28,7 +29,8 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { modelo: _modelo, ...report } = await buildAdvisorReport(parsed.items);
+    // El perfil es opcional: si no viene o no es válido, el informe se arma solo con la cartera
+    const { modelo: _modelo, ...report } = await buildAdvisorReport(parsed.items, [], parsePerfil(body?.perfil));
     void _modelo; // la matriz de riesgo es para el optimizador, no para el navegador
     console.log(`Informe de ${parsed.items.length} activos calculado en ${((Date.now() - started) / 1000).toFixed(1)}s`);
     return NextResponse.json({

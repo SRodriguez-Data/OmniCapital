@@ -1,8 +1,11 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Info, Newspaper, RefreshCw, ShieldAlert, Sparkles } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Info, Newspaper, RefreshCw, ShieldAlert, Sparkles, UserCheck } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
+import { supabase } from '@/lib/supabase';
+import { parsePerfil, textoDe, type NivelRiesgo, type PerfilInversionista } from '@/lib/perfil';
+import { PerfilInversionistaForm } from './PerfilInversionistaForm';
 
 type Accion = 'AUMENTAR' | 'MANTENER' | 'REDUCIR';
 type Tono = 'positivo' | 'neutral' | 'negativo' | 'mixto';
@@ -97,6 +100,7 @@ interface Informe {
   modelo: string | null;
   avisoIa: string | null;
   redaccionPendiente?: boolean;
+  perfilInversionista: { nivel: NivelRiesgo; volMaxima: number; caidaTolerable: number; plazoCorto: boolean; perfil: PerfilInversionista } | null;
 }
 
 interface Noticia { titulo: string; fuente: string; fecha: string; url: string }
@@ -106,7 +110,19 @@ interface Noticias {
   avisoIa: string | null;
 }
 
-const CACHE_PREFIX = 'omnicapital_informe_v4_';
+const CACHE_PREFIX = 'omnicapital_informe_v5_';
+// Sin sesión (modo demo o cartola) el perfil queda solo en este navegador; con sesión, en la cuenta
+const PERFIL_LOCAL = 'omnicapital_perfil_v1';
+// "Ahora no": se vuelve a preguntar después de 30 días
+const PERFIL_OMITIDO = 'omnicapital_perfil_omitido';
+const omitidoVigente = () => {
+  try {
+    const t = Number(localStorage.getItem(PERFIL_OMITIDO));
+    return Number.isFinite(t) && Date.now() - t < 30 * 24 * 60 * 60 * 1000;
+  } catch {
+    return false;
+  }
+};
 const NEWS_PREFIX = 'omnicapital_noticias_v1_';
 
 // Fecha de hoy en Chile: el informe se renueva cada día de mercado chileno, no a medianoche UTC
@@ -219,9 +235,65 @@ export default function RecommendationsTab() {
   const [error, setError] = useState('');
   const [abiertos, setAbiertos] = useState<Record<string, boolean>>({});
   const cacheKeyRef = useRef('');
+  const [perfil, setPerfil] = useState<PerfilInversionista | null>(null);
+  const [perfilListo, setPerfilListo] = useState(false);
+  const [perfilOmitido, setPerfilOmitido] = useState(false);
+  const [editandoPerfil, setEditandoPerfil] = useState(false);
+  const [guardandoPerfil, setGuardandoPerfil] = useState(false);
+  const [errorPerfil, setErrorPerfil] = useState('');
+
+  useEffect(() => {
+    let vigente = true;
+    (async () => {
+      let p: PerfilInversionista | null = null;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const { data } = await supabase.from('perfil_inversionista').select('datos').eq('user_id', session.user.id).maybeSingle();
+          p = parsePerfil(data?.datos);
+        } else {
+          p = parsePerfil(JSON.parse(localStorage.getItem(PERFIL_LOCAL) ?? 'null'));
+        }
+      } catch { /* sin perfil guardado */ }
+      if (!vigente) return;
+      setPerfil(p);
+      setPerfilOmitido(!p && omitidoVigente());
+      setPerfilListo(true);
+    })();
+    return () => { vigente = false; };
+  }, []);
+
+  const guardarPerfil = async (p: PerfilInversionista) => {
+    setGuardandoPerfil(true);
+    setErrorPerfil('');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        const { error: e } = await supabase.from('perfil_inversionista')
+          .upsert({ user_id: session.user.id, datos: p, actualizado: new Date().toISOString() });
+        if (e) throw e;
+      } else {
+        localStorage.setItem(PERFIL_LOCAL, JSON.stringify(p));
+      }
+      setPerfil(p);
+      setEditandoPerfil(false);
+    } catch {
+      setErrorPerfil('No se pudo guardar el perfil. Revisa tu conexión e intenta de nuevo.');
+    } finally {
+      setGuardandoPerfil(false);
+    }
+  };
+
+  const omitirPerfil = () => {
+    try { localStorage.setItem(PERFIL_OMITIDO, String(Date.now())); } catch { /* solo por esta vez */ }
+    setPerfilOmitido(true);
+    setEditandoPerfil(false);
+  };
 
   // Se cachea por sesión según la composición del portafolio y el día, para no gastar cuota de IA
-  const cacheKey = CACHE_PREFIX + hoyEnChile() + JSON.stringify(items.map(i => [i.ticker, i.cantidad, i.precio_compra, i.moneda, i.purchase_date || '']).sort());
+  const cacheKey = CACHE_PREFIX + hoyEnChile() + JSON.stringify(items.map(i => [i.ticker, i.cantidad, i.precio_compra, i.moneda, i.purchase_date || '']).sort()) + JSON.stringify(perfil);
+  // Antes del primer informe se pregunta el perfil (una vez; "Ahora no" lo pospone)
+  const esperandoPerfil = !perfilListo || (!perfil && !perfilOmitido) || editandoPerfil;
 
   // Noticias (aparte, porque tardan y no cambian las decisiones)
   const cargarNoticias = useCallback(async (informe: Informe, force: boolean) => {
@@ -279,7 +351,7 @@ export default function RecommendationsTab() {
 
   const generate = useCallback(async (force: boolean) => {
     cacheKeyRef.current = cacheKey;
-    if (items.length === 0) {
+    if (items.length === 0 || esperandoPerfil) {
       setLoading(false);
       return;
     }
@@ -315,6 +387,7 @@ export default function RecommendationsTab() {
                 moneda: i.moneda,
                 purchase_date: i.purchase_date || null,
               })),
+              perfil,
             }),
             signal: AbortSignal.timeout(130000),
           });
@@ -338,7 +411,7 @@ export default function RecommendationsTab() {
     } finally {
       if (cacheKeyRef.current === cacheKey) setLoading(false);
     }
-  }, [items, cacheKey, cargarNoticias, redactar]);
+  }, [items, cacheKey, cargarNoticias, redactar, esperandoPerfil, perfil]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -356,10 +429,27 @@ export default function RecommendationsTab() {
     );
   }
 
+  if (!perfilListo) {
+    return <div className="text-center p-12 font-mono text-zinc-600 dark:text-zinc-400">Cargando tu perfil...</div>;
+  }
+
+  if (esperandoPerfil) {
+    return (
+      <PerfilInversionistaForm
+        inicial={perfil}
+        guardando={guardandoPerfil}
+        error={errorPerfil}
+        onGuardar={guardarPerfil}
+        onCancelar={perfil ? () => setEditandoPerfil(false) : omitirPerfil}
+        textoCancelar={perfil ? 'Cancelar' : 'Ahora no'}
+      />
+    );
+  }
+
   if (loading) {
     return (
       <div className="text-center p-12 font-mono text-zinc-600 dark:text-zinc-400">
-        Descargando 3 años de precios con dividendos, fundamentales, consenso de analistas y contexto de mercado (la primera vez del día puede tardar hasta dos minutos)...
+        Analizando 3 años de precios con dividendos, fundamentales, consenso de analistas y contexto de mercado...
       </div>
     );
   }
@@ -392,6 +482,24 @@ export default function RecommendationsTab() {
           className="bg-[#60a5fa] hover:bg-[#3b82f6] text-white px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-colors flex items-center gap-2 w-fit"
         >
           <RefreshCw className="w-3.5 h-3.5" /> Actualizar informe
+        </button>
+      </div>
+
+      {/* Perfil del inversionista con el que se armó el informe */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 rounded-lg px-4 py-3">
+        <p className="text-xs text-zinc-700 dark:text-zinc-300 flex gap-2">
+          <UserCheck className="w-4 h-4 shrink-0 text-[#60a5fa]" />
+          {data.perfilInversionista ? (
+            <span>
+              Perfil <strong>{data.perfilInversionista.nivel}</strong> · necesitas el dinero {textoDe('horizonte', data.perfilInversionista.perfil.horizonte).toLowerCase()}
+              {' '}· toleras caídas de hasta {pct(data.perfilInversionista.caidaTolerable, 0)} · fondo de emergencia: {textoDe('fondoEmergencia', data.perfilInversionista.perfil.fondoEmergencia).split(',')[0].toLowerCase()}
+            </span>
+          ) : (
+            <span>Sin perfil de inversionista: las recomendaciones no consideran tu plazo, tu tolerancia a caídas ni si tienes un respaldo fuera de la bolsa.</span>
+          )}
+        </p>
+        <button onClick={() => setEditandoPerfil(true)} className="text-xs font-bold text-[#60a5fa] hover:underline shrink-0 text-left">
+          {data.perfilInversionista ? 'Editar perfil' : 'Completar perfil'}
         </button>
       </div>
 

@@ -29,7 +29,7 @@ export interface DailyHistory {
   adjSeries: DatedSeries;
   dividends: Dividendo[];
   dividendsKnown: boolean; // false si no se pudo consultar el historial de dividendos
-  source: 'yahoo' | 'supabase';
+  source: 'yahoo' | 'supabase' | 'respaldo';
   fresh: boolean; // el último cierre tiene menos de una semana
   frozen: boolean; // los últimos cierres son idénticos (dato congelado)
 }
@@ -126,7 +126,60 @@ async function fromYahoo(ticker: string, days: number): Promise<DailyHistory | n
     .map(q => ({ date: toDay(new Date(q.date)), close: q.close as number })), 'yahoo', dividends, true);
 }
 
-// El minero diario (GitHub Actions) guarda los cierres en precios_historicos desde 2021
+// Dividendos que guardó el minero. null si no los revisó en los últimos días: una lista vacía no distingue
+// "no paga dividendos" de "nadie los consultó"
+async function dividendosGuardados(ticker: string, days: number): Promise<Dividendo[] | null> {
+  const { data: meta, error: e1 } = await supabase.from('series_meta').select('dividendos_revisados').eq('ticker', ticker).maybeSingle();
+  if (e1) throw e1;
+  if (!meta?.dividendos_revisados || Date.now() - new Date(meta.dividendos_revisados).getTime() > 10 * DAY_MS) return null;
+  const since = new Date(Date.now() - days * DAY_MS).toISOString().slice(0, 10);
+  const { data, error } = await supabase.from('dividendos').select('fecha, monto').eq('ticker', ticker).gte('fecha', since).order('fecha');
+  if (error) throw error;
+  return (data ?? []).map(r => ({ date: String(r.fecha).slice(0, 10), amount: Number(r.monto) }));
+}
+
+// Respaldo cuando Yahoo y la base fallan, con fuentes gratuitas y sin clave: Nasdaq para acciones y ETFs de
+// EE.UU., FRED (Reserva Federal de St. Louis) para el S&P 500, el VIX y la tasa a 10 años, y mindicador.cl
+// (Banco Central de Chile) para el dólar observado
+const FRED: Record<string, string> = { '^GSPC': 'SP500', '^VIX': 'VIXCLS', '^TNX': 'DGS10' };
+const NAVEGADOR = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36';
+
+async function fromRespaldo(ticker: string, days: number): Promise<DailyHistory | null> {
+  const since = new Date(Date.now() - days * DAY_MS).toISOString().slice(0, 10);
+  const opts = { signal: AbortSignal.timeout(YAHOO_TIMEOUT_MS), headers: { 'User-Agent': NAVEGADOR, Accept: 'application/json, text/csv' } };
+  if (FRED[ticker]) {
+    const res = await fetch(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${FRED[ticker]}&cosd=${since}`, opts);
+    if (!res.ok) throw new Error(`FRED ${res.status}`);
+    const rows = (await res.text()).trim().split('\n').slice(1).map(l => {
+      const [date, v] = l.split(',');
+      return { date, close: Number(v) }; // los días sin dato vienen como "." y se descartan
+    });
+    return build(ticker, rows, 'respaldo');
+  }
+  if (ticker === FX_TICKER) {
+    // Solo el último mes: las series anuales de mindicador.cl tardan de 7 a 30 segundos o no responden
+    const res = await fetch('https://mindicador.cl/api/dolar', opts);
+    if (!res.ok) throw new Error(`mindicador ${res.status}`);
+    const serie = ((await res.json())?.serie ?? []) as { fecha: string; valor: number }[];
+    // Las fechas vienen como medianoche de Chile en UTC (03:00Z o 04:00Z): los 10 primeros caracteres son el día
+    return build(ticker, serie.map(s => ({ date: s.fecha.slice(0, 10), close: s.valor })), 'respaldo');
+  }
+  if (/^[A-Z]{1,5}$/.test(ticker)) {
+    for (const clase of ['stocks', 'etf']) {
+      const res = await fetch(`https://api.nasdaq.com/api/quote/${ticker}/historical?assetclass=${clase}&fromdate=${since}&limit=9999`, opts);
+      if (!res.ok) continue;
+      const filas = (await res.json())?.data?.tradesTable?.rows as { date: string; close: string }[] | undefined;
+      if (!filas?.length) continue;
+      return build(ticker, filas.map(f => {
+        const [m, d, y] = f.date.split('/');
+        return { date: `${y}-${m}-${d}`, close: Number(f.close.replace(/[$,]/g, '')) };
+      }), 'respaldo');
+    }
+  }
+  return null;
+}
+
+// El minero diario (GitHub Actions) guarda los cierres reales (sin ajustar) en precios_historicos
 async function fromSupabase(ticker: string, days: number): Promise<DailyHistory | null> {
   const since = new Date(Date.now() - days * DAY_MS).toISOString().slice(0, 10);
   const PAGE = 1000; // máximo de filas por consulta en Supabase
@@ -187,8 +240,9 @@ function slice(h: DailyHistory, days: number): DailyHistory {
 }
 
 async function load(ticker: string, window: number): Promise<DailyHistory | null> {
-  // Chile: primero la base del minero (Yahoo congela el historial chileno); resto: primero Yahoo
-  const sources = ticker.endsWith('.SN') ? [fromSupabase, fromYahoo] : [fromYahoo, fromSupabase];
+  // Primero la base del minero: ya está descargada (sin depender de Yahoo cada vez que parte una instancia)
+  // y corrige el historial chileno que Yahoo congela. Yahoo y el respaldo solo si la base no está al día.
+  const sources = [fromSupabase, fromYahoo, fromRespaldo];
   let best: DailyHistory | null = null;
   for (const source of sources) {
     try {
@@ -199,10 +253,11 @@ async function load(ticker: string, window: number): Promise<DailyHistory | null
       console.warn(`Sin historia de ${ticker} en ${source.name}:`, e instanceof Error ? e.message.slice(0, 120) : e);
     }
   }
-  // Los cierres del minero no traen los dividendos: se piden a Yahoo para ajustar la serie
+  // Los cierres del minero y del respaldo no traen los dividendos: primero los guardados, si no, Yahoo
   if (best && !best.dividendsKnown && !ticker.startsWith('^') && !ticker.includes('=')) {
     try {
-      best = conDividendos(best, await yahooDividends(ticker, window), true);
+      const guardados = await dividendosGuardados(ticker, window).catch(() => null);
+      best = conDividendos(best, guardados ?? await yahooDividends(ticker, window), true);
     } catch (e) {
       console.warn(`Sin dividendos de ${ticker}:`, e instanceof Error ? e.message.slice(0, 120) : e);
     }
@@ -257,6 +312,23 @@ export async function liveQuotes(tickers: string[]): Promise<Map<string, LiveQuo
     }
   } catch (e) {
     console.warn('Yahoo quote falló:', e instanceof Error ? e.message.slice(0, 120) : e);
+  }
+  // Respaldo: el último cierre guardado por el minero, con su fecha para que quien lo use vea si está atrasado
+  const faltan = tickers.filter(t => !out.has(t));
+  if (faltan.length) {
+    try {
+      const desde = new Date(Date.now() - 10 * DAY_MS).toISOString().slice(0, 10);
+      const { data } = await supabase.from('precios_historicos').select('ticker, date, close')
+        .in('ticker', faltan).gte('date', desde).order('date', { ascending: false });
+      for (const r of data ?? []) {
+        const price = Number(r.close);
+        if (out.has(r.ticker) || !(price > 0)) continue;
+        const currency = r.ticker.endsWith('.SN') ? 'CLP' : /^[A-Z.-]+$/.test(r.ticker) ? 'USD' : undefined;
+        out.set(r.ticker, { price, currency, time: String(r.date).slice(0, 10) });
+      }
+    } catch (e) {
+      console.warn('Sin respaldo de cotizaciones:', e instanceof Error ? e.message.slice(0, 120) : e);
+    }
   }
   return out;
 }
