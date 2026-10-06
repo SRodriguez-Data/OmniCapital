@@ -68,6 +68,55 @@ export function neweyWestCov(matrix: number[][], lags = 2): number[][] {
   return cov;
 }
 
+// Intensidad óptima de Ledoit-Wolf (2004) para encoger la covarianza muestral hacia el modelo de correlación
+// constante. Con muchos activos y pocos datos la matriz muestral exagera diferencias que son ruido; el
+// encogimiento las modera. Devuelve el factor (0 = muestral pura, 1 = correlación constante) y la correlación media.
+export function ledoitWolfConstantCorrelation(matrix: number[][]): { intensidad: number; correlacionMedia: number } {
+  const T = matrix.length;
+  const N = T ? matrix[0].length : 0;
+  if (T < 30 || N < 2) return { intensidad: 0, correlacionMedia: 0 };
+  const means = Array.from({ length: N }, (_, j) => mean(matrix.map(row => row[j])));
+  const X = matrix.map(row => row.map((v, j) => v - means[j]));
+  const S = Array.from({ length: N }, () => new Array<number>(N).fill(0));
+  for (const x of X) for (let i = 0; i < N; i++) for (let j = i; j < N; j++) S[i][j] += x[i] * x[j] / T;
+  for (let i = 0; i < N; i++) for (let j = 0; j < i; j++) S[i][j] = S[j][i];
+  const sd = S.map((r, i) => Math.sqrt(Math.max(r[i], 1e-18)));
+  let sumCorr = 0;
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) if (i !== j) sumCorr += S[i][j] / (sd[i] * sd[j]);
+  const rbar = sumCorr / (N * (N - 1));
+
+  // pi = suma de varianzas asintóticas de cada elemento de S; rho = covarianza entre S y el objetivo; gamma = distancia al objetivo
+  let pi = 0, rho = 0, gamma = 0;
+  const thetaII = Array.from({ length: N }, () => new Array<number>(N).fill(0)); // theta_ii,ij
+  for (const x of X) {
+    for (let i = 0; i < N; i++) {
+      const a = x[i] * x[i] - S[i][i];
+      for (let j = 0; j < N; j++) {
+        const y = x[i] * x[j] - S[i][j];
+        pi += y * y / T;
+        thetaII[i][j] += a * y / T;
+      }
+    }
+  }
+  for (let i = 0; i < N; i++) {
+    rho += thetaII[i][i];
+    for (let j = 0; j < N; j++) {
+      if (i === j) continue;
+      rho += (rbar / 2) * ((sd[j] / sd[i]) * thetaII[i][j] + (sd[i] / sd[j]) * thetaII[j][i]);
+      const f = rbar * sd[i] * sd[j];
+      gamma += (f - S[i][j]) ** 2;
+    }
+  }
+  const kappa = gamma > 0 ? (pi - rho) / gamma : 0;
+  return { intensidad: Math.max(0, Math.min(1, kappa / T)), correlacionMedia: rbar };
+}
+
+// Encoge una covarianza hacia la de correlación constante con la intensidad dada
+export function shrinkCov(cov: number[][], intensidad: number, correlacionMedia: number): number[][] {
+  const sd = cov.map((r, i) => Math.sqrt(Math.max(r[i], 0)));
+  return cov.map((row, i) => row.map((s, j) => (i === j ? s : (1 - intensidad) * s + intensidad * correlacionMedia * sd[i] * sd[j])));
+}
+
 export function matVec(m: number[][], v: number[]): number[] {
   return m.map(row => row.reduce((s, x, j) => s + x * v[j], 0));
 }

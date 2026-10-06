@@ -16,11 +16,19 @@ export const BENCH_CL = 'CFMITNIPSA.SN';
 // Acciones globales (MSCI ACWI) para el índice de comparación en pesos
 export const BENCH_GLOBAL = 'ACWI';
 
+export interface Dividendo { date: string; amount: number }
+
 export interface DailyHistory {
   ticker: string;
   dates: string[]; // ordenadas, YYYY-MM-DD en la zona horaria de la bolsa
-  closes: number[];
+  closes: number[]; // cierres tal como se transaron (para valorizar)
   series: DatedSeries;
+  // Cierres ajustados por dividendos (rentabilidad total): el último coincide con el real y los anteriores
+  // se rebajan en cada pago, así la caída del día ex-dividendo no parece una pérdida ni un quiebre de tendencia
+  adj: number[];
+  adjSeries: DatedSeries;
+  dividends: Dividendo[];
+  dividendsKnown: boolean; // false si no se pudo consultar el historial de dividendos
   source: 'yahoo' | 'supabase';
   fresh: boolean; // el último cierre tiene menos de una semana
   frozen: boolean; // los últimos cierres son idénticos (dato congelado)
@@ -53,7 +61,27 @@ function dayFormatter(timeZone?: string): (d: Date) => string {
   }
 }
 
-function build(ticker: string, rows: { date: string; close: number }[], source: DailyHistory['source']): DailyHistory | null {
+// Ajuste por dividendos hacia atrás: cada pago D con fecha ex-dividendo d multiplica los cierres anteriores
+// a d por (1 - D / cierre del día previo), como hace cualquier serie de "adjusted close"
+export function ajustarPorDividendos(dates: string[], closes: number[], dividends: Dividendo[]): number[] {
+  const adj = [...closes];
+  let factor = 1;
+  const pagos = [...dividends].sort((a, b) => b.date.localeCompare(a.date));
+  let k = 0;
+  for (let i = closes.length - 1; i >= 0; i--) {
+    adj[i] = closes[i] * factor;
+    // Pagos cuya fecha ex-dividendo cae justo después de este cierre
+    while (k < pagos.length && pagos[k].date > dates[i]) {
+      const D = pagos[k].amount;
+      if (i < closes.length - 1 && D > 0 && D < closes[i] * 0.5) factor *= 1 - D / closes[i];
+      k++;
+    }
+    adj[i] = closes[i] * factor;
+  }
+  return adj;
+}
+
+function build(ticker: string, rows: { date: string; close: number }[], source: DailyHistory['source'], dividends: Dividendo[] = [], dividendsKnown = false): DailyHistory | null {
   const byDate = new Map<string, number>();
   for (const r of rows) {
     if (Number.isFinite(r.close) && r.close > 0) byDate.set(r.date, r.close);
@@ -61,12 +89,28 @@ function build(ticker: string, rows: { date: string; close: number }[], source: 
   const dates = [...byDate.keys()].sort();
   if (dates.length === 0) return null;
   const closes = dates.map(d => byDate.get(d)!);
+  const adj = ajustarPorDividendos(dates, closes, dividends);
   const tail = closes.slice(-6);
   return {
     ticker, dates, closes, series: byDate, source,
+    adj, adjSeries: new Map(dates.map((d, i) => [d, adj[i]])), dividends, dividendsKnown,
     fresh: Date.now() - new Date(dates[dates.length - 1]).getTime() < 7 * DAY_MS,
     frozen: tail.length === 6 && tail.every(c => c === tail[0]),
   };
+}
+
+const conDividendos = (h: DailyHistory, dividends: Dividendo[], known: boolean): DailyHistory =>
+  build(h.ticker, h.dates.map((d, i) => ({ date: d, close: h.closes[i] })), h.source, dividends, known) ?? h;
+
+// Dividendos pagados (fecha ex-dividendo y monto por acción), en la moneda del activo
+async function yahooDividends(ticker: string, days: number): Promise<Dividendo[]> {
+  const period1 = new Date(Date.now() - days * DAY_MS);
+  const chart = await withTimeout(
+    yahooFinance.chart(ticker, { period1, interval: '1mo', events: 'div' }, yahooRequest()),
+    YAHOO_TIMEOUT_MS + 1000, `Yahoo dividendos ${ticker}`,
+  );
+  const toDay = dayFormatter(chart.meta.exchangeTimezoneName);
+  return (chart.events?.dividends ?? []).map(d => ({ date: toDay(new Date(d.date)), amount: d.amount }));
 }
 
 async function fromYahoo(ticker: string, days: number): Promise<DailyHistory | null> {
@@ -76,9 +120,10 @@ async function fromYahoo(ticker: string, days: number): Promise<DailyHistory | n
     YAHOO_TIMEOUT_MS + 1000, `Yahoo ${ticker}`,
   );
   const toDay = dayFormatter(chart.meta.exchangeTimezoneName);
+  const dividends = (chart.events?.dividends ?? []).map(d => ({ date: toDay(new Date(d.date)), amount: d.amount }));
   return build(ticker, chart.quotes
     .filter(q => q.date && q.close !== null && q.close !== undefined)
-    .map(q => ({ date: toDay(new Date(q.date)), close: q.close as number })), 'yahoo');
+    .map(q => ({ date: toDay(new Date(q.date)), close: q.close as number })), 'yahoo', dividends, true);
 }
 
 // El minero diario (GitHub Actions) guarda los cierres en precios_historicos desde 2021
@@ -134,7 +179,11 @@ function slice(h: DailyHistory, days: number): DailyHistory {
   const start = h.dates.findIndex(d => d >= since);
   if (start <= 0) return h;
   const dates = h.dates.slice(start);
-  return { ...h, dates, closes: h.closes.slice(start), series: new Map(dates.map(d => [d, h.series.get(d)!])) };
+  const adj = h.adj.slice(start);
+  return {
+    ...h, dates, closes: h.closes.slice(start), series: new Map(dates.map(d => [d, h.series.get(d)!])),
+    adj, adjSeries: new Map(dates.map((d, i) => [d, adj[i]])), dividends: h.dividends.filter(x => x.date >= dates[0]),
+  };
 }
 
 async function load(ticker: string, window: number): Promise<DailyHistory | null> {
@@ -144,10 +193,18 @@ async function load(ticker: string, window: number): Promise<DailyHistory | null
   for (const source of sources) {
     try {
       const h = await source(ticker, window);
-      if (h && usable(h)) return h;
+      if (h && usable(h)) { best = h; break; }
       if (h && (!best || (best.frozen && !h.frozen) || (!best.fresh && h.fresh) || h.closes.length > best.closes.length)) best = h;
     } catch (e) {
       console.warn(`Sin historia de ${ticker} en ${source.name}:`, e instanceof Error ? e.message.slice(0, 120) : e);
+    }
+  }
+  // Los cierres del minero no traen los dividendos: se piden a Yahoo para ajustar la serie
+  if (best && !best.dividendsKnown && !ticker.startsWith('^') && !ticker.includes('=')) {
+    try {
+      best = conDividendos(best, await yahooDividends(ticker, window), true);
+    } catch (e) {
+      console.warn(`Sin dividendos de ${ticker}:`, e instanceof Error ? e.message.slice(0, 120) : e);
     }
   }
   return best;
@@ -179,6 +236,7 @@ export interface LiveQuote {
   currency?: string;
   name?: string;
   quoteType?: string;
+  time?: string; // fecha (YYYY-MM-DD) de la cotización, para descartar precios atrasados
 }
 
 // Precio actual de varios tickers en una sola llamada
@@ -193,7 +251,8 @@ export async function liveQuotes(tickers: string[]): Promise<Map<string, LiveQuo
     for (const q of quotes) {
       const price = q.regularMarketPrice || q.regularMarketPreviousClose;
       if (q.symbol && price && price > 0) {
-        out.set(q.symbol, { price, currency: q.currency, name: q.longName || q.shortName, quoteType: q.quoteType });
+        const time = q.regularMarketTime ? new Date(q.regularMarketTime).toISOString().slice(0, 10) : undefined;
+        out.set(q.symbol, { price, currency: q.currency, name: q.longName || q.shortName, quoteType: q.quoteType, time });
       }
     }
   } catch (e) {
