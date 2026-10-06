@@ -111,6 +111,24 @@ def compute_quant_math(tickers):
         return {}, []
 
 
+def tickers_con_datos_frescos(tickers, max_date):
+    """Yahoo a veces repite el mismo cierre por semanas en acciones chilenas; un RSI calculado sobre eso es falso
+    (precio plano y luego una caída da RSI cercano a 0). Se descartan los tickers con pocos cierres distintos
+    en sus últimos 20 días."""
+    desde = (pd.Timestamp(max_date) - pd.Timedelta(days=40)).strftime("%Y-%m-%d")
+    buenos = set()
+    for i in range(0, len(tickers), 25):
+        lote = tickers[i:i + 25]
+        res = supabase.table("precios_historicos").select("date, ticker, close")            .in_("ticker", lote).gte("date", desde).order("date", desc=True).limit(1000).execute()
+        if not res.data:
+            continue
+        df = pd.DataFrame(res.data)
+        for t, g in df.groupby("ticker"):
+            ultimos = g.sort_values("date", ascending=False).head(20)["close"]
+            if len(ultimos) >= 15 and ultimos.nunique() >= 12:
+                buenos.add(t)
+    return buenos
+
 def get_fundamentals(ticker):
     try:
         info = yf.Ticker(ticker).info
@@ -126,6 +144,9 @@ def get_fundamentals(ticker):
             div_pct = div if isinstance(div, (int, float)) else 0
         div_str = f"{div_pct:.2f}%"
         deuda = info.get('debtToEquity', 0)
+        # En inmobiliarias/REITs el P/E (ganancia contable) no mide su valor: se trata como dato desconocido
+        if info.get('sector') == 'Real Estate':
+            pe = -1
         
         if not isinstance(pe, (int, float)): pe = -1
         if not isinstance(deuda, (int, float)): deuda = 0
@@ -255,6 +276,13 @@ def run_serverless_screener():
             else:
                 all_us.append(data_dict)
 
+    frescos = tickers_con_datos_frescos([c['ticker'] for c in all_us + all_cl], max_date)
+    descartados = [c['ticker'] for c in all_us + all_cl if c['ticker'] not in frescos]
+    if descartados:
+        logging.warning(f"Se descartan {len(descartados)} tickers con precios congelados en Yahoo: {', '.join(descartados[:30])}")
+    all_us = [c for c in all_us if c['ticker'] in frescos]
+    all_cl = [c for c in all_cl if c['ticker'] in frescos]
+
     top_us_fund = []
     rejected_us = []
     logging.info("⏳ Filtrando fundamentales en YFinance para US...")
@@ -283,16 +311,10 @@ def run_serverless_screener():
     rejected_us.sort(key=lambda x: x['rsi'])
     rejected_cl.sort(key=lambda x: x['rsi'])
     
-    # Aplica df.head(5) a la lista final garantizando 5 activos
+    # Hasta 5 por mercado
+    # Solo lo que pasa los fundamentales: mejor mostrar menos de 5 que rellenar con lo que no los cumple
     top_us = top_us_fund[:5]
-    if len(top_us) < 5:
-        top_us.extend(rejected_us[:5 - len(top_us)])
-        top_us.sort(key=lambda x: x['rsi'])
-        
     top_cl = top_cl_fund[:5]
-    if len(top_cl) < 5:
-        top_cl.extend(rejected_cl[:5 - len(top_cl)])
-        top_cl.sort(key=lambda x: x['rsi'])
     
     # Agregar métricas institucionales (Bollinger, Max Sell, Min Buy, Signal)
     top_us = calculate_trading_limits(top_us)
