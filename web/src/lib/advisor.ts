@@ -1,15 +1,18 @@
 import {
-  alignedReturns, annualVol, correlation, dimsonBeta, dot, expectedShortfall, historicalVaR, matVec,
-  maxDrawdown, momentum, neweyWestCov, neweyWestVariance, periodReturn, returns, rsi as rsiOf, sma,
+  alignedReturns, annualVol, correlation, dimsonBeta, dot, expectedShortfall, historicalVaR, ledoitWolfConstantCorrelation,
+  matVec, maxDrawdown, momentum, neweyWestCov, neweyWestVariance, periodReturn, returns, rsi as rsiOf, shrinkCov, sma,
   valueOn, volatilityStop, TRADING_DAYS,
 } from './quant';
 import {
   BENCH_CL, BENCH_GLOBAL, BENCH_US, FX_TICKER, dailyHistory, dolarObservado, liveQuotes, riskFreeRateClp,
   type DailyHistory, type LiveQuote,
 } from './marketData';
+import { ETF_CONOCIDOS, FONDOS_CHILE, fundamentales, type Fundamentales, type TipoActivo } from './fundamentals';
+import { contextoMercado, type ContextoMercado } from './mercado';
 
-// Motor de recomendaciones: todas las cifras salen de precios reales y las decisiones de reglas
-// explícitas. La IA solo redacta la explicación a partir de este informe.
+// Motor de recomendaciones: todas las cifras salen de datos reales (precios ajustados por dividendos,
+// fundamentales y consenso de analistas de Yahoo Finance) y las decisiones de reglas explícitas en cuatro
+// pilares: técnico, fundamental, riesgo dentro de la cartera y contexto de mercado. La IA solo redacta.
 
 export interface HoldingInput {
   ticker: string;
@@ -20,18 +23,31 @@ export interface HoldingInput {
 }
 
 export type Accion = 'AUMENTAR' | 'MANTENER' | 'REDUCIR';
+export type Conviccion = 'alta' | 'media' | 'baja';
+
+export interface Pilar<V extends string> {
+  veredicto: V;
+  motivos: string[];
+}
+export type VeredictoTecnico = 'alcista' | 'neutral' | 'bajista' | 'quiebre' | 'sin datos';
+export type VeredictoFundamental = 'favorable' | 'neutral' | 'débil' | 'sin datos';
+export type VeredictoRiesgo = 'holgado' | 'cerca del límite' | 'excedido';
 
 export interface AssetReport {
   ticker: string;
   nombre?: string;
+  tipo: TipoActivo;
+  sector?: string;
   moneda: 'USD' | 'CLP';
   cantidad: number;
   costoPromedio: number;
   precio: number;
   valorCLP: number;
   peso: number;
+  pesoEfectivo: number; // incluye lo que tienes de esta empresa dentro de tus fondos
   pnl: number | null; // en la moneda del activo
-  ret1y: number | null;
+  ret1y: number | null; // incluye dividendos
+  ret3y: number | null; // anual, incluye dividendos
   momentum: number | null; // 12-1 (o 6-1 con menos historia)
   momentumMeses: 12 | 6 | null;
   vol: number | null;
@@ -46,9 +62,14 @@ export interface AssetReport {
   stopActivado: boolean; // dos cierres seguidos bajo el stop
   diversificado: boolean;
   aporteRiesgo: number | null; // fracción del riesgo total del portafolio
+  fundamentales: Fundamentales | null;
+  tecnico: Pilar<VeredictoTecnico>;
+  fundamental: Pilar<VeredictoFundamental>;
+  riesgo: Pilar<VeredictoRiesgo>;
   accion: Accion;
+  conviccion: Conviccion;
   puntaje: number;
-  motivos: string[];
+  motivos: string[]; // los que deciden la acción
   conDatos: boolean;
   gemeloDe?: string; // activo casi idéntico de mayor peso donde conviene concentrar las compras
 }
@@ -59,16 +80,24 @@ export interface Hallazgo {
   detalle: string;
 }
 
+export interface Exposicion {
+  regiones: { nombre: string; peso: number }[];
+  sectores: { nombre: string; peso: number; via: string[] }[];
+  empresas: { ticker: string; directo: number; viaFondos: number; total: number; fondos: string[] }[];
+  notas: string[];
+}
+
 export interface PortfolioSummary {
   valorCLP: number;
   costoCLP: number;
   pnlCLP: number;
   pnlPct: number | null;
   pesoUSD: number;
-  // Riesgo y retorno de los últimos 12 meses con los pesos actuales, en pesos chilenos
+  // Riesgo y retorno con los pesos actuales, en pesos chilenos y con dividendos
   vol: number | null;
   maxDD: number | null;
   ret1y: number | null;
+  retAnualVentana: number | null; // rentabilidad anual en toda la ventana de riesgo
   sharpe: number | null;
   var95: number | null; // pérdida diaria como fracción
   var95CLP: number | null;
@@ -78,6 +107,8 @@ export interface PortfolioSummary {
   posicionesEfectivas: number | null; // número de apuestas independientes según su aporte al riesgo
   riesgoCambiario: number | null; // parte del riesgo que viene del dólar
   cobertura: number; // parte del valor con historial confiable para medir riesgo
+  ventanaAnios: number; // años de historia usados para el riesgo
+  encogimiento: number | null; // intensidad de Ledoit-Wolf aplicada a la covarianza
   sinFechaUSD: { posiciones: number; peso: number };
   indice: { nombre: string; ret1y: number; diferencia: number | null; trackingError: number | null } | null;
   perfil: string | null;
@@ -89,9 +120,13 @@ export interface AdvisorReport {
   usdClp: number;
   tasaLibreRiesgo: number;
   resumen: PortfolioSummary;
+  mercado: ContextoMercado | null;
+  exposicion: Exposicion;
+  estrategia: string[];
   hallazgos: Hallazgo[];
   posiciones: AssetReport[];
   candidatos: AssetReport[];
+  avisosDatos: string[];
 }
 
 // Covarianza anual en pesos de los activos con historial completo (portafolio y candidatos)
@@ -100,15 +135,31 @@ export interface RiskModel {
   cov: number[][];
 }
 
-export const LIMITE_ACCION = 0.2; // peso máximo prudente de una empresa individual
+export const LIMITE_ACCION = 0.2; // peso máximo prudente de una empresa individual (contando lo que hay dentro de tus fondos)
 export const LIMITE_FONDO = 0.4; // y de un fondo diversificado
+export const LIMITE_SECTOR = 0.35;
 export const limiteDe = (a: { diversificado: boolean }) => (a.diversificado ? LIMITE_FONDO : LIMITE_ACCION);
 const GEMELOS_CORR = 0.9;
-// Fondos chilenos que replican un índice amplio (Yahoo los marca como EQUITY)
-const FONDOS_INDICE = new Set(['CFMITNIPSA.SN', 'CFIETFIPSA1.SN']);
 // Los ETF apalancados o inversos no son diversificación de largo plazo
-const APALANCADO = /\b(2x|3x|ultra|leveraged|inverse|short|bear|bull)\b/i;
+const APALANCADO = /\b(2x|3x|leveraged|inverse|bear|bull|ultrapro|ultrashort)\b|\bProShares Ultra\b/i;
 const APALANCADOS = new Set(['TQQQ', 'SQQQ', 'SOXL', 'SOXS', 'UPRO', 'SPXL', 'SPXS', 'SPXU', 'TNA', 'TZA', 'LABU', 'LABD', 'FNGU', 'UVXY', 'SVXY']);
+
+// Fondos globales: parte aproximada en EE.UU. (el resto, otros países)
+const PESO_EEUU_FONDOS: Record<string, number> = { VT: 0.62, ACWI: 0.63, VXUS: 0, VEA: 0, VWO: 0, IEMG: 0, EEM: 0, EFA: 0, IEFA: 0, ECH: 0 };
+const PAISES: Record<string, string> = { 'United States': 'EE.UU.', Chile: 'Chile' };
+// Composición referencial y aproximada del IPSA (Yahoo no informa lo que tiene el ETF It Now IPSA), para ver
+// cuánto tienes de cada empresa y sector chileno contando lo que hay dentro del fondo
+const IPSA_EMPRESAS: Record<string, number> = {
+  'CHILE.SN': 0.10, 'SQM-B.SN': 0.09, 'BSANTANDER.SN': 0.08, 'LTM.SN': 0.07, 'FALABELLA.SN': 0.06, 'CENCOSUD.SN': 0.05,
+  'COPEC.SN': 0.05, 'BCI.SN': 0.05, 'ENELCHILE.SN': 0.04, 'ITAUCL.SN': 0.03, 'CMPC.SN': 0.03, 'QUINENCO.SN': 0.03,
+  'ENELAM.SN': 0.03, 'PARAUCO.SN': 0.03, 'MALLPLAZA.SN': 0.03, 'IAM.SN': 0.01, 'ILC.SN': 0.01,
+};
+const IPSA_SECTORES: Record<string, number> = {
+  Financiero: 0.27, Materiales: 0.135, 'Servicios básicos': 0.13, Industrial: 0.12, 'Consumo básico': 0.115,
+  Inmobiliario: 0.085, 'Consumo discrecional': 0.075, Energía: 0.05, Comunicaciones: 0.015, Tecnología: 0.005,
+};
+// Mercado de referencia para comparar valoraciones si Yahoo no responde
+const PER_REFERENCIA = { CLP: 12, USD: 22 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const pct = (x: number, digits = 1) => `${(x * 100).toFixed(digits)}%`;
@@ -137,71 +188,195 @@ function groupByTicker(items: HoldingInput[]): Position[] {
   return [...map.values()];
 }
 
-type Metrics = Omit<AssetReport, 'accion' | 'puntaje' | 'motivos' | 'aporteRiesgo' | 'gemeloDe'> & { sinDatosMotivo?: string };
+// --- Pilares ---------------------------------------------------------------------------------------
 
-function decide(a: Metrics): Pick<AssetReport, 'accion' | 'puntaje' | 'motivos'> {
-  if (!a.conDatos) {
-    return { accion: 'MANTENER', puntaje: 0, motivos: [a.sinDatosMotivo ?? 'No hay historial de precios suficiente para evaluarlo; se mantiene sin cambios.'] };
-  }
+interface DatosTecnicos {
+  conDatos: boolean;
+  sinDatosMotivo?: string;
+  distSma200: number | null;
+  momentum: number | null;
+  momentumMeses: 12 | 6 | null;
+  rsi: number | null;
+  stop: number | null;
+  stopActivado: boolean;
+  moneda: 'USD' | 'CLP';
+}
 
+// Tendencia con banda de ±3% sobre la media de 200 días (evita cambiar de opinión por ruido) y momentum 12-1,
+// ambos con precios ajustados por dividendos. El RSI solo sugiere el momento de entrada.
+function pilarTecnico(t: DatosTecnicos): Pilar<VeredictoTecnico> {
+  if (!t.conDatos) return { veredicto: 'sin datos', motivos: [t.sinDatosMotivo ?? 'No hay historial de precios suficiente para evaluar la tendencia.'] };
   const motivos: string[] = [];
-  let pts = 0;
+  let votos = 0;
+  if (t.distSma200 !== null) {
+    if (t.distSma200 > 0.03) { votos++; motivos.push(`Cotiza ${pct(t.distSma200)} sobre su media de 200 días: tendencia de largo plazo alcista.`); }
+    else if (t.distSma200 < -0.03) { votos--; motivos.push(`Cotiza ${pct(-t.distSma200)} bajo su media de 200 días: tendencia de largo plazo bajista.`); }
+    else motivos.push(`Cotiza junto a su media de 200 días (${signed(t.distSma200)}): sin tendencia definida.`);
+  }
+  if (t.momentum !== null) {
+    if (t.momentum > 0.05) votos++;
+    else if (t.momentum < -0.05) votos--;
+    motivos.push(`Momentum ${t.momentumMeses}-1 meses (con dividendos): ${signed(t.momentum)}.`);
+  }
+  if (t.rsi !== null && t.rsi < 30) motivos.push(`RSI ${t.rsi.toFixed(0)}: caída fuerte de corto plazo${votos > 0 ? ' dentro de una tendencia alcista, suele ser buen momento para comprar' : '; conviene esperar que se estabilice'}.`);
+  else if (t.rsi !== null && t.rsi > 70) motivos.push(`RSI ${t.rsi.toFixed(0)}: sobrecomprado en el corto plazo; si compras, hazlo en partes.`);
+  if (t.stopActivado && t.stop !== null) {
+    motivos.push(`Cerró dos días seguidos bajo su stop de volatilidad (${fmtMoney(t.stop, t.moneda)}): cayó desde su máximo del último mes más de 2 desviaciones estándar mensuales.`);
+    return { veredicto: 'quiebre', motivos };
+  }
+  return { veredicto: votos >= 1 ? 'alcista' : votos <= -1 ? 'bajista' : 'neutral', motivos };
+}
 
-  // Tendencia: precio contra su media de 200 días
-  if (a.distSma200 !== null) {
-    if (a.distSma200 >= 0) { pts++; motivos.push(`Cotiza ${pct(a.distSma200)} sobre su media de 200 días: tendencia de largo plazo alcista.`); }
-    else { pts--; motivos.push(`Cotiza ${pct(-a.distSma200)} bajo su media de 200 días: tendencia de largo plazo bajista.`); }
+// Valoración frente a su mercado, rentabilidad, crecimiento, salud del dividendo y consenso de analistas.
+function pilarFundamental(f: Fundamentales | null, tipo: TipoActivo, perMercado: number, moneda: 'USD' | 'CLP'): Pilar<VeredictoFundamental> {
+  if (!f) return { veredicto: 'sin datos', motivos: ['Yahoo Finance no tiene datos fundamentales de este activo.'] };
+  const motivos: string[] = [];
+  let puntos = 0;
+  let datos = 0;
+  const mercado = moneda === 'CLP' ? 'la bolsa chilena' : 'el S&P 500';
+
+  if (tipo === 'accion') {
+    if (f.per !== undefined) {
+      datos++;
+      const rel = f.per / perMercado;
+      if (rel < 0.8) { puntos++; motivos.push(`Barata frente a ${mercado}: PER ${f.per.toFixed(1)} vs. ${perMercado.toFixed(1)}.`); }
+      else if (rel > 1.6 && (f.crecimientoUtilidad ?? 0) < 0.2) { puntos--; motivos.push(`Cara frente a ${mercado} (PER ${f.per.toFixed(1)} vs. ${perMercado.toFixed(1)}) sin un crecimiento que lo justifique.`); }
+      else motivos.push(`PER ${f.per.toFixed(1)} vs. ${perMercado.toFixed(1)} de ${mercado}${rel > 1.6 ? ': exigente, pero con utilidades creciendo fuerte' : ': valoración razonable'}.`);
+      if (f.perForward !== undefined && f.perForward < f.per * 0.85) motivos.push(`El PER esperado (${f.perForward.toFixed(1)}) es menor: el mercado espera que las utilidades crezcan.`);
+      else if (f.perForward !== undefined && f.perForward > f.per * 1.15) motivos.push(`El PER esperado (${f.perForward.toFixed(1)}) es mayor: se esperan utilidades más bajas.`);
+    }
+    if (f.roe !== undefined) {
+      datos++;
+      if (f.roe >= 0.15) { puntos++; motivos.push(`Rentable: ROE de ${pct(f.roe)}${f.pvl !== undefined ? ` con P/VL ${f.pvl.toFixed(1)}` : ''}.`); }
+      else if (f.roe < 0.07) { puntos--; motivos.push(`Baja rentabilidad: ROE de ${pct(f.roe)}.`); }
+      else motivos.push(`ROE de ${pct(f.roe)}: rentabilidad normal.`);
+    }
+    if (f.deudaPatrimonio !== undefined && f.sector !== 'Financiero' && f.deudaPatrimonio > 2) {
+      puntos--;
+      motivos.push(`Endeudada: deuda de ${f.deudaPatrimonio.toFixed(1)} veces su patrimonio.`);
+    }
+    if (f.crecimientoUtilidad !== undefined) {
+      datos++;
+      if (f.crecimientoUtilidad >= 0.1) { puntos++; motivos.push(`Utilidades creciendo ${signed(f.crecimientoUtilidad)} anual (último trimestre).`); }
+      else if (f.crecimientoUtilidad <= -0.15) { puntos--; motivos.push(`Utilidades cayendo ${signed(f.crecimientoUtilidad)} anual (último trimestre).`); }
+    }
+    if (f.analistas) {
+      datos++;
+      const a = f.analistas;
+      const positiva = /compra/.test(a.recomendacion);
+      const negativa = /venta|bajo el mercado/.test(a.recomendacion);
+      if (a.potencial >= 0.15 && !negativa) puntos++;
+      else if (a.potencial <= -0.05 || negativa) puntos--;
+      motivos.push(`${a.n} analistas: ${a.recomendacion}, precio objetivo promedio ${fmtMoney(a.objetivo, moneda)} (${signed(a.potencial)} de potencial)${positiva && a.potencial < 0.05 ? ', aunque ya está cerca del objetivo' : ''}.`);
+    }
+    if (f.payout !== undefined && f.payout > 1) {
+      puntos--;
+      motivos.push(`Reparte en dividendos ${pct(f.payout, 0)} de su utilidad: el dividendo podría bajar.`);
+    } else if (f.dividendYield !== undefined && f.dividendYield >= 0.04) {
+      motivos.push(`Dividendo de ${pct(f.dividendYield)} anual${f.payout !== undefined ? ` (reparte ${pct(f.payout, 0)} de la utilidad)` : ''}.`);
+    }
+  } else if (tipo === 'etf') {
+    if (f.gastoAnual !== undefined) {
+      datos++;
+      if (f.gastoAnual <= 0.002) { puntos++; motivos.push(`Costo anual muy bajo (${pct(f.gastoAnual, 2)}).`); }
+      else if (f.gastoAnual > 0.0075) { puntos--; motivos.push(`Costo anual alto (${pct(f.gastoAnual, 2)}): existen fondos equivalentes más baratos.`); }
+      else motivos.push(`Costo anual ${pct(f.gastoAnual, 2)}.`);
+    }
+    if (f.per !== undefined) {
+      datos++;
+      const rel = f.per / perMercado;
+      motivos.push(`PER de lo que tiene el fondo: ${f.per.toFixed(1)} (${rel > 1.3 ? `exigente frente a ${perMercado.toFixed(1)} de ${mercado}` : rel < 0.8 ? `barato frente a ${perMercado.toFixed(1)} de ${mercado}` : `similar a ${perMercado.toFixed(1)} de ${mercado}`}).`);
+    }
+    const sectores = Object.entries(f.sectores ?? {}).sort((a, b) => b[1] - a[1]);
+    if (sectores[0] && sectores[0][1] > 0.4) motivos.push(`Concentrado: ${pct(sectores[0][1], 0)} en ${sectores[0][0]}.`);
+    if (f.dividendYield !== undefined && f.dividendYield > 0.025) motivos.push(`Dividendo de ${pct(f.dividendYield)} anual.`);
+  } else {
+    motivos.push('Fondo de inversión: Yahoo no informa sus estados financieros; revisa su valor cuota y valor libro en la CMF.');
   }
-  // Momentum 12-1: el factor de impulso más documentado (excluye el último mes, que tiende a revertirse)
-  if (a.momentum !== null) {
-    if (a.momentum > 0) pts++; else pts--;
-    motivos.push(`Momentum ${a.momentumMeses}-1 meses: ${signed(a.momentum)} (${a.momentum > 0 ? 'a favor' : 'en contra'}).`);
+
+  if (datos < 2 && tipo !== 'etf') return { veredicto: 'sin datos', motivos: motivos.length ? motivos : ['Datos fundamentales insuficientes.'] };
+  const veredicto: VeredictoFundamental = tipo === 'etf'
+    ? (puntos >= 1 ? 'favorable' : puntos <= -1 ? 'débil' : 'neutral')
+    : (puntos >= 2 ? 'favorable' : puntos <= -2 ? 'débil' : 'neutral');
+  return { veredicto, motivos };
+}
+
+interface Decision { accion: Accion; conviccion: Conviccion; puntaje: number; motivos: string[] }
+
+// Combina los pilares en una acción. La regla de riesgo manda (no se compra lo que ya pesa demasiado).
+function decidir(a: {
+  diversificado: boolean; tipo: TipoActivo; peso: number; pesoEfectivo: number; distSma200: number | null; vol: number | null; pnl: number | null;
+  tecnico: Pilar<VeredictoTecnico>; fundamental: Pilar<VeredictoFundamental>; riesgo: Pilar<VeredictoRiesgo>;
+}): Decision {
+  const t = a.tecnico.veredicto, f = a.fundamental.veredicto, r = a.riesgo.veredicto;
+  const motivos: string[] = [];
+  const puntaje = (t === 'alcista' ? 1 : t === 'bajista' ? -1 : t === 'quiebre' ? -2 : 0) + (f === 'favorable' ? 1 : f === 'débil' ? -1 : 0);
+  const estirado = a.distSma200 !== null && a.distSma200 > 0.25;
+
+  if (t === 'sin datos') return { accion: 'MANTENER', conviccion: 'baja', puntaje: 0, motivos: ['Sin precios confiables al día: no se recomienda comprar ni vender hasta tener datos.'] };
+  if (r === 'excedido') {
+    return { accion: 'REDUCIR', conviccion: 'alta', puntaje, motivos: [`Pesa ${pct(a.pesoEfectivo)} de tu patrimonio${a.pesoEfectivo > a.peso + 0.005 ? ' contando lo que tienes dentro de tus fondos' : ''}, sobre el máximo prudente de ${pct(limiteDe(a), 0)}: conviene rebalancear.`] };
   }
-  if (a.rsi !== null) {
-    if (a.rsi < 30) {
-      if (a.distSma200 !== null && a.distSma200 >= 0) { pts++; motivos.push(`RSI ${a.rsi.toFixed(0)}: caída de corto plazo dentro de una tendencia alcista, buen momento para comprar.`); }
-      else motivos.push(`RSI ${a.rsi.toFixed(0)}: sobrevendido, pero con tendencia bajista; conviene esperar que se estabilice antes de comprar.`);
-    } else if (a.rsi > 70) {
-      pts--;
-      motivos.push(`RSI ${a.rsi.toFixed(0)}: sobrecomprado, con riesgo de corrección de corto plazo.`);
+
+  let accion: Accion = 'MANTENER';
+  let conviccion: Conviccion = 'media';
+  if (t === 'quiebre') {
+    if (f === 'favorable' && !a.diversificado) {
+      motivos.push('Rompió su stop, pero sus fundamentales son buenos: revisa si hay una noticia que lo explique antes de vender; no aumentes por ahora.');
+    } else if (a.diversificado) {
+      motivos.push('Rompió su stop, pero es un fondo diversificado: una caída del mercado no es razón para vender; no aumentes por ahora.');
+    } else {
+      accion = 'REDUCIR';
+      conviccion = f === 'débil' ? 'alta' : 'media';
+      motivos.push(`Rompió su stop de volatilidad${f === 'débil' ? ' y sus fundamentales son débiles' : ''}: proteger la ganancia o cortar la pérdida es lo prudente.`);
+    }
+  } else if (a.diversificado) {
+    if (t === 'alcista' && f !== 'débil' && !estirado) {
+      accion = 'AUMENTAR';
+      conviccion = r === 'holgado' && f === 'favorable' ? 'alta' : 'media';
+      motivos.push(`Fondo diversificado en tendencia alcista${f === 'favorable' ? ' y de bajo costo' : ''}: buen lugar para tus próximos aportes.`);
+    } else if (t === 'bajista') {
+      motivos.push('Fondo diversificado en una mala racha: no es motivo para vender; espera que la tendencia mejore para aumentar.');
+    } else if (estirado) {
+      motivos.push(`Está ${pct(a.distSma200!)} sobre su media de 200 días, muy estirado: mejor aportar de a poco o esperar un retroceso.`);
+    } else {
+      motivos.push('Fondo diversificado sin señal clara: mantener.');
+    }
+  } else {
+    if (f === 'favorable' && t !== 'bajista' && !estirado) {
+      accion = 'AUMENTAR';
+      conviccion = t === 'alcista' && r === 'holgado' ? 'alta' : 'media';
+      motivos.push(`Buenos fundamentales${t === 'alcista' ? ' y tendencia alcista' : ' y sin tendencia en contra'}: los dos pilares acompañan.`);
+    } else if (t === 'alcista' && f === 'neutral' && !estirado) {
+      accion = 'AUMENTAR';
+      conviccion = 'baja';
+      motivos.push('Tendencia alcista con fundamentales normales: se puede aumentar, con montos moderados.');
+    } else if (t === 'bajista' && (f === 'débil' || f === 'sin datos' || f === 'neutral')) {
+      accion = 'REDUCIR';
+      conviccion = f === 'débil' ? 'alta' : 'media';
+      motivos.push(`Tendencia bajista${f === 'débil' ? ' y fundamentales débiles' : ' sin fundamentales que la compensen'}: el precio y el negocio no acompañan.`);
+    } else if (t === 'bajista' && f === 'favorable') {
+      motivos.push('Buena empresa en una mala racha: mantener y esperar que la tendencia se dé vuelta antes de aumentar.');
+    } else if (estirado && (t === 'alcista' || f === 'favorable')) {
+      motivos.push(`Está ${pct(a.distSma200!)} sobre su media de 200 días, muy estirado: mejor esperar un retroceso para aumentar.`);
+    } else if (f === 'débil') {
+      motivos.push('Fundamentales débiles sin tendencia que los compense: no aumentes.');
+    } else {
+      motivos.push('Sin señales claras en precio ni fundamentales: mantener.');
     }
   }
-  if (a.stopActivado && a.stop !== null) {
-    pts -= 2;
-    motivos.push(`Cerró dos días seguidos bajo su stop de volatilidad (${fmtMoney(a.stop, a.moneda)}): cayó desde su máximo del último mes más de 2 desviaciones estándar mensuales.`);
-  }
 
-  let accion: Accion = pts >= 2 ? 'AUMENTAR' : pts <= -2 || a.stopActivado ? 'REDUCIR' : 'MANTENER';
-
-  if (accion === 'AUMENTAR' && a.distSma200 !== null && a.distSma200 > 0.25) {
+  if (accion === 'AUMENTAR' && r === 'cerca del límite') {
     accion = 'MANTENER';
-    motivos.push(`Está ${pct(a.distSma200)} sobre su media de 200 días, muy estirado: mejor esperar un retroceso para aumentar.`);
+    motivos.push(`Ya pesa ${pct(a.pesoEfectivo)} de tu patrimonio, cerca del máximo de ${pct(limiteDe(a), 0)}: no conviene concentrarse más.`);
   }
-  if (accion === 'REDUCIR' && a.diversificado && a.peso <= LIMITE_FONDO) {
-    accion = 'MANTENER';
-    motivos.push('Es un fondo diversificado de largo plazo: una mala racha del mercado no es motivo suficiente para vender.');
-  }
-
-  const limite = limiteDe(a);
-  if (a.peso > limite) {
-    accion = 'REDUCIR';
-    motivos.push(`Pesa ${pct(a.peso)} del portafolio, sobre el máximo prudente de ${pct(limite, 0)}: conviene rebalancear.`);
-  } else if (accion === 'AUMENTAR' && a.peso > 0.75 * limite) {
-    accion = 'MANTENER';
-    motivos.push(`Ya pesa ${pct(a.peso)} del portafolio, cerca del máximo de ${pct(limite, 0)}: no conviene concentrarse más.`);
-  }
-
-  if (accion === 'AUMENTAR' && a.vol !== null && a.vol > 0.6) {
-    motivos.push(`Volatilidad muy alta (${pct(a.vol, 0)} anual): si aumentas, hazlo con montos pequeños.`);
-  }
-  if (a.pnl !== null && a.pnl > 0.5) {
-    motivos.push(`Acumula ${signed(a.pnl)} desde tu compra${accion !== 'AUMENTAR' ? '; tomar parte de la ganancia es razonable' : ''}.`);
-  } else if (a.pnl !== null && a.pnl < -0.25 && accion !== 'AUMENTAR') {
-    motivos.push(`Pierde ${pct(-a.pnl)} desde tu compra: revisa si la razón por la que lo compraste sigue vigente.`);
-  }
-
-  return { accion, puntaje: pts, motivos };
+  if (accion === 'AUMENTAR' && a.vol !== null && a.vol > 0.6) motivos.push(`Volatilidad muy alta (${pct(a.vol, 0)} anual): si aumentas, hazlo con montos pequeños.`);
+  if (a.pnl !== null && a.pnl > 0.5 && accion !== 'AUMENTAR') motivos.push(`Acumula ${signed(a.pnl)} desde tu compra: tomar parte de la ganancia es razonable si quieres rebalancear.`);
+  else if (a.pnl !== null && a.pnl < -0.25 && accion !== 'AUMENTAR') motivos.push(`Pierde ${pct(-a.pnl)} desde tu compra: revisa si la razón por la que lo compraste sigue vigente.`);
+  return { accion, conviccion, puntaje, motivos };
 }
+
+// --- Informe ---------------------------------------------------------------------------------------
 
 // `candidatos`: tickers fuera del portafolio que se evalúan con las mismas reglas (peso 0), sin entrar
 // en las métricas del portafolio. Los usa el optimizador, que además recibe el modelo de riesgo.
@@ -214,47 +389,76 @@ export async function buildAdvisorReport(
     .filter(t => !positions.some(p => p.ticker === t))
     .map(t => ({ ticker: t, moneda: t.endsWith('.SN') ? 'CLP' : 'USD', cantidad: 0, costoNativo: 0, lotes: [] }));
   const tickers = [...positions, ...extras].map(p => p.ticker);
+  const avisosDatos: string[] = [];
 
   // El dólar se pide desde la compra más antigua, para valorizar el costo de cada lote en pesos
   const oldest = items.map(i => i.purchase_date).filter((d): d is string => !!d).sort()[0];
-  const fxDays = oldest ? Math.min(15 * 365, Math.max(400, Math.ceil((Date.now() - new Date(oldest).getTime()) / DAY_MS) + 10)) : 400;
+  const fxDays = Math.max(3 * 365 + 10, oldest ? Math.min(15 * 365, Math.ceil((Date.now() - new Date(oldest).getTime()) / DAY_MS) + 10) : 0);
+  const DIAS_HISTORIA = 3 * 365 + 10; // tres años: riesgo más estable que con uno solo
 
-  const [histories, fx, benchUS, benchCL, benchGlobal, quotes, rf, dolar] = await Promise.all([
-    Promise.all(tickers.map(t => dailyHistory(t))),
+  const [histories, fx, benchUS, benchCL, benchGlobal, quotes, rf, dolar, fund, mercado] = await Promise.all([
+    Promise.all(tickers.map(t => dailyHistory(t, DIAS_HISTORIA))),
     dailyHistory(FX_TICKER, fxDays),
-    dailyHistory(BENCH_US),
-    dailyHistory(BENCH_CL),
-    dailyHistory(BENCH_GLOBAL),
+    dailyHistory(BENCH_US, DIAS_HISTORIA),
+    dailyHistory(BENCH_CL, DIAS_HISTORIA),
+    dailyHistory(BENCH_GLOBAL, DIAS_HISTORIA),
     liveQuotes(tickers),
     riskFreeRateClp(),
     dolarObservado(),
+    fundamentales([...tickers, BENCH_CL, 'VOO']).catch(() => new Map<string, Fundamentales>()),
+    contextoMercado().catch(() => null),
   ]);
   const usdClp = dolar ?? fx?.closes.at(-1) ?? null;
   if (!usdClp) throw new Error('No se pudo obtener el tipo de cambio del dólar.');
+  if (quotes.size === 0 && tickers.length > 0) avisosDatos.push('Yahoo no entregó cotizaciones en vivo: se usaron los últimos cierres conocidos.');
+  if (fund.size === 0) avisosDatos.push('Yahoo no entregó datos fundamentales: las decisiones usan solo precios y riesgo.');
+  if (!dolar) avisosDatos.push('El dólar observado no estuvo disponible: se usó el último cierre de Yahoo.');
 
+  const perMercado = {
+    CLP: fund.get(BENCH_CL)?.per ?? PER_REFERENCIA.CLP,
+    USD: fund.get('VOO')?.per ?? PER_REFERENCIA.USD,
+  };
   const histOf = new Map<string, DailyHistory | null>(tickers.map((t, i) => [t, histories[i]]));
   const fxAt = (fecha?: string | null) => (fecha && fx ? valueOn(fx.series, fx.dates, fecha) : undefined) ?? usdClp;
+
+  // Tipo de activo: fondos chilenos conocidos, Yahoo (quoteType o fundamentales) o la lista de ETFs conocidos.
+  // Así un ETF no pasa a tratarse como acción individual si la cotización de Yahoo falla.
+  const tipoDe = (ticker: string, q?: LiveQuote): TipoActivo =>
+    FONDOS_CHILE[ticker]?.tipo ?? fund.get(ticker)?.tipo
+    ?? (q?.quoteType === 'ETF' || q?.quoteType === 'MUTUALFUND' || ETF_CONOCIDOS.has(ticker) ? 'etf' : 'accion');
 
   // 1. Valorización y costo en pesos (el costo en dólares usa el dólar del día de compra, si se conoce)
   const base = positions.map(p => {
     const h = histOf.get(p.ticker) ?? null;
     const q = quotes.get(p.ticker);
-    const precio = q?.price ?? h?.closes.at(-1) ?? p.costoNativo / p.cantidad;
+    // Moneda real del activo según Yahoo: un ticker chileno cargado como USD se valorizaría 900 veces más
+    const monedaReal = q?.currency === 'USD' || q?.currency === 'CLP' ? q.currency : p.moneda;
+    if (monedaReal !== p.moneda) avisosDatos.push(`${p.ticker} está cargado en ${p.moneda} pero cotiza en ${monedaReal}: se valorizó en ${monedaReal}. Corrige la moneda en tu portafolio.`);
+    const pos = { ...p, moneda: monedaReal };
+    // Una cotización más antigua que el último cierre del historial no se usa
+    const cotizacionVigente = q && (!q.time || !h || q.time >= h.dates.at(-1)!);
+    const precio = (cotizacionVigente ? q?.price : undefined) ?? h?.closes.at(-1) ?? q?.price ?? p.costoNativo / p.cantidad;
+    if (!q && !h) avisosDatos.push(`${p.ticker}: sin precio de mercado, se valorizó a su costo.`);
     const valorNativo = p.cantidad * precio;
-    const aCLP = (monto: number, fecha?: string | null) => (p.moneda === 'USD' ? monto * fxAt(fecha) : monto);
+    const aCLP = (monto: number, fecha?: string | null) => (monedaReal === 'USD' ? monto * fxAt(fecha) : monto);
     return {
-      p, h, q, precio,
-      valorCLP: p.moneda === 'USD' ? valorNativo * usdClp : valorNativo,
+      p: pos, h, q, precio,
+      valorCLP: monedaReal === 'USD' ? valorNativo * usdClp : valorNativo,
       costoCLP: p.lotes.reduce((s, l) => s + aCLP(l.cantidad * l.precio, l.fecha), 0),
-      sinFecha: p.moneda === 'USD' && p.lotes.some(l => !l.fecha),
+      sinFecha: monedaReal === 'USD' && p.lotes.some(l => !l.fecha),
     };
   });
   const totalCLP = base.reduce((s, b) => s + b.valorCLP, 0);
   const costoTotalCLP = base.reduce((s, b) => s + b.costoCLP, 0);
 
-  // 2. Métricas y decisión por activo
+  // 2. Exposición mirando dentro de los fondos: cuánto tienes de cada empresa, sector y región
+  const pesoDe = new Map(base.map(b => [b.p.ticker, totalCLP > 0 ? b.valorCLP / totalCLP : 0]));
+  const exposicion = calcularExposicion(base.map(b => ({ ticker: b.p.ticker, moneda: b.p.moneda, peso: pesoDe.get(b.p.ticker)!, tipo: tipoDe(b.p.ticker, b.q) })), fund);
+  const efectivo = new Map(exposicion.empresas.map(e => [e.ticker, e.total]));
+
+  // 3. Métricas y decisión por activo
   const assess = (p: Position, h: DailyHistory | null, q: LiveQuote | undefined, precio: number, valorCLP: number): AssetReport => {
-    const closes = h?.closes ?? [];
+    const closes = h?.adj ?? []; // con dividendos
     const year = closes.slice(-(TRADING_DAYS + 1));
     const conDatos = !!h && h.fresh && !h.frozen && closes.length >= 60;
     const sinDatosMotivo = !h || closes.length < 60
@@ -270,44 +474,47 @@ export async function buildAdvisorReport(
     if (p.ticker === benchTicker) beta = 1;
     else if (h && bench && conDatos) {
       const cutoff = h.dates[Math.max(0, h.dates.length - TRADING_DAYS - 1)];
-      beta = dimsonBeta(...alignedReturns(new Map([...h.series].filter(([d]) => d >= cutoff)), bench.series));
+      beta = dimsonBeta(...alignedReturns(new Map([...h.adjSeries].filter(([d]) => d >= cutoff)), bench.adjSeries));
     }
     const costoPromedio = p.cantidad > 0 ? p.costoNativo / p.cantidad : 0;
     const sma200 = sma(closes, 200);
     const mom = momentum(closes);
-    const nombre = q?.name;
+    const f = fund.get(p.ticker) ?? null;
+    const nombre = q?.name ?? f?.nombre;
+    const tipo = tipoDe(p.ticker, q);
     const apalancado = APALANCADOS.has(p.ticker) || (!!nombre && APALANCADO.test(nombre));
+    const diversificado = tipo === 'etf' && !apalancado;
+    const distSma200 = sma200 ? precio / sma200 - 1 : null;
+    const rsi = rsiOf(closes.slice(-250));
+    const anios3 = Math.min(3, (n - 1) / TRADING_DAYS);
+    const ret3y = anios3 >= 2 && closes[0] > 0 ? (closes[n - 1] / closes[0]) ** (1 / anios3) - 1 : null;
+    const peso = totalCLP > 0 ? valorCLP / totalCLP : 0;
+    const pesoEfectivo = diversificado ? peso : Math.max(peso, efectivo.get(p.ticker) ?? peso);
+    const vol = annualVol(returns(year));
+    const pnl = costoPromedio > 0 ? precio / costoPromedio - 1 : null;
 
-    const metrics: Metrics = {
-      ticker: p.ticker,
-      nombre,
-      moneda: p.moneda,
-      cantidad: p.cantidad,
-      costoPromedio,
-      precio,
-      valorCLP,
-      peso: totalCLP > 0 ? valorCLP / totalCLP : 0,
-      pnl: costoPromedio > 0 ? precio / costoPromedio - 1 : null,
-      ret1y: periodReturn(closes, TRADING_DAYS),
-      momentum: mom?.valor ?? null,
-      momentumMeses: mom?.meses ?? null,
-      vol: annualVol(returns(year)),
-      maxDD: conDatos ? maxDrawdown(year) : null,
-      beta,
-      benchmark: benchTicker === BENCH_CL ? 'IPSA' : 'S&P 500',
-      rsi: rsiOf(closes.slice(-250)),
-      sma200,
-      distSma200: sma200 ? precio / sma200 - 1 : null,
-      stop: stopCalc?.stop ?? null,
-      stopDist: stopCalc ? stopCalc.stop / precio - 1 : null,
-      stopActivado,
-      diversificado: !apalancado && (q?.quoteType === 'ETF' || q?.quoteType === 'MUTUALFUND' || FONDOS_INDICE.has(p.ticker)),
-      conDatos,
-      sinDatosMotivo,
+    const tecnico = pilarTecnico({ conDatos, sinDatosMotivo, distSma200, momentum: mom?.valor ?? null, momentumMeses: mom?.meses ?? null, rsi, stop: stopCalc?.stop ?? null, stopActivado, moneda: p.moneda });
+    const fundamental = pilarFundamental(f, tipo, perMercado[p.moneda], p.moneda);
+    const limite = diversificado ? LIMITE_FONDO : LIMITE_ACCION;
+    const riesgo: Pilar<VeredictoRiesgo> = {
+      veredicto: pesoEfectivo > limite ? 'excedido' : pesoEfectivo > 0.75 * limite ? 'cerca del límite' : 'holgado',
+      motivos: [`Pesa ${pct(peso)} de tu patrimonio${pesoEfectivo > peso + 0.005 ? ` (${pct(pesoEfectivo)} contando lo que tienes dentro de tus fondos)` : ''}; máximo prudente ${pct(limite, 0)}${diversificado ? ' para un fondo diversificado' : ' para una sola empresa'}.`],
     };
-    const { sinDatosMotivo: _omit, ...rest } = metrics;
-    void _omit;
-    return { ...rest, aporteRiesgo: null, ...decide(metrics) };
+    if (vol !== null) riesgo.motivos.push(`Volatilidad ${pct(vol, 0)} anual${beta !== null ? `, beta ${beta.toFixed(2)} vs. ${benchTicker === BENCH_CL ? 'IPSA' : 'S&P 500'}` : ''}.`);
+    const decision = decidir({ diversificado, tipo, peso, pesoEfectivo, distSma200, vol, pnl, tecnico, fundamental, riesgo });
+
+    return {
+      ticker: p.ticker, nombre, tipo, sector: f?.sector ?? (tipo === 'etf' ? f?.categoria : undefined),
+      moneda: p.moneda, cantidad: p.cantidad, costoPromedio, precio, valorCLP, peso, pesoEfectivo, pnl,
+      ret1y: periodReturn(closes, TRADING_DAYS), ret3y,
+      momentum: mom?.valor ?? null, momentumMeses: mom?.meses ?? null,
+      vol, maxDD: conDatos ? maxDrawdown(year) : null, beta,
+      benchmark: benchTicker === BENCH_CL ? 'IPSA' : 'S&P 500',
+      rsi, sma200, distSma200,
+      stop: stopCalc?.stop ?? null, stopDist: stopCalc ? stopCalc.stop / precio - 1 : null, stopActivado,
+      diversificado, aporteRiesgo: null, fundamentales: f,
+      tecnico, fundamental, riesgo, ...decision, conDatos,
+    };
   };
   const posiciones = base.map(b => assess(b.p, b.h, b.q, b.precio, b.valorCLP));
   posiciones.sort((a, b) => b.valorCLP - a.valorCLP);
@@ -319,12 +526,23 @@ export async function buildAdvisorReport(
     })
     .filter((a): a is AssetReport => a !== null);
 
-  // 3. Modelo de riesgo en pesos del último año. Solo entran activos con historial fresco que cubra el
-  //    año completo; el resto se informa como no cubierto (antes se trataban como si no tuvieran riesgo).
-  const cutoff = new Date(Date.now() - 365 * DAY_MS).toISOString().slice(0, 10);
-  const cubre = (a: AssetReport) => a.conDatos && (histOf.get(a.ticker)?.dates[0] ?? '9999') <= addDays(cutoff, 10);
-  const cubiertos = posiciones.filter(cubre);
-  const candidatosCubiertos = evaluados.filter(cubre);
+  // 4. Modelo de riesgo en pesos y con dividendos. Se usa la ventana más larga (3, 2 o 1 año) en la que los
+  //    activos con historial cubran al menos el 90% del valor; el resto se informa como no cubierto.
+  let ventanaAnios = 1;
+  let cutoff = '';
+  let cubiertos: AssetReport[] = [];
+  for (const anios of [3, 2, 1]) {
+    const c = new Date(Date.now() - anios * 365 * DAY_MS).toISOString().slice(0, 10);
+    const cubre = (a: AssetReport) => a.conDatos && (histOf.get(a.ticker)?.dates[0] ?? '9999') <= addDays(c, 10);
+    const cub = posiciones.filter(cubre);
+    const valor = cub.reduce((s, a) => s + a.valorCLP, 0);
+    if (anios === 1 || (totalCLP > 0 && valor / totalCLP >= 0.9)) {
+      ventanaAnios = anios; cutoff = c; cubiertos = cub;
+      break;
+    }
+  }
+  const cubreVentana = (a: AssetReport) => a.conDatos && (histOf.get(a.ticker)?.dates[0] ?? '9999') <= addDays(cutoff, 10);
+  const candidatosCubiertos = evaluados.filter(cubreVentana);
   const universo = [...cubiertos, ...candidatosCubiertos];
   const calendar = [...new Set(universo.flatMap(a => histOf.get(a.ticker)!.dates))].filter(d => d >= cutoff).sort();
 
@@ -333,7 +551,7 @@ export async function buildAdvisorReport(
   const usdCubierto = cubiertos.reduce((s, a, i) => s + (a.moneda === 'USD' ? w[i] : 0), 0);
 
   // Retornos diarios locales de cada activo (precio arrastrado en los feriados de su bolsa) y del dólar
-  const localReturns = (h: DailyHistory) => returns(calendar.map(d => valueOn(h.series, h.dates, d) ?? h.closes[0]));
+  const localReturns = (h: DailyHistory) => returns(calendar.map(d => valueOn(h.adjSeries, h.dates, d) ?? h.adj[0]));
   const fxReturns = returns(calendar.map(d => fxAt(d)));
   const localByTicker = new Map(universo.map(a => [a.ticker, localReturns(histOf.get(a.ticker)!)]));
   const clpReturns = (a: AssetReport) => {
@@ -344,9 +562,9 @@ export async function buildAdvisorReport(
   const span = calendar.length > 1 ? (new Date(calendar[T]).getTime() - new Date(calendar[0]).getTime()) / DAY_MS : 0;
   const periodsPerYear = span > 0 ? T * 365 / span : TRADING_DAYS;
 
-  let vol: number | null = null, ret1y: number | null = null, maxDD: number | null = null;
+  let vol: number | null = null, ret1y: number | null = null, retAnualVentana: number | null = null, maxDD: number | null = null;
   let var95: number | null = null, es95: number | null = null, diversificacion: number | null = null;
-  let posicionesEfectivas: number | null = null, riesgoCambiario: number | null = null;
+  let posicionesEfectivas: number | null = null, riesgoCambiario: number | null = null, encogimiento: number | null = null;
   let indice: PortfolioSummary['indice'] = null;
   let modelo: RiskModel = { tickers: [], cov: [] };
 
@@ -356,7 +574,9 @@ export async function buildAdvisorReport(
     vol = Math.sqrt(neweyWestVariance(portfolio) * periodsPerYear);
     const index = [1];
     portfolio.forEach(r => index.push(index[index.length - 1] * (1 + r)));
-    ret1y = index[index.length - 1] - 1;
+    retAnualVentana = index[index.length - 1] ** (365 / Math.max(span, 1)) - 1;
+    const desdeUnAnio = calendar.findIndex(d => d >= addDays(new Date().toISOString().slice(0, 10), -365));
+    ret1y = desdeUnAnio >= 0 ? index[index.length - 1] / index[desdeUnAnio] - 1 : null;
     maxDD = maxDrawdown(index);
     var95 = historicalVaR(portfolio);
     es95 = expectedShortfall(portfolio);
@@ -376,74 +596,116 @@ export async function buildAdvisorReport(
       posicionesEfectivas = totalRc > 0 ? 1 / rcActivos.reduce((s, x) => s + (x / totalRc) ** 2, 0) : null;
     }
 
-    // Matriz en pesos para el optimizador (portafolio + candidatos)
+    // Matriz en pesos para el optimizador (portafolio + candidatos), encogida con Ledoit-Wolf
     const clpMatrix = Array.from({ length: T }, (_, t) => universo.map(a => clpByTicker.get(a.ticker)![t]));
-    const covClp = neweyWestCov(clpMatrix).map(row => row.map(x => x * periodsPerYear));
+    const lw = ledoitWolfConstantCorrelation(clpMatrix);
+    encogimiento = lw.intensidad;
+    const covClp = shrinkCov(neweyWestCov(clpMatrix), lw.intensidad, lw.correlacionMedia).map(row => row.map(x => x * periodsPerYear));
     modelo = { tickers: universo.map(a => a.ticker), cov: covClp };
     if (vol > 0) {
       const sumaIndividual = cubiertos.reduce((s, _, i) => s + w[i] * Math.sqrt(Math.max(covClp[i][i], 0)), 0);
       diversificacion = sumaIndividual / vol;
     }
 
-    // Índice equivalente: IPSA y acciones globales en pesos, con tu misma mezcla de monedas
+    // Índice equivalente: IPSA y acciones globales en pesos, con tu misma mezcla de monedas (último año)
     const global = benchGlobal ?? benchUS;
-    if (benchCL && global) {
+    if (benchCL && global && benchCL.fresh && desdeUnAnio >= 0) {
       const rCl = localReturns(benchCL);
       const rGl = localReturns(global).map((x, t) => (1 + x) * (1 + fxReturns[t]) - 1);
-      const bench = rCl.map((x, t) => (1 - usdCubierto) * x + usdCubierto * rGl[t]);
+      const bench = rCl.map((x, t) => (1 - usdCubierto) * x + usdCubierto * rGl[t]).slice(desdeUnAnio);
+      const propio = portfolio.slice(desdeUnAnio);
       const retB = bench.reduce((acc, r) => acc * (1 + r), 1) - 1;
       indice = {
         nombre: `${pct(1 - usdCubierto, 0)} IPSA + ${pct(usdCubierto, 0)} ${global === benchGlobal ? 'acciones globales (ACWI)' : 'S&P 500'} en pesos`,
         ret1y: retB,
-        diferencia: ret1y - retB,
-        trackingError: Math.sqrt(neweyWestVariance(portfolio.map((r, t) => r - bench[t])) * periodsPerYear),
+        diferencia: ret1y !== null ? ret1y - retB : null,
+        trackingError: Math.sqrt(neweyWestVariance(propio.map((r, t) => r - bench[t])) * periodsPerYear),
       };
+    } else if (benchCL && !benchCL.fresh) {
+      avisosDatos.push('El precio del ETF del IPSA no está al día: no se compara con el índice.');
     }
   }
 
-  // 4. Grupos de activos casi idénticos (incluye candidatos del escáner contra lo que ya tienes)
+  // 5. Grupos de activos casi idénticos (último año; incluye candidatos del escáner contra lo que ya tienes).
+  //    Cada miembro debe parecerse al activo principal del grupo, no solo a un intermediario.
+  const corte1y = new Date(Date.now() - 365 * DAY_MS).toISOString().slice(0, 10);
   const yearSeries = new Map([...posiciones, ...evaluados].filter(a => a.conDatos).map(a => [
-    a.ticker, new Map([...histOf.get(a.ticker)!.series].filter(([d]) => d >= cutoff)),
+    a.ticker, new Map([...histOf.get(a.ticker)!.adjSeries].filter(([d]) => d >= corte1y)),
   ]));
   const conSerie = [...yearSeries.keys()];
+  const corrDe = new Map<string, number>();
   const pares: { a: string; b: string; corr: number }[] = [];
   for (let i = 0; i < conSerie.length; i++) {
     for (let j = i + 1; j < conSerie.length; j++) {
       const corr = correlation(...alignedReturns(yearSeries.get(conSerie[i])!, yearSeries.get(conSerie[j])!));
-      if (corr !== null && corr >= GEMELOS_CORR) pares.push({ a: conSerie[i], b: conSerie[j], corr });
+      if (corr === null) continue;
+      corrDe.set(`${conSerie[i]}|${conSerie[j]}`, corr);
+      corrDe.set(`${conSerie[j]}|${conSerie[i]}`, corr);
+      if (corr >= GEMELOS_CORR) pares.push({ a: conSerie[i], b: conSerie[j], corr });
     }
   }
   const byTicker = new Map([...posiciones, ...evaluados].map(a => [a.ticker, a]));
-  const grupo = new Map<string, string>(conSerie.map(t => [t, t]));
-  const raiz = (t: string): string => (grupo.get(t) === t ? t : raiz(grupo.get(t)!));
-  pares.forEach(p => grupo.set(raiz(p.a), raiz(p.b)));
-  const grupos = new Map<string, string[]>();
-  conSerie.forEach(t => grupos.set(raiz(t), [...(grupos.get(raiz(t)) ?? []), t]));
-  for (const miembros of grupos.values()) {
-    if (miembros.length < 2) continue;
-    const enCartera = miembros.map(t => byTicker.get(t)!).filter(a => a.cantidad > 0).sort((x, y) => y.peso - x.peso);
-    const principal = enCartera[0];
-    if (!principal) continue;
-    for (const t of miembros) {
+  const enCartera = [...posiciones].sort((x, y) => y.peso - x.peso);
+  const asignado = new Set<string>();
+  for (const principal of enCartera) {
+    if (asignado.has(principal.ticker) || !principal.conDatos) continue;
+    for (const t of conSerie) {
+      if (t === principal.ticker || asignado.has(t)) continue;
+      const corr = corrDe.get(`${t}|${principal.ticker}`);
+      if (corr === undefined || corr < GEMELOS_CORR) continue;
       const a = byTicker.get(t)!;
-      if (a === principal) continue;
+      if (a.cantidad > 0 && a.peso > principal.peso) continue;
+      asignado.add(t);
       a.gemeloDe = principal.ticker;
-      const corr = pares.find(p => (p.a === t && p.b === principal.ticker) || (p.b === t && p.a === principal.ticker))?.corr;
-      const parecido = corr ? `correlación ${corr.toFixed(2)}` : 'mismo grupo de activos casi idénticos';
       if (a.cantidad > 0 && a.accion === 'AUMENTAR') {
         a.accion = 'MANTENER';
-        a.motivos.push(`Se mueve casi igual que ${principal.ticker} (${parecido}): si vas a aumentar, concentra la compra en ${principal.ticker}.`);
+        a.conviccion = 'media';
+        a.motivos.push(`Se mueve casi igual que ${principal.ticker} (correlación ${corr.toFixed(2)}): si vas a aumentar, concentra la compra en ${principal.ticker}.`);
       } else if (a.cantidad === 0) {
-        a.motivos.push(`Se mueve casi igual que ${principal.ticker}, que ya tienes (${parecido}): no agrega diversificación.`);
+        a.motivos.push(`Se mueve casi igual que ${principal.ticker}, que ya tienes (correlación ${corr.toFixed(2)}): no agrega diversificación.`);
       }
     }
   }
 
-  // 5. Un activo que aporta mucho más riesgo que su peso no debería crecer
+  // 6. Un activo que aporta mucho más riesgo que su peso no debería crecer
   for (const a of posiciones) {
     if (a.accion === 'AUMENTAR' && a.aporteRiesgo !== null && a.aporteRiesgo > 0.15 && a.aporteRiesgo > 2 * a.peso) {
       a.accion = 'MANTENER';
+      a.conviccion = 'media';
       a.motivos.push(`Pesa ${pct(a.peso)} pero aporta ${pct(a.aporteRiesgo)} del riesgo total: aumentarlo desbalancearía el portafolio.`);
+    }
+    if (a.aporteRiesgo !== null) a.riesgo.motivos.push(`Aporta ${pct(a.aporteRiesgo)} del riesgo total de tu cartera.`);
+  }
+  // 7. Coherencia con la cartera completa: una compra no puede empeorar lo que el plan pide corregir
+  const frenar = (a: AssetReport, motivo: string) => {
+    if (a.accion !== 'AUMENTAR') return;
+    a.accion = 'MANTENER';
+    a.conviccion = 'media';
+    a.motivos.push(motivo);
+  };
+  const pesoSector = new Map(exposicion.sectores.map(s => [s.nombre, s.peso]));
+  const pesoChile = exposicion.regiones.find(x => x.nombre === 'Chile')?.peso ?? 0;
+  for (const a of posiciones) {
+    // Sector: el de la empresa o, si es un fondo sectorial (más de 60% en un sector), ese sector
+    const sectoresFondo = Object.entries(a.fundamentales?.sectores ?? {}).sort((x, y) => y[1] - x[1]);
+    const sector = !a.diversificado ? a.sector : sectoresFondo[0] && sectoresFondo[0][1] > 0.6 ? sectoresFondo[0][0] : undefined;
+    const ps = sector ? pesoSector.get(sector) ?? 0 : 0;
+    if (sector && ps > LIMITE_SECTOR) frenar(a, `El sector ${sector} ya pesa ${pct(ps, 0)} de tu patrimonio contando tus fondos: aumentar aquí concentra más el riesgo.`);
+    if (a.moneda === 'CLP' && pesoChile > 0.6) frenar(a, `Ya tienes ${pct(pesoChile, 0)} de tu patrimonio en Chile: los próximos aportes rinden más en diversificación fuera de Chile.`);
+  }
+  // De dos posiciones que se mueven casi igual, solo se aumenta la más grande
+  for (const p of pares) {
+    const a = byTicker.get(p.a)!, b = byTicker.get(p.b)!;
+    if (a.cantidad === 0 || b.cantidad === 0) continue;
+    const [chica, grande] = a.peso < b.peso ? [a, b] : [b, a];
+    // Si el más grande a su vez se parece a otro mayor, las compras van a ese
+    const destino = grande.gemeloDe ?? grande.ticker;
+    frenar(chica, `Se mueve casi igual que ${grande.ticker} (correlación ${p.corr.toFixed(2)}): si vas a aumentar, concentra la compra en ${destino}.`);
+  }
+  // En un mercado defensivo no se suman activos de alto riesgo
+  if (mercado?.regimen === 'defensivo') {
+    for (const a of posiciones) {
+      if (!a.diversificado && (a.beta ?? 1) > 1.2) frenar(a, `El mercado está en modo defensivo y este activo amplifica sus movimientos (beta ${a.beta!.toFixed(2)}): espera que mejore antes de aumentar.`);
     }
   }
 
@@ -456,32 +718,33 @@ export async function buildAdvisorReport(
     pnlCLP: totalCLP - costoTotalCLP,
     pnlPct: costoTotalCLP > 0 ? totalCLP / costoTotalCLP - 1 : null,
     pesoUSD: totalCLP > 0 ? posiciones.filter(a => a.moneda === 'USD').reduce((s, a) => s + a.peso, 0) : 0,
-    vol,
-    maxDD,
-    ret1y,
-    sharpe: vol && ret1y !== null ? (ret1y - rf) / vol : null,
+    vol, maxDD, ret1y, retAnualVentana,
+    sharpe: vol && retAnualVentana !== null ? (retAnualVentana - rf) / vol : null,
     var95,
     var95CLP: var95 !== null ? var95 * valorCubierto : null,
     es95,
     es95CLP: es95 !== null ? es95 * valorCubierto : null,
-    diversificacion,
-    posicionesEfectivas,
-    riesgoCambiario,
+    diversificacion, posicionesEfectivas, riesgoCambiario,
     cobertura: totalCLP > 0 ? valorCubierto / totalCLP : 0,
+    ventanaAnios, encogimiento,
     sinFechaUSD: { posiciones: sinFecha.length, peso: totalCLP > 0 ? sinFecha.reduce((s, b) => s + b.valorCLP, 0) / totalCLP : 0 },
-    indice,
-    perfil,
+    indice, perfil,
     diasHistoria: calendar.length,
   };
 
+  const gemelosEnCartera = pares.filter(p => byTicker.get(p.a)!.cantidad > 0 && byTicker.get(p.b)!.cantidad > 0);
   return {
     generado: new Date().toISOString(),
     usdClp,
     tasaLibreRiesgo: rf,
     resumen,
-    hallazgos: buildFindings(resumen, posiciones, pares.filter(p => byTicker.get(p.a)!.cantidad > 0 && byTicker.get(p.b)!.cantidad > 0), rf),
+    mercado,
+    exposicion,
+    estrategia: planEstrategico(resumen, posiciones, exposicion, mercado, gemelosEnCartera),
+    hallazgos: buildFindings(resumen, posiciones, exposicion, gemelosEnCartera, rf, mercado),
     posiciones,
     candidatos: evaluados,
+    avisosDatos,
     modelo,
   };
 }
@@ -490,33 +753,157 @@ function addDays(date: string, days: number): string {
   return new Date(new Date(date).getTime() + days * DAY_MS).toISOString().slice(0, 10);
 }
 
-function buildFindings(r: PortfolioSummary, pos: AssetReport[], gemelos: { a: string; b: string; corr: number }[], rf: number): Hallazgo[] {
+// --- Exposición con transparencia (look-through) ------------------------------------------------------
+
+function calcularExposicion(
+  pos: { ticker: string; moneda: 'USD' | 'CLP'; peso: number; tipo: TipoActivo }[],
+  fund: Map<string, Fundamentales>,
+): Exposicion {
+  const regiones = new Map<string, number>();
+  const sectores = new Map<string, { peso: number; via: Set<string> }>();
+  const empresas = new Map<string, { directo: number; viaFondos: number; fondos: Set<string> }>();
+  const notas = new Set<string>();
+  const sumar = <T>(m: Map<string, T>, k: string, f: (x: T | undefined) => T) => m.set(k, f(m.get(k)));
+  const sumaSector = (nombre: string, peso: number, via: string) =>
+    sumar(sectores, nombre, x => ({ peso: (x?.peso ?? 0) + peso, via: (x?.via ?? new Set<string>()).add(via) }));
+  const sumaEmpresa = (ticker: string, directo: number, indirecto: number, fondo?: string) =>
+    sumar(empresas, ticker, x => {
+      const fondos = x?.fondos ?? new Set<string>();
+      if (fondo) fondos.add(fondo);
+      return { directo: (x?.directo ?? 0) + directo, viaFondos: (x?.viaFondos ?? 0) + indirecto, fondos };
+    });
+
+  for (const p of pos) {
+    const f = fund.get(p.ticker);
+    // Región
+    if (p.moneda === 'CLP') sumar(regiones, 'Chile', x => (x ?? 0) + p.peso);
+    else if (p.tipo === 'etf' && PESO_EEUU_FONDOS[p.ticker] !== undefined) {
+      const us = PESO_EEUU_FONDOS[p.ticker];
+      sumar(regiones, 'EE.UU.', x => (x ?? 0) + p.peso * us);
+      sumar(regiones, 'Resto del mundo', x => (x ?? 0) + p.peso * (1 - us));
+      notas.add('La parte de EE.UU. dentro de los fondos globales (VT, ACWI) es aproximada.');
+    } else {
+      const pais = f?.tipo === 'accion' ? f.pais : undefined;
+      sumar(regiones, pais && !PAISES[pais] ? 'Resto del mundo' : 'EE.UU.', x => (x ?? 0) + p.peso);
+    }
+    // Sectores y empresas
+    if (p.ticker === 'CFMITNIPSA.SN' || p.ticker === 'CFIETFIPSA1.SN') {
+      for (const [s, w] of Object.entries(IPSA_SECTORES)) sumaSector(s, p.peso * w, p.ticker);
+      for (const [t, w] of Object.entries(IPSA_EMPRESAS)) sumaEmpresa(t, 0, p.peso * w, p.ticker);
+      notas.add('Lo que tiene el fondo del IPSA se estima con una composición referencial del índice (aproximada).');
+    } else if (p.tipo === 'etf' && f?.sectores) {
+      const total = Object.values(f.sectores).reduce((s, w) => s + w, 0) || 1;
+      for (const [s, w] of Object.entries(f.sectores)) sumaSector(s, p.peso * w / total, p.ticker);
+      for (const h of f.principales ?? []) sumaEmpresa(h.ticker, 0, p.peso * h.peso, p.ticker);
+    } else if (p.tipo === 'etf') {
+      sumaSector('Fondos sin detalle', p.peso, p.ticker);
+    } else {
+      sumaSector(f?.sector ?? FONDOS_CHILE[p.ticker]?.sector ?? 'Sin clasificar', p.peso, p.ticker);
+    }
+    if (p.tipo !== 'etf') sumaEmpresa(p.ticker, p.peso, 0);
+  }
+  return {
+    regiones: [...regiones].map(([nombre, peso]) => ({ nombre, peso })).sort((a, b) => b.peso - a.peso),
+    sectores: [...sectores].map(([nombre, x]) => ({ nombre, peso: x.peso, via: [...x.via] })).sort((a, b) => b.peso - a.peso),
+    empresas: [...empresas].map(([ticker, x]) => ({ ticker, directo: x.directo, viaFondos: x.viaFondos, total: x.directo + x.viaFondos, fondos: [...x.fondos] }))
+      .sort((a, b) => b.total - a.total),
+    notas: [...notas],
+  };
+}
+
+// --- Plan estratégico (reglas) ---------------------------------------------------------------------
+
+function planEstrategico(
+  r: PortfolioSummary, pos: AssetReport[], ex: Exposicion, mercado: ContextoMercado | null, gemelos: { a: string; b: string; corr: number }[],
+): string[] {
+  const plan: string[] = [];
+  if (mercado) {
+    plan.push(mercado.regimen === 'favorable'
+      ? 'Contexto favorable: mantén tu exposición y aprovecha los retrocesos para aportar en lo que tiene señal AUMENTAR.'
+      : mercado.regimen === 'defensivo'
+        ? 'Contexto defensivo: prioriza proteger. No sumes activos de alto riesgo, respeta los stops y aporta de a poco, preferentemente en fondos diversificados.'
+        : 'Contexto mixto: sé selectivo. Aporta en partes (por ejemplo, en 2 o 3 meses) y prioriza fondos diversificados y empresas con buenos fundamentales.');
+  }
+  const reducir = pos.filter(a => a.accion === 'REDUCIR');
+  if (reducir.length) plan.push(`Revisa primero ${reducir.map(a => `${a.ticker} (${a.motivos[0]?.replace(/[.:].*$/, '').toLowerCase()})`).join('; ')}: tienen señal REDUCIR.`);
+  const sector = ex.sectores[0];
+  if (sector && sector.peso > LIMITE_SECTOR && sector.nombre !== 'Fondos sin detalle') {
+    plan.push(`${sector.nombre} pesa ${pct(sector.peso, 0)} de tu patrimonio contando lo que hay dentro de tus fondos: no sumes más de ese sector y dirige los próximos aportes a otros.`);
+  }
+  const chile = ex.regiones.find(x => x.nombre === 'Chile')?.peso ?? 0;
+  if (chile > 0.6) {
+    plan.push(`${pct(chile, 0)} de tu patrimonio está en Chile: para que tu cartera dependa menos de una sola economía, dirige los próximos aportes a fondos globales hasta acercarte a la mitad fuera de Chile.`);
+  } else if (chile < 0.2 && chile > 0) {
+    plan.push(`Solo ${pct(chile, 0)} está en Chile: si tus gastos son en pesos, tener algo más en activos locales reduce el riesgo cambiario.`);
+  }
+  const aumentar = pos.filter(a => a.accion === 'AUMENTAR').sort((a, b) => (a.conviccion === 'alta' ? 0 : a.conviccion === 'media' ? 1 : 2) - (b.conviccion === 'alta' ? 0 : b.conviccion === 'media' ? 1 : 2) || b.puntaje - a.puntaje);
+  if (aumentar.length) plan.push(`Para tus próximos aportes, en orden de convicción: ${aumentar.slice(0, 5).map(a => `${a.ticker} (${a.conviccion})`).join(', ')}.`);
+  if (gemelos.length) {
+    const top = [...gemelos].sort((a, b) => b.corr - a.corr).slice(0, 3);
+    plan.push(`Simplifica: ${top.map(p => `${p.a} y ${p.b}`).join('; ')} se mueven casi igual. Concentra las compras en uno de cada par.`);
+  }
+  const chicas = pos.filter(a => a.peso < 0.01);
+  if (chicas.length >= 3) plan.push(`Tienes ${chicas.length} posiciones de menos de 1% (${chicas.map(a => a.ticker).join(', ')}): aportan poco al resultado. O las llevas a un tamaño que importe o las juntas en tus posiciones principales (ojo con comisiones e impuestos al vender).`);
+  const caros = pos.filter(a => a.tipo === 'etf' && (a.fundamentales?.gastoAnual ?? 0) > 0.0075);
+  if (caros.length) plan.push(`Revisa el costo de ${caros.map(a => `${a.ticker} (${pct(a.fundamentales!.gastoAnual!, 2)} anual)`).join(', ')}: hay fondos equivalentes más baratos.`);
+  const dividendoRiesgo = pos.filter(a => (a.fundamentales?.payout ?? 0) > 1);
+  if (dividendoRiesgo.length) plan.push(`${dividendoRiesgo.map(a => a.ticker).join(', ')} reparte${dividendoRiesgo.length > 1 ? 'n' : ''} más dividendos de lo que gana${dividendoRiesgo.length > 1 ? 'n' : ''}: no cuentes con ese dividendo a futuro.`);
+  if (r.perfil === 'agresivo') plan.push('Tu cartera es de perfil agresivo (volatilidad sobre 22% anual): asegúrate de tener un fondo de emergencia aparte, fuera de la bolsa.');
+  return plan;
+}
+
+// --- Hallazgos -------------------------------------------------------------------------------------
+
+function buildFindings(
+  r: PortfolioSummary, pos: AssetReport[], ex: Exposicion, gemelos: { a: string; b: string; corr: number }[], rf: number, mercado: ContextoMercado | null,
+): Hallazgo[] {
   const out: Hallazgo[] = [];
+
+  if (mercado) {
+    out.push({ nivel: mercado.regimen === 'favorable' ? 'ok' : mercado.regimen === 'defensivo' ? 'alerta' : 'atencion', titulo: mercado.titulo, detalle: mercado.lecturas.slice(0, 3).join(' ') });
+  }
 
   const stops = pos.filter(a => a.stopActivado);
   if (stops.length) {
     out.push({
       nivel: 'alerta',
       titulo: `${stops.length === 1 ? 'Un activo cerró' : `${stops.length} activos cerraron`} dos días bajo su stop de volatilidad: ${stops.map(a => a.ticker).join(', ')}`,
-      detalle: 'Cayeron desde su máximo del último mes más de 2 desviaciones estándar mensuales. Revisa si hay una noticia de fondo antes de decidir mantenerlos.',
+      detalle: 'Cayeron desde su máximo del último mes más de 2 desviaciones estándar mensuales (precios ajustados por dividendos). Revisa si hay una noticia de fondo antes de decidir.',
     });
   }
 
-  const concentrados = pos.filter(a => a.peso > limiteDe(a));
-  const mayor = pos[0];
+  const concentrados = pos.filter(a => a.riesgo.veredicto === 'excedido');
+  const mayor = [...pos].sort((a, b) => b.pesoEfectivo - a.pesoEfectivo)[0];
   if (concentrados.length) {
     out.push({
       nivel: 'alerta',
-      titulo: `Concentración: ${concentrados.map(a => `${a.ticker} (${pct(a.peso)})`).join(', ')}`,
-      detalle: `Una mala noticia en un solo activo golpearía todo tu patrimonio. Lo prudente es que ninguna empresa pese más de ${pct(LIMITE_ACCION, 0)} ni un fondo más de ${pct(LIMITE_FONDO, 0)}.`,
+      titulo: `Concentración: ${concentrados.map(a => `${a.ticker} (${pct(a.pesoEfectivo)})`).join(', ')}`,
+      detalle: `Una mala noticia en un solo activo golpearía todo tu patrimonio. Lo prudente es que ninguna empresa pese más de ${pct(LIMITE_ACCION, 0)} (contando lo que tienes dentro de tus fondos) ni un fondo más de ${pct(LIMITE_FONDO, 0)}.`,
     });
   } else if (mayor) {
     out.push({
       nivel: 'ok',
-      titulo: `Sin concentraciones excesivas (la mayor es ${mayor.ticker} con ${pct(mayor.peso)})`,
+      titulo: `Sin concentraciones excesivas en un solo activo (la mayor es ${mayor.ticker} con ${pct(mayor.pesoEfectivo)})`,
       detalle: r.posicionesEfectivas !== null
         ? `Por su aporte al riesgo, tu portafolio equivale a ${r.posicionesEfectivas.toFixed(1)} apuestas independientes${r.diversificacion !== null ? ` y la diversificación reduce tu riesgo ${r.diversificacion.toFixed(2)} veces respecto de sumar el de cada activo` : ''}.`
         : 'No hay historial suficiente para medir cómo se reparte el riesgo.',
+    });
+  }
+
+  const sector = ex.sectores[0];
+  if (sector && sector.peso > LIMITE_SECTOR && sector.nombre !== 'Fondos sin detalle') {
+    out.push({
+      nivel: 'atencion',
+      titulo: `Sector concentrado: ${sector.nombre} pesa ${pct(sector.peso, 0)} contando lo que hay dentro de tus fondos`,
+      detalle: `Viene de ${sector.via.join(', ')}. Las empresas de un mismo sector caen juntas ante la misma noticia (tasas, regulación, ciclo): lo prudente es que ningún sector pase de ${pct(LIMITE_SECTOR, 0)}.`,
+    });
+  }
+  const chile = ex.regiones.find(x => x.nombre === 'Chile')?.peso ?? 0;
+  if (chile > 0.6) {
+    out.push({
+      nivel: 'atencion',
+      titulo: `${pct(chile, 0)} de tu patrimonio depende de Chile`,
+      detalle: `Regiones: ${ex.regiones.map(x => `${x.nombre} ${pct(x.peso, 0)}`).join(', ')}. Chile es menos del 1% de la bolsa mundial; concentrarse en un solo país suma riesgo sin sumar rentabilidad esperada.`,
     });
   }
 
@@ -529,48 +916,18 @@ function buildFindings(r: PortfolioSummary, pos: AssetReport[], gemelos: { a: st
     });
   }
 
-  // Riesgo por mercado: las acciones de un mismo país se mueven juntas, así que su riesgo pesa más que su valor
-  const riesgoChile = pos.filter(a => a.moneda === 'CLP').reduce((s, a) => s + (a.aporteRiesgo ?? 0), 0);
-  const pesoChile = 1 - r.pesoUSD;
-  if (r.posicionesEfectivas !== null && riesgoChile > 0.5 && riesgoChile > pesoChile + 0.1) {
+  const debiles = pos.filter(a => a.fundamental.veredicto === 'débil');
+  if (debiles.length) {
     out.push({
       nivel: 'atencion',
-      titulo: `Chile explica ${pct(riesgoChile, 0)} del riesgo con ${pct(pesoChile, 0)} del valor`,
-      detalle: 'Tus acciones chilenas se mueven muy juntas (bancos y el IPSA): agregar más nombres locales casi no reduce el riesgo. Lo que más diversifica es sumar activos globales.',
-    });
-  } else if (r.posicionesEfectivas !== null && riesgoChile < 0.5 && 1 - riesgoChile > r.pesoUSD + 0.1) {
-    out.push({
-      nivel: 'atencion',
-      titulo: `Tus activos en dólares explican ${pct(1 - riesgoChile, 0)} del riesgo con ${pct(r.pesoUSD, 0)} del valor`,
-      detalle: 'Las acciones de EE.UU. (y el tipo de cambio) dominan las subidas y bajadas de tu cartera más de lo que sugiere su peso.',
-    });
-  }
-
-  if (r.pesoUSD < 0.2) {
-    out.push({
-      nivel: 'atencion',
-      titulo: `Casi todo está en pesos chilenos (${pct(1 - r.pesoUSD, 0)} en CLP)`,
-      detalle: 'Tu patrimonio depende de la economía chilena y del peso. Sumar fondos globales en dólares reduce ese riesgo país.',
-    });
-  } else if (r.pesoUSD > 0.8) {
-    out.push({
-      nivel: 'atencion',
-      titulo: `${pct(r.pesoUSD, 0)} está en dólares`,
-      detalle: 'Si el dólar baja, tu portafolio medido en pesos cae aunque las acciones suban. Algo de exposición a Chile equilibra ese riesgo.',
-    });
-  } else {
-    out.push({
-      nivel: 'ok',
-      titulo: `Monedas equilibradas: ${pct(r.pesoUSD, 0)} USD / ${pct(1 - r.pesoUSD, 0)} CLP`,
-      detalle: r.riesgoCambiario !== null
-        ? `El tipo de cambio explica ${pct(Math.max(0, r.riesgoCambiario), 0)} del riesgo de tu cartera; ${r.riesgoCambiario < 0 ? 'de hecho, el dólar la amortigua porque suele subir cuando las acciones caen.' : 'el resto viene de las acciones.'}`
-        : 'La mezcla de pesos y dólares amortigua los movimientos del tipo de cambio.',
+      titulo: `Fundamentales débiles: ${debiles.map(a => a.ticker).join(', ')}`,
+      detalle: debiles.map(a => `${a.ticker}: ${a.fundamental.motivos.slice(0, 2).join(' ')}`).join(' '),
     });
   }
 
   if (r.vol !== null) {
-    const partes = [`Volatilidad anual de ${pct(r.vol)} medida en pesos.`];
-    if (r.maxDD !== null) partes.push(`Con tus pesos actuales, en el último año habría caído hasta ${pct(r.maxDD)} desde un máximo.`);
+    const partes = [`Volatilidad anual de ${pct(r.vol)} medida en pesos (últimos ${r.ventanaAnios} año${r.ventanaAnios > 1 ? 's' : ''}).`];
+    if (r.maxDD !== null) partes.push(`Con tus pesos actuales, en ese período habría caído hasta ${pct(r.maxDD)} desde un máximo.`);
     if (r.var95CLP !== null && r.es95CLP !== null) {
       partes.push(`En 1 de cada 20 días podrías perder más de ${fmtMoney(r.var95CLP, 'CLP')}; en esos días malos, la pérdida promedio es ${fmtMoney(r.es95CLP, 'CLP')}.`);
     }
@@ -584,11 +941,11 @@ function buildFindings(r: PortfolioSummary, pos: AssetReport[], gemelos: { a: st
       : '';
     out.push({
       nivel: bajoTasa || (r.indice?.diferencia ?? 0) < -0.03 ? 'atencion' : 'ok',
-      titulo: `Con tus pesos actuales, los últimos 12 meses habrían rendido ${signed(r.ret1y)} en pesos`,
+      titulo: `Con tus pesos actuales, los últimos 12 meses habrían rendido ${signed(r.ret1y)} en pesos (con dividendos)`,
       detalle: (bajoTasa
         ? `Menos que la tasa libre de riesgo (TPM ${pct(rf)}): un depósito a plazo habría rendido más con menos riesgo.`
         : `${pct(r.ret1y - rf)} sobre la tasa libre de riesgo (TPM ${pct(rf)}).`) + vsIndice
-        + ' Es una simulación con tus posiciones de hoy: no incluye compras, ventas ni dividendos del período.',
+        + ` Es una simulación con tus posiciones de hoy${r.retAnualVentana !== null && r.ventanaAnios > 1 ? `; en ${r.ventanaAnios} años habría rendido ${signed(r.retAnualVentana)} anual` : ''}.`,
     });
   }
 
@@ -601,15 +958,6 @@ function buildFindings(r: PortfolioSummary, pos: AssetReport[], gemelos: { a: st
     });
   }
 
-  const chicas = pos.filter(a => a.peso < 0.01);
-  if (chicas.length >= 3) {
-    out.push({
-      nivel: 'atencion',
-      titulo: `${chicas.length} posiciones pesan menos de 1% cada una: ${chicas.map(a => a.ticker).join(', ')}`,
-      detalle: 'Aportan muy poco al resultado total y complican el seguimiento: o las llevas a un tamaño que importe (si su recomendación es AUMENTAR) o las vendes y sumas ese dinero a tus posiciones principales.',
-    });
-  }
-
   const sinDatos = pos.filter(a => !a.conDatos);
   if (sinDatos.length || r.cobertura < 0.999) {
     out.push({
@@ -617,7 +965,7 @@ function buildFindings(r: PortfolioSummary, pos: AssetReport[], gemelos: { a: st
       titulo: sinDatos.length
         ? `Sin precios confiables al día: ${sinDatos.map(a => a.ticker).join(', ')}`
         : `El riesgo se mide sobre el ${pct(r.cobertura, 0)} del portafolio`,
-      detalle: `Las métricas de riesgo cubren el ${pct(r.cobertura, 0)} del valor (activos con un año completo de precios al día). Lo que no tiene datos confiables no recibe recomendaciones de compra o venta.`,
+      detalle: `Las métricas de riesgo cubren el ${pct(r.cobertura, 0)} del valor (activos con ${r.ventanaAnios} año${r.ventanaAnios > 1 ? 's' : ''} de precios al día). Lo que no tiene datos confiables no recibe recomendaciones de compra o venta.`,
     });
   }
 

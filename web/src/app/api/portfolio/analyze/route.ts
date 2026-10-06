@@ -2,13 +2,14 @@ import { NextResponse } from 'next/server';
 import { aiConfigured, generateText, aiError, type JsonSchema } from '@/lib/ai';
 import { parsePortfolioItems } from '@/lib/validation';
 import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
-import { buildAdvisorReport, fmtMoney, type AdvisorReport } from '@/lib/advisor';
+import { buildAdvisorReport, fmtMoney, type AdvisorReport, type AssetReport } from '@/lib/advisor';
 
-// Node (no Edge): necesita yahoo-finance2 para el historial de precios
-export const maxDuration = 60;
+// Node (no Edge): necesita yahoo-finance2. Descarga 3 años de precios, dividendos, fundamentales y contexto de
+// mercado de todos los activos, así que se le da más tiempo que a una consulta simple.
+export const maxDuration = 120;
 
 // La IA usa el tiempo que queda hasta este límite, para que el informe nunca se pierda por timeout
-const DEADLINE_MS = 52000;
+const DEADLINE_MS = 108000;
 
 // La IA solo redacta: no decide acciones ni inventa cifras
 const responseSchema: JsonSchema = {
@@ -19,8 +20,8 @@ const responseSchema: JsonSchema = {
       type: 'array',
       items: {
         type: 'object',
-        properties: { ticker: { type: 'string' }, analisis: { type: 'string' } },
-        required: ['ticker', 'analisis'],
+        properties: { ticker: { type: 'string' }, comentario: { type: 'string' } },
+        required: ['ticker', 'comentario'],
         additionalProperties: false,
       },
     },
@@ -29,7 +30,7 @@ const responseSchema: JsonSchema = {
   additionalProperties: false,
 };
 
-const pct = (x: number | null, digits = 1) => (x === null ? 'N/D' : `${(x * 100).toFixed(digits)}%`);
+const pct = (x: number | null | undefined, digits = 1) => (x === null || x === undefined ? 'N/D' : `${(x * 100).toFixed(digits)}%`);
 
 export async function POST(req: Request) {
   const started = Date.now();
@@ -55,29 +56,41 @@ export async function POST(req: Request) {
     report = rest;
   } catch (error) {
     console.error('Error construyendo el informe:', error);
-    return NextResponse.json({ error: 'No se pudieron obtener los precios de mercado. Intenta de nuevo en unos minutos.' }, { status: 502 });
+    return NextResponse.json({ error: 'No se pudieron obtener los datos de mercado. Intenta de nuevo en unos minutos.' }, { status: 502 });
   }
 
-  // Texto por defecto, armado con las mismas reglas: la pestaña funciona aunque la IA no responda
-  let diagnostico = report.hallazgos.slice(0, 3).map(h => `${h.titulo}. ${h.detalle}`).join(' ');
-  const analisis = new Map(report.posiciones.map(p => [p.ticker, p.motivos.join(' ')]));
+  // Sin IA, el diagnóstico es el plan estratégico calculado con reglas
+  let diagnostico = report.estrategia.slice(0, 3).join(' ');
+  const comentarios = new Map<string, string>();
+  const descartados: string[] = [];
   let modelo: string | null = null;
   let avisoIa: string | null = null;
 
   if (aiConfigured) {
+    const { prompt, cifras } = buildPrompt(report);
     try {
-      const { text, model } = await generateText(buildPrompt(report), {
+      const { text, model } = await generateText(prompt, {
         schema: responseSchema,
-        speed: 'fast',
-        timeoutMs: Math.max(5000, DEADLINE_MS - (Date.now() - started)),
+        speed: 'quality',
+        timeoutMs: Math.max(8000, DEADLINE_MS - (Date.now() - started)),
       });
       const data = JSON.parse(text);
-      if (typeof data?.diagnostico === 'string' && data.diagnostico.trim()) diagnostico = data.diagnostico.trim();
+      const general = cifras.get('*') ?? [];
+      if (typeof data?.diagnostico === 'string' && data.diagnostico.trim()) {
+        const d = data.diagnostico.trim();
+        if (cifrasValidas(d, [...general, ...[...cifras.values()].flat()])) diagnostico = d;
+        else descartados.push('diagnóstico');
+      }
       for (const p of Array.isArray(data?.posiciones) ? data.posiciones : []) {
         const t = typeof p?.ticker === 'string' ? p.ticker.toUpperCase() : '';
-        if (analisis.has(t) && typeof p.analisis === 'string' && p.analisis.trim()) analisis.set(t, p.analisis.trim());
+        const pos = report.posiciones.find(x => x.ticker === t);
+        if (!pos || typeof p.comentario !== 'string' || !p.comentario.trim()) continue;
+        const c = p.comentario.trim();
+        if (accionConsistente(c, pos) && cifrasValidas(c, [...(cifras.get(t) ?? []), ...general])) comentarios.set(t, c);
+        else descartados.push(t);
       }
       modelo = model;
+      if (descartados.length) console.warn('Textos de IA descartados por cifras o acciones que no calzan:', descartados.join(', '));
     } catch (error) {
       console.error('IA no disponible para el diagnóstico:', error);
       avisoIa = `${aiError(error).message} Se muestra el análisis calculado sin redacción de IA.`;
@@ -89,42 +102,91 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ...report,
     diagnostico,
-    posiciones: report.posiciones.map(p => ({ ...p, analisis: analisis.get(p.ticker) ?? '' })),
+    posiciones: report.posiciones.map(p => ({ ...p, comentarioIa: comentarios.get(p.ticker) ?? '' })),
     modelo,
     avisoIa,
   });
 }
 
-function buildPrompt(r: AdvisorReport): string {
+// La IA no puede contradecir la acción calculada
+function accionConsistente(texto: string, p: AssetReport): boolean {
+  const mencionadas = (texto.match(/\b(AUMENTAR|MANTENER|REDUCIR)\b/g) ?? []);
+  return mencionadas.every(a => a === p.accion);
+}
+
+// Cada porcentaje que escribe la IA debe estar en los datos que recibió (con tolerancia de redondeo)
+function cifrasValidas(texto: string, permitidas: number[]): boolean {
+  const escritas = [...texto.matchAll(/(-?\d+(?:[.,]\d+)?)\s?%/g)].map(m => Math.abs(parseFloat(m[1].replace(',', '.'))));
+  return escritas.every(x => permitidas.some(y => Math.abs(x - Math.abs(y)) <= 0.11 || (Number.isInteger(x) && Math.abs(x - Math.abs(y)) < 0.51)));
+}
+
+const numerosDe = (s: string) => [...s.matchAll(/-?\d+(?:\.\d+)?/g)].map(m => parseFloat(m[0]));
+
+function lineaFundamental(p: AssetReport): string {
+  const f = p.fundamentales;
+  if (!f) return 'sin datos fundamentales';
+  const partes: string[] = [];
+  if (f.per !== undefined) partes.push(`PER ${f.per.toFixed(1)}`);
+  if (f.perForward !== undefined) partes.push(`PER esperado ${f.perForward.toFixed(1)}`);
+  if (f.pvl !== undefined) partes.push(`P/VL ${f.pvl.toFixed(1)}`);
+  if (f.roe !== undefined) partes.push(`ROE ${pct(f.roe)}`);
+  if (f.margen !== undefined) partes.push(`margen ${pct(f.margen)}`);
+  if (f.crecimientoUtilidad !== undefined) partes.push(`crec. utilidad ${pct(f.crecimientoUtilidad)}`);
+  if (f.dividendYield !== undefined) partes.push(`dividendo ${pct(f.dividendYield)}`);
+  if (f.payout !== undefined) partes.push(`payout ${pct(f.payout, 0)}`);
+  if (f.analistas) partes.push(`${f.analistas.n} analistas: ${f.analistas.recomendacion}, objetivo ${fmtMoney(f.analistas.objetivo, p.moneda)} (potencial ${pct(f.analistas.potencial)})`);
+  if (f.gastoAnual !== undefined) partes.push(`costo anual ${pct(f.gastoAnual, 2)}`);
+  return partes.join(', ') || 'sin datos fundamentales';
+}
+
+function buildPrompt(r: AdvisorReport): { prompt: string; cifras: Map<string, number[]> } {
   const s = r.resumen;
-  const lineas = r.posiciones.map(p => [
-    `- ${p.ticker}${p.nombre ? ` (${p.nombre})` : ''}: DECISIÓN ${p.accion}`,
-    `peso ${pct(p.peso)}`,
-    `P&L desde compra ${pct(p.pnl)}`,
-    `momentum ${p.momentumMeses ?? 12}-1 ${pct(p.momentum)}`,
-    `12m ${pct(p.ret1y)}`,
-    `volatilidad ${pct(p.vol, 0)}`,
-    `aporte al riesgo ${pct(p.aporteRiesgo)}`,
-    `beta vs ${p.benchmark} ${p.beta?.toFixed(2) ?? 'N/D'}`,
-    `RSI ${p.rsi?.toFixed(0) ?? 'N/D'}`,
-    `stop ${p.stop !== null ? `${fmtMoney(p.stop, p.moneda)} (${pct(p.stopDist)})` : 'N/D'}`,
-    `motivos: ${p.motivos.join(' ')}`,
-  ].join(' | ')).join('\n');
+  const cifras = new Map<string, number[]>();
+  const lineas = r.posiciones.map(p => {
+    const linea = [
+      `- ${p.ticker}${p.nombre ? ` (${p.nombre})` : ''} [${p.tipo}${p.sector ? `, ${p.sector}` : ''}]: DECISIÓN ${p.accion} (convicción ${p.conviccion})`,
+      `peso ${pct(p.peso)}${p.pesoEfectivo > p.peso + 0.005 ? ` (${pct(p.pesoEfectivo)} contando fondos)` : ''}`,
+      `P&L desde compra ${pct(p.pnl)}`,
+      `12m con dividendos ${pct(p.ret1y)}`,
+      `3 años anual ${pct(p.ret3y)}`,
+      `volatilidad ${pct(p.vol, 0)}`,
+      `aporte al riesgo ${pct(p.aporteRiesgo)}`,
+      `técnico ${p.tecnico.veredicto}: ${p.tecnico.motivos.join(' ')}`,
+      `fundamental ${p.fundamental.veredicto} (${lineaFundamental(p)}): ${p.fundamental.motivos.join(' ')}`,
+      `riesgo ${p.riesgo.veredicto}: ${p.riesgo.motivos.join(' ')}`,
+      `motivos de la decisión: ${p.motivos.join(' ')}`,
+    ].join(' | ');
+    cifras.set(p.ticker, numerosDe(linea));
+    return linea;
+  }).join('\n');
 
-  return `Eres un asesor de inversiones chileno que explica a un cliente no experto el informe de su portafolio.
-Todas las cifras y decisiones ya fueron calculadas con precios reales. Tu trabajo es SOLO redactarlas con claridad.
+  const ex = r.exposicion;
+  const general = [
+    `Portafolio: valor ${fmtMoney(s.valorCLP, 'CLP')} CLP, resultado desde la compra ${pct(s.pnlPct)}, ${pct(s.pesoUSD, 0)} en dólares.`,
+    `Riesgo en pesos (simulación con los pesos actuales, ${s.ventanaAnios} años, con dividendos): volatilidad ${pct(s.vol)}, caída máxima ${pct(s.maxDD)}, 12 meses ${pct(s.ret1y)}, anual en la ventana ${pct(s.retAnualVentana)}, perfil ${s.perfil ?? 'N/D'}, parte del riesgo que viene del dólar ${pct(s.riesgoCambiario, 0)}. TPM ${pct(r.tasaLibreRiesgo)}.${s.indice ? ` Índice equivalente (${s.indice.nombre}): ${pct(s.indice.ret1y)}.` : ''}`,
+    `Regiones: ${ex.regiones.map(x => `${x.nombre} ${pct(x.peso, 0)}`).join(', ')}. Sectores (contando lo que hay dentro de los fondos): ${ex.sectores.slice(0, 6).map(x => `${x.nombre} ${pct(x.peso, 0)}`).join(', ')}.`,
+    r.mercado ? `Contexto de mercado (${r.mercado.regimen}): ${r.mercado.titulo}. ${r.mercado.lecturas.join(' ')}` : 'Contexto de mercado no disponible.',
+  ].join('\n');
+  cifras.set('*', numerosDe(general + r.hallazgos.map(h => ` ${h.titulo} ${h.detalle}`).join('') + r.estrategia.join(' ')));
 
-Portafolio: valor ${fmtMoney(s.valorCLP, 'CLP')} CLP, resultado desde la compra ${pct(s.pnlPct)}, ${pct(s.pesoUSD, 0)} en dólares.
-Riesgo en pesos (simulación de 12 meses con los pesos actuales): volatilidad ${pct(s.vol)}, caída máxima ${pct(s.maxDD)}, rentabilidad ${pct(s.ret1y)}, perfil ${s.perfil ?? 'N/D'}, pérdida esperada en el 5% de peores días ${pct(s.es95, 2)}, parte del riesgo que viene del dólar ${pct(s.riesgoCambiario, 0)}. Tasa libre de riesgo (TPM) ${pct(r.tasaLibreRiesgo)}.${s.indice ? ` Índice equivalente (${s.indice.nombre}): ${pct(s.indice.ret1y)}.` : ''}
+  const prompt = `Eres un asesor de inversiones chileno, técnico y estratégico, que explica a su cliente el informe de su portafolio.
+Todas las cifras, veredictos y decisiones ya fueron calculados con datos reales (precios ajustados por dividendos, fundamentales y consenso de analistas de Yahoo Finance, contexto de mercado). Tu trabajo es SOLO explicarlos con criterio profesional.
+
+${general}
+
 Hallazgos:
 ${r.hallazgos.map(h => `- [${h.nivel}] ${h.titulo}. ${h.detalle}`).join('\n')}
 
-Posiciones:
+Plan estratégico calculado:
+${r.estrategia.map(e => `- ${e}`).join('\n')}
+
+Posiciones (técnico | fundamental | riesgo | decisión):
 ${lineas}
 
 Reglas:
-- No cambies ninguna DECISIÓN ni inventes cifras, noticias, precios objetivo ni indicadores que no estén arriba.
-- Español de Chile, claro y directo, sin jerga innecesaria.
-- "diagnostico": 90 a 130 palabras. Qué tan sano está el portafolio, sus 2 o 3 problemas principales y qué haría primero.
-- "posiciones": una por cada ticker, en el mismo orden. "analisis": 35 a 60 palabras que expliquen la decisión con los números de sus motivos y digan qué haría el cliente en concreto.`;
+- No cambies ninguna DECISIÓN ni la contradigas. No inventes cifras, noticias, precios objetivo ni indicadores: usa solo los números de arriba, escritos igual.
+- Español de Chile, claro y directo, sin jerga innecesaria; si usas un término técnico (PER, ROE, momentum), explícalo en pocas palabras.
+- "diagnostico": 150 a 220 palabras. Primero el contexto de mercado en una frase, luego qué tan sano está el portafolio (diversificación por país y sector, riesgo), sus 2 o 3 problemas principales y el orden de los pasos del plan.
+- "posiciones": una por cada ticker, en el mismo orden. "comentario": 40 a 70 palabras que conecten los pilares (técnico, fundamental y riesgo) y expliquen por qué la decisión tiene sentido y qué haría el cliente en concreto.`;
+  return { prompt, cifras };
 }
