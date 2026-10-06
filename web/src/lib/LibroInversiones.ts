@@ -310,9 +310,13 @@ export function construirLibro(
             monto: 0, moneda: pos?.moneda ?? moneda, archivo: doc.archivo, implicito: true,
             detalle: `${fmtCant(diff)} ${ticker} que ya estaban en la cuenta antes del ${fechaCorta(doc.desde ?? foto.fecha)}${costo === undefined ? ' (costo de compra no informado)' : ''}` });
         } else if (motivo === 'entrada' && diff > 0) {
-          sinteticos.push({ cuenta, fecha: fechaAjuste, tipo: 'NO_INFORMADO', ticker, cantidad: diff, precio: 0, monto: 0, moneda: pos?.moneda ?? moneda,
-            archivo: doc.archivo, implicito: true, detalle: `Entraron ${fmtCant(diff)} ${ticker} sin compra ni cargo en la caja (probable acción de regalo): costo $0` });
-          alertas.push({ nivel: 'aviso', cuenta, texto: `${cuenta} ${nombreMes(foto.fecha.slice(0, 7))}: aparecieron ${fmtCant(diff)} ${ticker} sin ninguna compra ni cargo en la caja, y la cuenta empezó el mes en $0. Lo más probable es que sea una acción de regalo (promoción de bienvenida): quedó registrada con costo $0.` });
+          // Costo = valor de mercado al recibirla (criterio usual para acciones recibidas sin pago); lo que valía
+          // al llegar igual cuenta como ganancia de la cuenta, porque no salió de tus aportes
+          const precio = enFoto?.precio ?? 0;
+          const valor = precio ? ` (${formatoMonto(precio * diff, pos?.moneda ?? moneda)} al ${fechaCorta(foto.fecha)})` : '';
+          sinteticos.push({ cuenta, fecha: fechaAjuste, tipo: 'NO_INFORMADO', ticker, cantidad: diff, precio, monto: 0, moneda: pos?.moneda ?? moneda,
+            archivo: doc.archivo, implicito: true, detalle: `Entraron ${fmtCant(diff)} ${ticker} sin compra ni cargo en la caja (probable acción de regalo); costo = valor de mercado al recibirla${valor}` });
+          alertas.push({ nivel: 'aviso', cuenta, texto: `${cuenta} ${nombreMes(foto.fecha.slice(0, 7))}: aparecieron ${fmtCant(diff)} ${ticker} sin ninguna compra ni cargo en la caja, y la cuenta empezó el mes en $0. Lo más probable es que sea una acción de regalo (promoción de bienvenida): su costo queda en su valor de mercado al recibirla${valor}, y ese valor cuenta como ganancia de la cuenta.` });
         } else {
           diferencias.push(`${ticker}: la cartola informa ${fmtCant(ahora)} pero los movimientos llevan a ${fmtCant(antes + flujo)} (diferencia ${fmtCant(diff)}).`);
           sinteticos.push({ cuenta, fecha: fechaAjuste, tipo: 'NO_INFORMADO', ticker, cantidad: diff, precio: enFoto?.precio, monto: 0, moneda: pos?.moneda ?? moneda,
@@ -657,8 +661,9 @@ export function posicionesParaPortafolio(libro: LibroInversiones): PosicionPorta
   const out = new Map<string, PosicionPortafolio & { costoTotal: number }>();
   for (const p of libro.posiciones) {
     const ticker = tickerYahoo(p.ticker, p.moneda);
-    const costoEstimado = p.costo === undefined;
-    const costo = p.costo ?? (p.precio ?? 0) * p.cantidad;
+    // Sin costo informado (o costo cero) se usa el valor de mercado de la cartola: el portafolio exige precio > 0
+    const costoEstimado = p.costo === undefined || p.costo <= 0;
+    const costo = costoEstimado ? (p.precio ?? 0) * p.cantidad : p.costo!;
     const previa = out.get(ticker);
     if (previa) {
       previa.cantidad += p.cantidad;

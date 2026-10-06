@@ -56,7 +56,12 @@ for (const archivo of pdfs) {
     const doc = await pdfjs.getDocument({ data: new Uint8Array(datos), password: clave, verbosity: 0 }).promise;
     const texto = await textoDePdf(doc);
     const r = parseCartolaText(texto, path.basename(archivo));
-    Object.assign(ficha, { r, huella: crypto.createHash('sha1').update(texto).digest('hex'), nombre: nombreEstandar(r) });
+    // Huella = lo que se leyó (movimientos y cartera), no el texto exacto: una cartola con clave y su copia
+    // desbloqueada (ej. por ilovepdf) dicen lo mismo aunque el texto extraído cambie en detalles
+    const firma = JSON.stringify({ cuenta: r.cuenta, tipo: r.tipoDoc, hasta: r.hasta,
+      movimientos: r.movimientos.map(m => [m.fecha, m.tipo, m.ticker, m.cantidad, m.monto]).sort(),
+      foto: r.foto && { caja: r.foto.caja, valor: r.foto.valorTotal, posiciones: r.foto.posiciones.map(p => [p.ticker, p.cantidad, p.costo]) } });
+    Object.assign(ficha, { r, huella: crypto.createHash('sha1').update(firma).digest('hex'), nombre: nombreEstandar(r) });
     if (r.sinTexto) ficha.problema = 'sin texto (escaneado)';
     else if (r.desconocido) ficha.problema = r.avisos[0] ?? 'formato no reconocido';
     else if (!ficha.nombre) ficha.problema = 'no se encontró la fecha de la cartola';
