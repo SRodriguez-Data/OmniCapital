@@ -10,9 +10,10 @@ import { usePortfolio } from '../context/PortfolioContext';
 interface Candidato {
   ticker: string;
   price: number;
-  rsi: number;
-  score: number;
-  distancia_ema200: number;
+  rsi: number | null;
+  score: number | null;
+  distancia_ema200: number | null;
+  sin_senal_tecnica?: boolean;
   bollinger_lower?: number;
   bollinger_upper?: number;
   pe?: string | number;
@@ -26,9 +27,10 @@ interface TopOpportunity {
   target_price: string;
   riesgo: string;
   price: number;
-  rsi: number;
-  distancia_ema200: number;
-  score: number;
+  rsi: number | null;
+  distancia_ema200: number | null;
+  score: number | null;
+  sinSenal: boolean;
   pe: string | number;
   div_str: string;
   deuda: string | number;
@@ -73,12 +75,13 @@ export default function TopOportunidadesTab() {
             const us: Candidato[] = report.candidatos_json.us || [];
             const cl: Candidato[] = report.candidatos_json.cl || [];
             const combined = [...us, ...cl];
-            const sorted = combined.sort((a, b) => b.score - a.score).slice(0, 5);
+            // Los sin señal técnica (RSI nulo: precios congelados en la fuente) no tienen score: van al final
+            const sorted = combined.sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity)).slice(0, 5);
 
             // Garantizar al menos una acción chilena (.SN)
             const hasChilean = sorted.some(c => c.ticker.endsWith('.SN'));
             if (!hasChilean && cl.length > 0) {
-               const bestCl = [...cl].sort((a, b) => b.score - a.score)[0];
+               const bestCl = [...cl].sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity))[0];
                sorted.push(bestCl); // Añadimos como sexta oportunidad
             }
 
@@ -86,11 +89,12 @@ export default function TopOportunidadesTab() {
               ticker: c.ticker,
               precio_entrada_ideal: c.bollinger_lower ? precioDe(c.ticker, c.bollinger_lower) : 'N/D',
               target_price: c.bollinger_upper ? precioDe(c.ticker, c.bollinger_upper) : 'N/D',
-              riesgo: c.distancia_ema200 < -0.1 ? 'ALTO' : 'MODERADO',
+              riesgo: c.distancia_ema200 == null ? 'N/D' : c.distancia_ema200 < -0.1 ? 'ALTO' : 'MODERADO',
               price: c.price,
               rsi: c.rsi,
               distancia_ema200: c.distancia_ema200,
               score: c.score,
+              sinSenal: c.rsi == null,
               pe: typeof c.pe === 'number' && c.pe > 0 ? c.pe : typeof c.pe === 'string' && parseFloat(c.pe) > 0 ? c.pe : 'N/A',
               div_str: normalizeYield(c.div_str),
               deuda: c.deuda || 'N/A'
@@ -213,6 +217,14 @@ export default function TopOportunidadesTab() {
                       <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase tracking-wider ${isHighRisk ? 'bg-[#7f1d1d] text-[#fca5a5]' : 'bg-[#064e3b] text-[#6ee7b7]'}`}>
                         Riesgo técnico {op.riesgo}
                       </span>
+                      <span className="text-[10px] font-mono text-zinc-500 dark:text-[#71717a]">
+                        RSI {op.rsi == null ? 'N/D' : op.rsi.toFixed(1)}
+                      </span>
+                      {op.sinSenal && (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded font-bold bg-[#422006] text-[#fcd34d]">
+                          Sin señal técnica (datos de precio no confiables)
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>

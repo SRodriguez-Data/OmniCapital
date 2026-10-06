@@ -175,6 +175,8 @@ def calculate_trading_limits(candidates):
         df = pd.DataFrame(res.data)
         
         for c in candidates:
+            if c.get('sin_senal_tecnica'):
+                continue
             ticker_data = df[df['ticker'] == c['ticker']]
             if len(ticker_data) < 5:
                 continue
@@ -219,6 +221,11 @@ def calculate_trading_limits(candidates):
         
     return candidates
 
+def linea_prompt(c):
+    if c.get('sin_senal_tecnica'):
+        return f"- {c['ticker']}: Precio ${c['price']:.2f}, SIN señal técnica (precios congelados en la fuente), P/E {c['pe']:.1f}, Dividend Yield {c['div_str']}"
+    return f"- {c['ticker']}: Precio ${c['price']:.2f}, RSI {c['rsi']:.1f}, Distancia EMA200 {c['distancia_ema200']*100:.1f}%, Score {c['score']:.1f}"
+
 def run_serverless_screener():
     logging.info("🚀 Iniciando Quantum Trader Serverless (Institucional)...")
     
@@ -241,6 +248,7 @@ def run_serverless_screener():
 
     all_us = []
     all_cl = []
+    liquidos = {}
     
     # 2. Filtrado Cuantitativo Separado (EE.UU. vs Chile)
     for row in activos_hoy:
@@ -262,6 +270,8 @@ def run_serverless_screener():
         elif not ticker.endswith(".SN") and volumen_nominal < 500_000:
             continue
             
+        liquidos[ticker] = close
+
         if rsi < 50 and pvc_ema200 > -0.20:
             score = (50 - rsi) + (pvc_ema200 * 100)
             data_dict = {
@@ -276,12 +286,29 @@ def run_serverless_screener():
             else:
                 all_us.append(data_dict)
 
-    frescos = tickers_con_datos_frescos([c['ticker'] for c in all_us + all_cl], max_date)
-    descartados = [c['ticker'] for c in all_us + all_cl if c['ticker'] not in frescos]
-    if descartados:
-        logging.warning(f"Se descartan {len(descartados)} tickers con precios congelados en Yahoo: {', '.join(descartados[:30])}")
+    # Yahoo congela el historial de varias acciones chilenas: su RSI/EMA/Bollinger no son confiables.
+    # No se descartan: se evalúan solo por P/E y dividendo y se marcan "sin señal técnica" (RSI nulo).
+    frescos = tickers_con_datos_frescos(list(liquidos), max_date)
+    congelados = [t for t in liquidos if t not in frescos]
+    if congelados:
+        logging.warning(f"{len(congelados)} tickers con precios congelados en Yahoo (RSI nulo): {', '.join(congelados[:30])}")
     all_us = [c for c in all_us if c['ticker'] in frescos]
     all_cl = [c for c in all_cl if c['ticker'] in frescos]
+
+    sin_senal_us, sin_senal_cl = [], []
+    for t in congelados:
+        fund = get_fundamentals(t)
+        try:
+            div = float(str(fund['div_str']).replace('%', ''))
+        except ValueError:
+            div = 0
+        if not (0 < fund['pe'] < 40 and div > 0):
+            continue
+        c = {'ticker': t, 'price': liquidos[t], 'rsi': None, 'distancia_ema200': None, 'score': None,
+             'sin_senal_tecnica': True, **fund}
+        (sin_senal_cl if t.endswith('.SN') else sin_senal_us).append(c)
+    sin_senal_us.sort(key=lambda x: -float(x['div_str'].replace('%', '')))
+    sin_senal_cl.sort(key=lambda x: -float(x['div_str'].replace('%', '')))
 
     top_us_fund = []
     rejected_us = []
@@ -315,6 +342,9 @@ def run_serverless_screener():
     # Solo lo que pasa los fundamentales: mejor mostrar menos de 5 que rellenar con lo que no los cumple
     top_us = top_us_fund[:5]
     top_cl = top_cl_fund[:5]
+    # Los de RSI nulo solo completan los cupos que quedan libres
+    top_us += sin_senal_us[:5 - len(top_us)]
+    top_cl += sin_senal_cl[:5 - len(top_cl)]
     
     # Agregar métricas institucionales (Bollinger, Max Sell, Min Buy, Signal)
     top_us = calculate_trading_limits(top_us)
@@ -336,8 +366,8 @@ def run_serverless_screener():
         logging.error(f"Error guardando matemáticas del portafolio en Supabase: {e}")
 
     # 4. Generación Analista Institucional (Gemini) - Mercado Global
-    prompt_us = "\\n".join([f"- {c['ticker']}: Precio ${c['price']:.2f}, RSI {c['rsi']:.1f}, Distancia EMA200 {c['distancia_ema200']*100:.1f}%, Score {c['score']:.1f}" for c in top_us])
-    prompt_cl = "\\n".join([f"- {c['ticker']}: Precio ${c['price']:.2f}, RSI {c['rsi']:.1f}, Distancia EMA200 {c['distancia_ema200']*100:.1f}%, Score {c['score']:.1f}" for c in top_cl])
+    prompt_us = "\n".join([linea_prompt(c) for c in top_us])
+    prompt_cl = "\n".join([linea_prompt(c) for c in top_cl])
     
     # Nuevo: Extraer info del portafolio del usuario
     portfolio_data = []
