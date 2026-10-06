@@ -82,10 +82,10 @@ export default function SizingTab() {
           <Calculator className="w-6 h-6 text-[#60a5fa]" />
           <div>
             <h2 className="text-lg font-sans font-bold tracking-tight text-zinc-900 dark:text-[#e4e4e7] uppercase tracking-wider flex items-center gap-2">
-              Optimizador de Rebalanceo IA <Sparkles className="w-4 h-4 text-[#d946ef]" />
+              Plan de compra con nuevo capital <Sparkles className="w-4 h-4 text-[#d946ef]" />
             </h2>
             <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans">
-              Reparte tu nuevo capital sin vender nada. Cada activo recibe un peso objetivo por paridad de riesgo (todos aportan lo mismo al riesgo de tu cartera, medido en pesos), un poco más si su señal es AUMENTAR, con máximo 20% por empresa y 40% por fondo. Solo se compra lo que está bajo su objetivo; lo que no conviene invertir queda sin asignar.
+              Reparte tu nuevo capital sin vender nada. Cada activo recibe un peso objetivo por paridad de riesgo (todos aportan lo mismo al riesgo de tu cartera, medido en pesos), un poco más si su señal es AUMENTAR, con máximo 20% por empresa y 40% por fondo. Solo se compra lo que está bajo su objetivo; lo que no conviene invertir queda sin asignar. No vende ni considera comisiones, impuestos, tu horizonte ni tus metas: es un cálculo de apoyo, no asesoría personalizada.
             </p>
           </div>
         </div>
@@ -128,7 +128,7 @@ export default function SizingTab() {
             disabled={loading || !budget}
             className="w-full mt-6 flex items-center justify-center gap-2 bg-[#60a5fa] hover:bg-[#3b82f6] disabled:bg-[#27272a] disabled:text-zinc-500 dark:text-[#71717a] text-[#09090b] px-6 py-4 font-bold font-mono transition-colors"
           >
-            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'GENERAR ASIGNACIÓN ÓPTIMA'}
+            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'CALCULAR PLAN DE COMPRA'}
           </button>
         </form>
       </div>

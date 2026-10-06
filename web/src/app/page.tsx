@@ -15,11 +15,13 @@ import { ThemeToggle } from './components/ThemeToggle';
 import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History, LogOut, Database, Landmark } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
+import { usePortfolio } from './context/PortfolioContext';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA' | 'TOP5' | 'DIVIDENDOS' | 'BACKTEST' | 'DATA_WAREHOUSE'>('DATA_WAREHOUSE');
   const [session, setSession] = useState<{ user: { id: string; email?: string } } | null>(null);
   const router = useRouter();
+  const { isDemo } = usePortfolio();
 
   useEffect(() => {
     // Si estamos en modo demo o modo cartola, no exigir sesión real
@@ -99,6 +101,11 @@ export default function Home() {
         </div>
       </header>
 
+      {isDemo && (
+        <div className="bg-amber-100 dark:bg-amber-900/30 text-amber-900 dark:text-amber-200 text-xs font-mono text-center py-2 px-4 border-b border-amber-300/60">
+          Modo demo: estás viendo un portafolio de ejemplo, no el tuyo. Para salir, usa SALIR.
+        </div>
+      )}
       <MacroPanel />
       
       {/* TABS MENU */}

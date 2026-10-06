@@ -35,6 +35,11 @@ interface TopOpportunity {
 }
 
 // Escaneos antiguos del bot guardaron el dividend yield multiplicado dos veces por 100 ("346.00%" en vez de 3,46%)
+// Los tickers chilenos (.SN) cotizan en pesos; el resto en dólares
+const precioDe = (ticker: string, n: number) => ticker.endsWith('.SN')
+  ? `$${Math.round(n).toLocaleString('es-CL')}`
+  : `US$${n.toFixed(2)}`;
+
 function normalizeYield(divStr?: string): string {
   const value = parseFloat(String(divStr ?? '').replace('%', ''));
   if (!Number.isFinite(value)) return 'N/A';
@@ -79,14 +84,14 @@ export default function TopOportunidadesTab() {
 
             top5 = sorted.map(c => ({
               ticker: c.ticker,
-              precio_entrada_ideal: c.bollinger_lower ? `$${c.bollinger_lower.toFixed(2)}` : `$${c.price.toFixed(2)}`,
-              target_price: c.bollinger_upper ? `$${c.bollinger_upper.toFixed(2)}` : `$${(c.price * 1.1).toFixed(2)}`,
+              precio_entrada_ideal: c.bollinger_lower ? precioDe(c.ticker, c.bollinger_lower) : 'N/D',
+              target_price: c.bollinger_upper ? precioDe(c.ticker, c.bollinger_upper) : 'N/D',
               riesgo: c.distancia_ema200 < -0.1 ? 'ALTO' : 'MODERADO',
               price: c.price,
               rsi: c.rsi,
               distancia_ema200: c.distancia_ema200,
               score: c.score,
-              pe: c.pe || 'N/A',
+              pe: typeof c.pe === 'number' && c.pe > 0 ? c.pe : typeof c.pe === 'string' && parseFloat(c.pe) > 0 ? c.pe : 'N/A',
               div_str: normalizeYield(c.div_str),
               deuda: c.deuda || 'N/A'
             }));
@@ -177,7 +182,7 @@ export default function TopOportunidadesTab() {
           Top Oportunidades
         </h2>
         <p className="text-zinc-600 dark:text-[#a1a1aa] text-sm font-sans max-w-xl mx-auto">
-          Acciones y ETFs globales seleccionados algorítmicamente por sobreventa extrema y validados por nuestra Inteligencia Artificial.
+          Ideas del último escaneo automático: acciones y ETFs con señales técnicas de sobreventa (precio cerca de su banda inferior de Bollinger y RSI bajo). No consideran tu cartera, sus fundamentales ni noticias: son ideas para investigar, no recomendaciones de compra.
         </p>
         <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] mt-4 uppercase">
           Última actualización: {new Date(fecha).toLocaleString()}
@@ -206,7 +211,7 @@ export default function TopOportunidadesTab() {
                     <h3 className="font-mono text-2xl font-bold text-zinc-900 dark:text-[#e4e4e7]">{op.ticker}</h3>
                     <div className="flex items-center gap-2 mt-1">
                       <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase tracking-wider ${isHighRisk ? 'bg-[#7f1d1d] text-[#fca5a5]' : 'bg-[#064e3b] text-[#6ee7b7]'}`}>
-                        Riesgo {op.riesgo}
+                        Riesgo técnico {op.riesgo}
                       </span>
                     </div>
                   </div>
@@ -214,11 +219,11 @@ export default function TopOportunidadesTab() {
                 
                 <div className="hidden sm:flex text-right gap-6 font-mono">
                   <div>
-                    <p className="text-[10px] text-zinc-500 dark:text-[#71717a] uppercase tracking-widest">Entrada Ideal</p>
+                    <p className="text-[10px] text-zinc-500 dark:text-[#71717a] uppercase tracking-widest">Banda inferior (20 días)</p>
                     <p className="text-[#34d399] font-bold text-lg">{op.precio_entrada_ideal}</p>
                   </div>
                   <div>
-                    <p className="text-[10px] text-zinc-500 dark:text-[#71717a] uppercase tracking-widest">Target Mínimo</p>
+                    <p className="text-[10px] text-zinc-500 dark:text-[#71717a] uppercase tracking-widest">Banda superior (20 días)</p>
                     <p className="text-[#60a5fa] font-bold text-lg">{op.target_price}</p>
                   </div>
                 </div>
@@ -229,11 +234,11 @@ export default function TopOportunidadesTab() {
                 <div className="p-6 bg-white dark:bg-[#18181b] border-t border-zinc-200 dark:border-[#27272a] animate-in slide-in-from-top-2 cursor-auto" onClick={(e) => e.stopPropagation()}>
                   <div className="flex sm:hidden justify-between mb-6 font-mono border-b border-zinc-200 dark:border-[#27272a] pb-4">
                     <div>
-                      <p className="text-[10px] text-zinc-500 dark:text-[#71717a] uppercase tracking-widest">Entrada</p>
+                      <p className="text-[10px] text-zinc-500 dark:text-[#71717a] uppercase tracking-widest">Banda inferior</p>
                       <p className="text-[#34d399] font-bold text-lg">{op.precio_entrada_ideal}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-[10px] text-zinc-500 dark:text-[#71717a] uppercase tracking-widest">Target</p>
+                      <p className="text-[10px] text-zinc-500 dark:text-[#71717a] uppercase tracking-widest">Banda superior</p>
                       <p className="text-[#60a5fa] font-bold text-lg">{op.target_price}</p>
                     </div>
                   </div>
@@ -258,7 +263,7 @@ export default function TopOportunidadesTab() {
                       {thesis?.loading ? (
                         <div className="flex flex-col items-center justify-center h-full space-y-3 py-6 text-zinc-500">
                           <Loader2 className="w-6 h-6 animate-spin text-[#60a5fa]" />
-                          <p className="text-xs font-mono animate-pulse">Generando tesis de grado institucional...</p>
+                          <p className="text-xs font-mono animate-pulse">Generando análisis con IA...</p>
                         </div>
                       ) : thesis?.error ? (
                         <div className="text-red-400 p-4 bg-red-950/20 rounded-sm border border-red-900/50 flex flex-col items-center">
@@ -276,7 +281,7 @@ export default function TopOportunidadesTab() {
                           <ReactMarkdown>{thesis.content}</ReactMarkdown>
                         </div>
                       ) : (
-                        <p className="text-zinc-500 italic">Haz clic en Generar Análisis para obtener la tesis predictiva.</p>
+                        <p className="text-zinc-500 italic">Haz clic en Generar Análisis para obtener un análisis redactado por IA (no es una predicción).</p>
                       )}
                     </div>
                   </div>

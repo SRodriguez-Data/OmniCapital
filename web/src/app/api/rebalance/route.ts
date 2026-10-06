@@ -53,7 +53,7 @@ export async function POST(request: Request) {
       try {
         const ordenes = plan.recommendations.map(o =>
           `- ${o.ticker} (${o.origen === 'OPORTUNIDAD' ? 'nueva' : 'ya en cartera'}, señal ${o.accion}): ${fmtMoney(o.expectedCost, currency)}, peso ${(o.pesoAntes * 100).toFixed(1)}% → ${(o.pesoDespues * 100).toFixed(1)}%`).join('\n');
-        const prompt = `Eres un asesor de inversiones chileno. Explica en 2 o 3 frases simples, a un cliente no experto, por qué este plan de compra con ${fmtMoney(budget, currency)} ${currency} mejora su portafolio. No inventes cifras ni cambies el plan.
+        const prompt = `Eres un asesor de inversiones chileno. Explica en 2 o 3 frases simples, a un cliente no experto, qué hace este plan de compra con ${fmtMoney(budget, currency)} ${currency} y con qué criterio se armó. No inventes cifras, no cambies el plan y no prometas resultados.
 Plan:
 ${ordenes}
 ${plan.excluidos.length ? `No se compran: ${plan.excluidos.map(e => `${e.ticker} (${e.motivo})`).join('; ')}` : ''}
