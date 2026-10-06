@@ -3,13 +3,14 @@
 //   informe.md        resumen por cuenta, faltantes, duplicados y cuadratura mes a mes
 //   movimientos.csv   todos los movimientos con fecha (compras, ventas, dividendos, comisiones, aportes...)
 //   posiciones.csv    posiciones actuales con su fecha de compra y costo promedio
+//   portafolio.json   las mismas posiciones sumadas por activo, tal como se guardan en "Mi Portafolio"
 //
 // Uso (desde web/):  node scripts/revisar-cartolas.mjs [fecha de hoy YYYY-MM-DD] [--clave=XXXX]
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { cartolaConClave, textoDePdf, parseCartolaText } from '../src/lib/CartolaParser.ts';
-import { construirLibro, formatoMonto, tickerYahoo, valorizarHoy } from '../src/lib/LibroInversiones.ts';
+import { construirLibro, formatoMonto, posicionesParaPortafolio, tickerYahoo, valorizarHoy } from '../src/lib/LibroInversiones.ts';
 import YahooFinance from 'yahoo-finance2';
 
 const RAIZ = path.resolve(import.meta.dirname, '../../Cartolas');
@@ -131,6 +132,8 @@ fs.writeFileSync(path.join(SALIDA, 'posiciones.csv'), '﻿' + csv([
   ['cuenta', 'ticker', 'cantidad', 'costo_total', 'costo_promedio', 'moneda', 'desde', 'fecha_aproximada', 'dividendos_cobrados'],
   ...libro.posiciones.map(p => [p.cuenta, p.ticker, p.cantidad, p.costo, p.costo !== undefined ? p.costo / p.cantidad : undefined, p.moneda, p.fechaCompra, p.fechaCompraAproximada ? 'si' : '', p.dividendos]),
 ]), 'utf8');
+
+fs.writeFileSync(path.join(SALIDA, 'portafolio.json'), JSON.stringify(posicionesParaPortafolio(libro), null, 2), 'utf8');
 
 console.log('\n' + md.join('\n'));
 console.log(`\nArchivos escritos en ${SALIDA}`);
