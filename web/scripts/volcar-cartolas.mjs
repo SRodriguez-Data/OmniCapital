@@ -28,10 +28,10 @@ if (!fs.existsSync(MUESTRAS)) {
 
 // PDFs de una carpeta y sus subcarpetas (ej. racional/Racional Stocks y racional/Racional Portafolio)
 const pdfsEn = dir => fs.readdirSync(dir, { recursive: true })
-  .filter(f => f.toLowerCase().endsWith('.pdf'))
+  .filter(f => f.toLowerCase().endsWith('.pdf') && !f.startsWith('_'))
   .sort();
 
-for (const broker of fs.readdirSync(MUESTRAS).filter(d => d !== '_texto' && (!soloBroker || d === soloBroker))) {
+for (const broker of fs.readdirSync(MUESTRAS).filter(d => !d.startsWith('_') && (!soloBroker || d === soloBroker))) {
   const dir = path.join(MUESTRAS, broker);
   if (!fs.statSync(dir).isDirectory()) continue;
   const pdfs = pdfsEn(dir);
