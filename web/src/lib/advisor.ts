@@ -865,7 +865,7 @@ function planEstrategico(
         : 'Contexto mixto: sé selectivo. Aporta en partes (por ejemplo, en 2 o 3 meses) y prioriza fondos diversificados y empresas con buenos fundamentales.');
   }
   const reducir = pos.filter(a => a.accion === 'REDUCIR');
-  if (reducir.length) plan.push(`Revisa primero ${reducir.map(a => `${a.ticker} (${a.motivos[0]?.replace(/[.:].*$/, '').toLowerCase()})`).join('; ')}: ${reducir.length > 1 ? 'tienen' : 'tiene'} señal REDUCIR.`);
+  if (reducir.length) plan.push(`Revisa primero ${reducir.map(a => `${a.ticker} (${a.motivos[0]?.replace(/(:|\.(\s|$))[\s\S]*$/, '').toLowerCase()})`).join('; ')}: ${reducir.length > 1 ? 'tienen' : 'tiene'} señal REDUCIR.`);
   const sector = ex.sectores[0];
   if (sector && sector.peso > LIMITE_SECTOR && sector.nombre !== 'Fondos sin detalle') {
     plan.push(`${sector.nombre} pesa ${pct(sector.peso, 0)} de tu patrimonio contando lo que hay dentro de tus fondos: no sumes más de ese sector y dirige los próximos aportes a otros.`);
