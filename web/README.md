@@ -1,6 +1,6 @@
 # Quantum Trader (OmniCapital) — web
 
-Plataforma de gestión de portafolios: lector de cartolas (Racional EE.UU./Chile, Fintual), P&L con precios en vivo, dividendos, backtesting y análisis con IA. Next.js 16 (App Router) desplegado en Vercel, con Supabase para auth y datos.
+Plataforma de gestión de portafolios: lector de cartolas (Racional, BTG Pactual, Vector/Zesty, XTB y Fintual), P&L con precios en vivo, asesor técnico, fundamental y de riesgo ajustado al perfil del inversionista, dividendos y backtesting. La descripción general está en el [README principal](../README.md). Next.js 16 (App Router) desplegado en Vercel, con Supabase para auth y datos.
 
 ## Desarrollo
 
@@ -29,4 +29,6 @@ Nunca subas claves al repositorio: `.env*` está en `.gitignore`.
 
 ## Datos del bot
 
-`analisis_ia`, `alertas_mercado` y `precios_historicos` los escribe el bot en Python de la carpeta superior (GitHub Actions). Para la web son de solo lectura.
+`precios_historicos` (cierre real, sin ajustar), `dividendos`, `series_meta`, `fundamentales`, `analisis_ia` y `alertas_mercado` los escriben los scripts en Python de la carpeta superior (GitHub Actions). Para la web son de solo lectura: la web lee primero de ahí y recurre a Yahoo, y después a Nasdaq y FRED, solo si la base no está al día.
+
+`mi_portafolio` y `perfil_inversionista` son de cada usuario: las políticas RLS solo dejan ver y modificar las filas propias. Las migraciones están en `../supabase/`.

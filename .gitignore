@@ -12,3 +12,12 @@ __pycache__/
 
 # Cartolas reales (RUT, dirección, cuentas): nunca versionar
 Cartolas/
+
+# Datos personales y archivos generados por el bot antiguo: quedan solo en este computador
+privado/
+output/
+portfolio_quantities.json
+cooldown_list.json
+
+# Notas de traspaso entre asistentes
+HANDOFF*.md

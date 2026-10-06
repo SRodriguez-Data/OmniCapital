@@ -637,7 +637,7 @@ function parseFintual(texto: string, lineas: string[], archivo: string): Resulta
   const dividendos = corrido(/^Dividendos recibidos$/, /^Este certificado/);
   const comun = { cuenta: r.cuenta, moneda: 'USD' as Moneda, archivo };
 
-  // Compra: "2025- [US $] Nombre TICKER ETF|Acciones Mercado [US $ 12,34] 0,123456789 01-27 [100,00]"
+  // Compra: "2025- [US $] Nombre TICKER ETF|Acciones Mercado [US $ 12,34] 0,123456789 01-15 [100,00]"
   for (const m of compras.matchAll(/(\d{4})-\s+(?:US \$\s+)?(.+?)\s+([A-Z]{1,5})\s+(ETF|Acciones)\s+Mercado\s+(?:US \$\s+([\d.]+,\d{2})\s+)?(\d+,\d+)\s+(\d{2}-\d{2})(?:\s+([\d.]+,\d{2})(?!\d))?/g)) {
     const monto = numCL(m[5] ?? m[8] ?? '');
     const cantidad = numCL(m[6]);
