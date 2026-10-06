@@ -131,7 +131,7 @@ async function cargar(ticker: string): Promise<Fundamentales | null> {
 const TTL = 12 * 60 * 60 * 1000;
 const cache = new Map<string, { at: number; data: Fundamentales | null }>();
 
-export async function fundamentales(tickers: string[], concurrencia = 4): Promise<Map<string, Fundamentales>> {
+export async function fundamentales(tickers: string[], concurrencia = 6): Promise<Map<string, Fundamentales>> {
   const out = new Map<string, Fundamentales>();
   const pendientes = tickers.filter(t => {
     const hit = cache.get(t);

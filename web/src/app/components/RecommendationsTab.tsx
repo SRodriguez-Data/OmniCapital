@@ -96,6 +96,7 @@ interface Informe {
   avisosDatos: string[];
   modelo: string | null;
   avisoIa: string | null;
+  redaccionPendiente?: boolean;
 }
 
 interface Noticia { titulo: string; fuente: string; fecha: string; url: string }
@@ -214,6 +215,7 @@ export default function RecommendationsTab() {
   const [data, setData] = useState<Informe | null>(null);
   const [noticias, setNoticias] = useState<Noticias | null>(null);
   const [loading, setLoading] = useState(true);
+  const [redactando, setRedactando] = useState(false);
   const [error, setError] = useState('');
   const [abiertos, setAbiertos] = useState<Record<string, boolean>>({});
   const cacheKeyRef = useRef('');
@@ -246,6 +248,35 @@ export default function RecommendationsTab() {
     } catch { /* las noticias son un extra: si fallan, el informe sigue */ }
   }, []);
 
+  // Redacción con IA (llamada aparte): el informe ya está en pantalla mientras tanto
+  const redactar = useCallback(async (informe: Informe, key: string) => {
+    setRedactando(true);
+    let final: Informe;
+    try {
+      const res = await fetch('/api/portfolio/redaccion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ informe }),
+        signal: AbortSignal.timeout(70000),
+      });
+      const r = await res.json().catch(() => ({}));
+      if (!res.ok || r.error) throw new Error(r.error || `Error ${res.status}`);
+      final = {
+        ...informe,
+        diagnostico: r.diagnostico ?? informe.diagnostico,
+        posiciones: informe.posiciones.map(p => ({ ...p, comentarioIa: r.comentarios?.[p.ticker] ?? '' })),
+        modelo: r.modelo ?? null,
+        avisoIa: r.avisoIa ?? null,
+        redaccionPendiente: false,
+      };
+    } catch {
+      final = { ...informe, avisoIa: 'La redacción con IA no está disponible ahora; se muestra el análisis calculado.', redaccionPendiente: false };
+    }
+    try { sessionStorage.setItem(key, JSON.stringify(final)); } catch { /* sin caché */ }
+    if (cacheKeyRef.current === key) setData(final);
+    if (cacheKeyRef.current === key) setRedactando(false);
+  }, []);
+
   const generate = useCallback(async (force: boolean) => {
     cacheKeyRef.current = cacheKey;
     if (items.length === 0) {
@@ -263,6 +294,7 @@ export default function RecommendationsTab() {
           setData(informe);
           setLoading(false);
           cargarNoticias(informe, false);
+          if (informe.redaccionPendiente) redactar(informe, cacheKey);
           return;
         }
       } catch { /* sessionStorage no disponible: seguimos sin caché */ }
@@ -297,6 +329,7 @@ export default function RecommendationsTab() {
       if (cacheKeyRef.current === cacheKey) {
         setData(json);
         cargarNoticias(json, force);
+        if (json.redaccionPendiente) redactar(json, cacheKey);
       }
     } catch (e: unknown) {
       if (cacheKeyRef.current !== cacheKey) return; // el portafolio cambió mientras esperaba
@@ -305,7 +338,7 @@ export default function RecommendationsTab() {
     } finally {
       if (cacheKeyRef.current === cacheKey) setLoading(false);
     }
-  }, [items, cacheKey, cargarNoticias]);
+  }, [items, cacheKey, cargarNoticias, redactar]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -326,7 +359,7 @@ export default function RecommendationsTab() {
   if (loading) {
     return (
       <div className="text-center p-12 font-mono text-zinc-600 dark:text-zinc-400">
-        Descargando 3 años de precios con dividendos, fundamentales, consenso de analistas y contexto de mercado, y redactando el informe (puede tardar hasta dos minutos)...
+        Descargando 3 años de precios con dividendos, fundamentales, consenso de analistas y contexto de mercado (la primera vez del día puede tardar hasta dos minutos)...
       </div>
     );
   }
@@ -412,7 +445,7 @@ export default function RecommendationsTab() {
       {/* Diagnóstico redactado por la IA */}
       <div className="bg-blue-50 dark:bg-blue-900/10 border-l-4 border-l-blue-500 border-y border-r border-blue-200 dark:border-blue-900/30 p-5 rounded-md">
         <h3 className="text-xs font-bold text-blue-700 dark:text-blue-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-          <Sparkles className="w-3.5 h-3.5" /> Diagnóstico {data.modelo ? '(redactado por IA a partir de los datos calculados)' : '(calculado)'}
+          <Sparkles className="w-3.5 h-3.5" /> Diagnóstico {redactando ? '(redactando con IA…)' : data.modelo ? '(redactado por IA a partir de los datos calculados)' : '(calculado)'}
         </h3>
         <p className="text-sm text-blue-900 dark:text-blue-100 leading-relaxed whitespace-pre-line">{data.diagnostico}</p>
         {data.avisoIa && (

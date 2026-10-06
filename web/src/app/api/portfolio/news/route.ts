@@ -34,6 +34,7 @@ const schema: JsonSchema = {
 };
 
 export async function POST(req: Request) {
+  const started = Date.now();
   if (!rateLimit(req, 'news', 15)) {
     return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
   }
@@ -69,7 +70,8 @@ Si los titulares no tratan realmente de la empresa, tono "neutral" y resumen "Si
 
 ${bloque}`;
     try {
-      const { text, model } = await generateText(prompt, { schema, speed: 'fast', timeoutMs: 40000 });
+      // Lo que quede hasta el límite de la función (los titulares pueden haber tardado)
+      const { text, model } = await generateText(prompt, { schema, speed: 'fast', timeoutMs: Math.max(10000, 55000 - (Date.now() - started)) });
       for (const e of JSON.parse(text)?.empresas ?? []) {
         const t = typeof e?.ticker === 'string' ? e.ticker.toUpperCase() : '';
         if (porActivo[t] && TONOS.includes(e.tono) && typeof e.resumen === 'string') tono[t] = { tono: e.tono, resumen: e.resumen.trim().slice(0, 300) };

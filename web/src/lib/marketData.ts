@@ -148,9 +148,9 @@ async function fromSupabase(ticker: string, days: number): Promise<DailyHistory 
 
 const usable = (h: DailyHistory) => h.closes.length >= 30 && h.fresh && !h.frozen;
 
-// Caché por instancia con tope de tamaño. Cada ticker se descarga en una ventana fija (2, 5 o 15 años)
+// Caché por instancia con tope de tamaño. Cada ticker se descarga en una ventana fija (2, 3, 5 o 15 años)
 // y las consultas más cortas se recortan en memoria, para no repetir descargas ni llenar la memoria.
-const WINDOWS = [2 * 365 + 10, 5 * 365 + 10, 15 * 365];
+const WINDOWS = [2 * 365 + 10, 3 * 365 + 20, 5 * 365 + 10, 15 * 365];
 const MAX_ENTRIES = 250;
 const TTL_OK = 60 * 60 * 1000;
 const TTL_FAIL = 2 * 60 * 1000; // un fallo pasajero (429) no se arrastra por una hora
