@@ -39,7 +39,7 @@ flowchart LR
   PDF["Cartolas PDF"] --> UI
 ```
 
-- Un **minero en Python** corre en GitHub Actions cada día hábil. Descarga unos 600 activos (S&P 500, Nasdaq 100, acciones chilenas, ETFs y los activos de los usuarios), calcula indicadores técnicos y guarda en Supabase el cierre real, los dividendos y los fundamentales. Si Yahoo cambia el historial (por un split, por ejemplo), lo detecta y reescribe el activo.
+- Un **minero en Python** corre en GitHub Actions cada madrugada de día hábil, con las bolsas cerradas. Sigue unos 600 activos (S&P 500, Nasdaq 100, acciones chilenas, ETFs y los activos de los usuarios) y es incremental: baja solo el último tramo, de a 100 activos por llamada, continúa los indicadores técnicos desde lo guardado y escribe en Supabase solo los días nuevos (cierre real, dividendos y fundamentales). Nunca guarda un día con la bolsa abierta, corrige los días que Yahoo cambió y, si un split cambia el historial, reescribe el activo.
 - La **web** lee primero de la base, así que un informe se arma en segundos sin descargar años de precios. Solo si la base no está al día recurre a Yahoo, y si Yahoo falla, a fuentes gratuitas de respaldo.
 - Las **cartolas se procesan en el navegador** con pdf.js: los PDF con datos personales no se suben a ningún servidor.
 
