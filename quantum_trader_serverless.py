@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import importlib
 import requests
@@ -41,11 +42,10 @@ if SUPABASE_URL and SUPABASE_KEY:
 else:
     supabase = None
 
+# Mismo orden que la web (src/lib/gemini.ts): si un modelo falla o se agota su cuota gratis, se usa el siguiente
+MODELOS_GEMINI = ['gemini-3.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash']
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    llm = genai.GenerativeModel('gemini-2.5-flash')
-else:
-    llm = None
 
 def compute_quant_math(tickers):
     if not tickers or not supabase:
@@ -229,22 +229,32 @@ def linea_prompt(c):
 def run_serverless_screener():
     logging.info("🚀 Iniciando Quantum Trader Serverless (Institucional)...")
     
-    if not supabase or not llm:
+    # Sin credenciales o sin datos el job debe quedar en rojo en GitHub Actions, no en verde sin hacer nada
+    if not supabase or not GEMINI_API_KEY:
         logging.error("❌ Faltan credenciales clave (Supabase o Gemini).")
-        return
+        sys.exit(1)
 
     # 1. Extraer los datos más recientes
     try:
         res_date = supabase.table("precios_historicos").select("date").order("date", desc=True).limit(1).execute()
         if not res_date.data:
-            return
+            logging.error("❌ No hay precios guardados.")
+            sys.exit(1)
         max_date = res_date.data[0]['date']
-        
+
+        # La corrida de respaldo no repite el análisis (ni gasta cuota de Gemini) si ya se hizo con estos precios
+        if not os.getenv("FORZAR_ANALISIS"):
+            ultimo = (supabase.table("analisis_ia").select("candidatos_json->fecha_precios")
+                      .order("fecha", desc=True).limit(1).execute().data)
+            if ultimo and ultimo[0].get("fecha_precios") == max_date:
+                logging.info(f"✅ El análisis con los precios del {max_date[:10]} ya está hecho; no se repite.")
+                return
+
         res_activos = supabase.table("precios_historicos").select("*").eq("date", max_date).execute()
         activos_hoy = res_activos.data
     except Exception as e:
         logging.error(f"Error consultando Supabase: {e}")
-        return
+        sys.exit(1)
 
     all_us = []
     all_cl = []
@@ -416,15 +426,21 @@ Responde ESTRICTAMENTE EN ESPAÑOL, en formato JSON válido, sin bloques de cód
 }}
 Incluye todos los tickers en sus respectivos diccionarios/listas."""
 
-    try:
-        response = llm.generate_content(
-            prompt_macro, 
-            generation_config={"response_mime_type": "application/json", "temperature": 0.0}
-        )
-        texto_ia = response.text.replace("```json", "").replace("```", "").strip()
-        ia_data = json.loads(texto_ia)
-    except Exception as e:
-        logging.error(f"Error generando IA: {e}")
+    ia_data = None
+    for modelo in MODELOS_GEMINI:
+        try:
+            response = genai.GenerativeModel(modelo).generate_content(
+                prompt_macro,
+                generation_config={"response_mime_type": "application/json", "temperature": 0.0}
+            )
+            texto_ia = response.text.replace("```json", "").replace("```", "").strip()
+            ia_data = json.loads(texto_ia)
+            logging.info(f"🧠 Análisis generado con {modelo}.")
+            break
+        except Exception as e:
+            logging.warning(f"{modelo} no respondió: {str(e)[:160]}")
+    if ia_data is None:
+        logging.error("Error generando IA: ningún modelo de Gemini respondió.")
         ia_data = {
             "contexto_macro": "Error", "vision_radar": "Error", "seleccion_fondo": "Error", "setup_tecnico": "Error",
             "insights_us": {}, "insights_cl": {}
@@ -436,7 +452,9 @@ Incluye todos los tickers en sus respectivos diccionarios/listas."""
         "us": top_us,
         "cl": top_cl,
         "diagnostico_portafolio": ia_data.get("diagnostico_mi_portafolio", "Sin diagnóstico específico."),
-        "recomendaciones_portafolio": ia_data.get("recomendaciones_mi_portafolio", [])
+        "recomendaciones_portafolio": ia_data.get("recomendaciones_mi_portafolio", []),
+        # Con qué precios se hizo: la corrida de respaldo no repite el análisis si no hay precios nuevos
+        "fecha_precios": max_date
     }
     
     try:
@@ -450,6 +468,7 @@ Incluye todos los tickers en sus respectivos diccionarios/listas."""
         }).execute()
     except Exception as e:
         logging.error(f"Error guardando IA en Supabase: {e}")
+        sys.exit(1)
             
     logging.info("✅ Pipeline Institucional Finalizado.")
 
