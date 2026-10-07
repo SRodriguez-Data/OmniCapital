@@ -4,17 +4,34 @@ on:
   push:
     branches:
       - main
-    # Los cambios solo de la web (Vercel) no deben re-ejecutar el minero ni gastar cuota de Gemini
-    paths-ignore:
-      - 'web/**'
+    # Solo cambios del bot: la web (Vercel), la documentación y lo demás no re-ejecutan el minero ni gastan cuota de Gemini
+    paths:
+      - 'miner.py'
+      - 'quantum_trader_serverless.py'
+      - 'requirements.txt'
+      - '.github/workflows/daily_update.yml'
   schedule:
-    # Run at 21:00 UTC (17:00 or 18:00 Chile Time depending on DST)
-    - cron: '0 21 * * 1-5'
+    # De madrugada en Chile (01:13 en horario de verano, 00:13 en invierno), martes a sábado: con las dos bolsas
+    # cerradas quedan los cierres oficiales del día hábil anterior y la web amanece al día. GitHub atrasa los cron
+    # a veces varias horas (sobre todo a la hora en punto), por eso un minuto impar y con margen antes de la apertura.
+    - cron: '13 4 * * 2-6'
+    # Respaldo por si GitHub se salta la primera: si ya está al día no escribe nada y no repite el análisis
+    - cron: '43 7 * * 2-6'
   workflow_dispatch:
+    inputs:
+      dias:
+        description: 'Días guardados que se revisan contra Yahoo (30 normal; 370 repasa el último año)'
+        default: '30'
+
+# Dos corridas a la vez escribirían los mismos días
+concurrency:
+  group: pipeline-diario
+  cancel-in-progress: false
 
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Check out repository
@@ -30,18 +47,21 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          
-      - name: Run Miner (Download IPSA and Global Data to Supabase)
+
+      - name: Run Miner (download only the new days to Supabase)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          DIAS_REVISION: ${{ inputs.dias }}
         run: |
           python miner.py
-          
+
       - name: Run AI Analysis (Generate Top 5 Opportunities)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Un push o una corrida manual siempre rehacen el análisis; las programadas solo si hay precios nuevos
+          FORZAR_ANALISIS: ${{ github.event_name != 'schedule' && '1' || '' }}
         run: |
           python quantum_trader_serverless.py
