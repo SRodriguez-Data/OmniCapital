@@ -51,7 +51,8 @@ def obtener_universo_masivo() -> tuple[list[str], list[str]]:
 
     # 2. Nasdaq 100
     try:
-        r = requests.get('https://en.wikipedia.org/wiki/Nasdaq-100', headers=headers)
+        # La tabla de componentes se movió de la página 'Nasdaq-100' a esta lista
+        r = requests.get('https://en.wikipedia.org/wiki/List_of_NASDAQ-100_companies', headers=headers)
         tablas = pd.read_html(StringIO(r.text))
         for t in tablas:
             if 'Ticker' in t.columns:
@@ -59,6 +60,8 @@ def obtener_universo_masivo() -> tuple[list[str], list[str]]:
                 tickers_finales.extend(ndx)
                 logging.info(f"✅ NASDAQ 100 cargado ({len(ndx)} activos).")
                 break
+        else:
+            logging.error("Error Nasdaq 100: Wikipedia no trae la tabla de componentes.")
     except Exception as e: 
         logging.error(f"Error Nasdaq 100: {e}")
 
