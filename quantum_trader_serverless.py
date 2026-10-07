@@ -42,8 +42,10 @@ if SUPABASE_URL and SUPABASE_KEY:
 else:
     supabase = None
 
-# Mismo orden que la web (src/lib/gemini.ts): si un modelo falla o se agota su cuota gratis, se usa el siguiente
-MODELOS_GEMINI = ['gemini-3.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash']
+# Si un modelo falla o se agota su cuota gratis, se usa el siguiente. gemini-3.5-flash no tiene cuota gratis con
+# esta clave (429) y el SDK reintentaba varios minutos antes de rendirse: por eso el tope de tiempo por modelo
+MODELOS_GEMINI = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite']
+TIEMPO_MAXIMO_GEMINI = 180
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
@@ -69,7 +71,8 @@ def compute_quant_math(tickers):
             return {}, []
             
         corr_matrix = returns.corr().round(2)
-        corr_json = {t: corr_matrix[t].to_dict() for t in corr_matrix.columns}
+        # Un precio congelado no varía y su correlación sale NaN, que no se puede guardar como JSON
+        corr_json = {t: {k: (None if pd.isna(v) else v) for k, v in corr_matrix[t].items()} for t in corr_matrix.columns}
             
         num_portfolios = 3000
         risk_free_rate = 0.04
@@ -431,7 +434,8 @@ Incluye todos los tickers en sus respectivos diccionarios/listas."""
         try:
             response = genai.GenerativeModel(modelo).generate_content(
                 prompt_macro,
-                generation_config={"response_mime_type": "application/json", "temperature": 0.0}
+                generation_config={"response_mime_type": "application/json", "temperature": 0.0},
+                request_options={"timeout": TIEMPO_MAXIMO_GEMINI}
             )
             texto_ia = response.text.replace("```json", "").replace("```", "").strip()
             ia_data = json.loads(texto_ia)
