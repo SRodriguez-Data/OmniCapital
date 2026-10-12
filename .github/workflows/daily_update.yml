@@ -11,14 +11,12 @@ on:
       - 'requirements.txt'
       - '.github/workflows/daily_update.yml'
   schedule:
-    # De madrugada en Chile (01:13 en horario de verano, 00:13 en invierno): con las dos bolsas cerradas quedan los
-    # cierres oficiales del día hábil anterior y la web amanece al día. GitHub atrasa los cron a veces varias horas
-    # (sobre todo a la hora en punto), por eso un minuto impar. Todos los días y no solo de martes a sábado: GitHub
-    # también se salta corridas (el sábado 2026-10-11 no lanzó ninguna) y así el domingo recupera el viernes en vez
-    # de esperar al martes. Con todo al día la corrida no escribe nada y no repite el análisis.
-    - cron: '13 4 * * *'
-    # Respaldo por si GitHub se salta la primera
-    - cron: '43 7 * * *'
+    # De madrugada en Chile (01:13 en horario de verano, 00:13 en invierno), martes a sábado: con las dos bolsas
+    # cerradas quedan los cierres oficiales del día hábil anterior y la web amanece al día. GitHub atrasa los cron
+    # a veces varias horas (sobre todo a la hora en punto), por eso un minuto impar y con margen antes de la apertura.
+    - cron: '13 4 * * 2-6'
+    # Respaldo por si GitHub se salta la primera: si ya está al día no escribe nada y no repite el análisis
+    - cron: '43 7 * * 2-6'
   workflow_dispatch:
     inputs:
       dias:
