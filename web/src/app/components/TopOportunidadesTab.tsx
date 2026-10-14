@@ -17,8 +17,16 @@ interface Candidato {
   bollinger_lower?: number;
   bollinger_upper?: number;
   pe?: string | number;
+  pe_nota?: 'estimado' | 'perdidas' | 'reit' | 'sin dato' | null;
   div_str?: string;
-  deuda?: string | number;
+  deuda?: string | number | null;   // deuda / patrimonio en %
+  deuda_fuente?: string | null;     // 'yahoo' o 'balance AAAA-MM-DD' (calculada del balance)
+  deuda_nota?: 'etf' | 'patrimonio negativo' | 'sin dato' | null;
+  patrimonio_activos?: number | null; // solo bancos y aseguradoras, en %
+  tipo?: 'accion' | 'etf';
+  sector?: string | null;
+  industria?: string | null;
+  proximos_resultados?: string | null; // AAAA-MM-DD
 }
 
 interface TopOpportunity {
@@ -31,9 +39,11 @@ interface TopOpportunity {
   distancia_ema200: number | null;
   score: number | null;
   sinSenal: boolean;
-  pe: string | number;
+  pe: string;
   div_str: string;
-  deuda: string | number;
+  deuda: string;
+  resultados: { texto: string; pronto: boolean } | null;
+  sector: string | null;
 }
 
 // Escaneos antiguos del bot guardaron el dividend yield multiplicado dos veces por 100 ("346.00%" en vez de 3,46%)
@@ -44,9 +54,47 @@ const precioDe = (ticker: string, n: number) => ticker.endsWith('.SN')
 
 function normalizeYield(divStr?: string): string {
   const value = parseFloat(String(divStr ?? '').replace('%', ''));
-  if (!Number.isFinite(value)) return 'N/A';
+  if (!Number.isFinite(value)) return 'Sin dato en Yahoo';
+  if (value === 0) return '0% (no reparte)';
   return `${(value > 25 ? value / 100 : value).toFixed(2)}%`;
 }
+
+const fechaCorta = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00Z`).toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' });
+
+// Cada dato dice de dónde sale o por qué no aplica: nunca un "N/A" sin explicación
+function textoPE(c: Candidato): string {
+  if (c.pe_nota === 'reit') return 'No aplica (REIT: se valora por su flujo, no por la utilidad contable)';
+  const pe = typeof c.pe === 'number' ? c.pe : parseFloat(String(c.pe));
+  if (Number.isFinite(pe) && pe > 0) return `${pe.toFixed(1)}${c.pe_nota === 'estimado' ? ' (sobre utilidad estimada)' : ''}`;
+  if (c.pe_nota === 'perdidas') return 'Negativo (la empresa tiene pérdidas)';
+  return 'Sin dato en Yahoo';
+}
+
+function textoDeuda(c: Candidato): string {
+  if (c.deuda_nota === 'etf' || c.tipo === 'etf') return 'No aplica (ETF)';
+  if (c.deuda_nota === 'patrimonio negativo') return 'Patrimonio negativo (deuda mayor que sus activos netos)';
+  const d = typeof c.deuda === 'number' ? c.deuda : parseFloat(String(c.deuda));
+  // Escaneos anteriores guardaban 0 cuando Yahoo no informaba la deuda: ese 0 no significa "sin deuda"
+  if (!Number.isFinite(d) || (d === 0 && !c.deuda_fuente)) return 'Sin dato en Yahoo';
+  const partes = [`${Math.round(d)}% del patrimonio`];
+  if (c.deuda_fuente?.startsWith('balance ')) partes.push(`calculada del balance al ${fechaCorta(c.deuda_fuente.slice(8))}`);
+  if (typeof c.patrimonio_activos === 'number') partes.push(`en un banco la deuda es parte del negocio: su patrimonio es ${c.patrimonio_activos.toFixed(1)}% de sus activos`);
+  return partes.join(' · ');
+}
+
+function textoResultados(iso?: string | null): { texto: string; pronto: boolean } | null {
+  if (!iso) return null;
+  const dias = Math.round((new Date(`${iso}T12:00:00Z`).getTime() - Date.now()) / 86400000);
+  if (dias < 0) return null;
+  const cuando = dias === 0 ? 'hoy' : dias === 1 ? 'mañana' : `en ${dias} días`;
+  return { texto: `${fechaCorta(iso)} (${cuando})`, pronto: dias <= 7 };
+}
+
+const SECTOR: Record<string, string> = {
+  'Financial Services': 'Financiero', Healthcare: 'Salud', 'Real Estate': 'Inmobiliario', Industrials: 'Industrial',
+  'Consumer Defensive': 'Consumo básico', 'Consumer Cyclical': 'Consumo discrecional', Technology: 'Tecnología',
+  'Communication Services': 'Comunicaciones', Utilities: 'Servicios básicos', Energy: 'Energía', 'Basic Materials': 'Materiales',
+};
 
 export default function TopOportunidadesTab() {
   const { items } = usePortfolio();
@@ -95,9 +143,11 @@ export default function TopOportunidadesTab() {
               distancia_ema200: c.distancia_ema200,
               score: c.score,
               sinSenal: c.rsi == null,
-              pe: typeof c.pe === 'number' && c.pe > 0 ? c.pe : typeof c.pe === 'string' && parseFloat(c.pe) > 0 ? c.pe : 'N/A',
+              pe: textoPE(c),
               div_str: normalizeYield(c.div_str),
-              deuda: c.deuda || 'N/A'
+              deuda: textoDeuda(c),
+              resultados: textoResultados(c.proximos_resultados),
+              sector: c.sector ? [SECTOR[c.sector] ?? c.sector, c.industria].filter(Boolean).join(' · ') : null,
             }));
           }
           setOportunidades(top5);
@@ -114,8 +164,8 @@ export default function TopOportunidadesTab() {
   const generateThesis = async (op: TopOpportunity) => {
     if (theses[op.ticker]?.loading || theses[op.ticker]?.content) return;
 
-    // Verificar caché local primero
-    const cacheKey = `quantum_thesis_${op.ticker}_${fecha}`;
+    // Verificar caché local primero (v2: las tesis anteriores se escribieron con datos en blanco)
+    const cacheKey = `quantum_thesis_v2_${op.ticker}_${fecha}`;
     const cachedThesis = localStorage.getItem(cacheKey);
     if (cachedThesis) {
       setTheses(prev => ({ ...prev, [op.ticker]: { loading: false, content: cachedThesis } }));
@@ -139,6 +189,8 @@ export default function TopOportunidadesTab() {
           pe: op.pe,
           div_str: op.div_str,
           deuda: op.deuda,
+          sector: op.sector,
+          resultados: op.resultados?.texto,
           portfolio: portfolioSummary
         })
       });
@@ -254,6 +306,29 @@ export default function TopOportunidadesTab() {
                       <p className="text-[#60a5fa] font-bold text-lg">{op.target_price}</p>
                     </div>
                   </div>
+
+                  {op.sector && <p className="text-xs font-sans text-zinc-500 dark:text-[#a1a1aa] mb-3">{op.sector}</p>}
+                  <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6 text-sm font-sans">
+                    {[
+                      ['P/E (precio / utilidad)', op.pe],
+                      ['Dividendo anual', op.div_str],
+                      ['Deuda / patrimonio', op.deuda],
+                      ['Próximos resultados', op.resultados?.texto ?? 'Sin fecha anunciada en Yahoo'],
+                    ].map(([label, valor]) => (
+                      <div key={label} className="bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-[#27272a] rounded-sm p-3">
+                        <dt className="text-[10px] font-mono text-zinc-500 dark:text-[#71717a] uppercase tracking-widest">{label}</dt>
+                        <dd className="mt-1 text-zinc-900 dark:text-[#e4e4e7]">{valor}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {op.resultados?.pronto && (
+                    <div className="mb-6 flex items-start gap-3 bg-amber-50 dark:bg-[#422006] border border-amber-300 dark:border-[#78350f] p-3 rounded-sm text-amber-900 dark:text-[#fcd34d]">
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs font-sans">
+                        Publica resultados {op.resultados.texto}. El precio suele moverse fuerte ese día, hacia arriba o hacia abajo: comprar antes es apostar al resultado.
+                      </p>
+                    </div>
+                  )}
 
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
