@@ -158,6 +158,24 @@ def proximos_resultados(info):
     futuras = [f for f in fechas if es_numero(f) and f > ahora - 86400]
     return datetime.utcfromtimestamp(min(futuras)).strftime('%Y-%m-%d') if futuras else None
 
+def ultimas_filas(max_date, dias=5):
+    """La última fila guardada de cada activo en los últimos días. Si solo se miraran las filas de la fecha más
+    reciente, un feriado en una bolsa (el 12 de octubre en Chile) o Yahoo atrasado en publicar el cierre de la
+    otra (el de EE.UU. sale pasadas las 21:00 de Nueva York) dejaría a ese mercado entero fuera del análisis."""
+    desde = (pd.Timestamp(max_date) - pd.Timedelta(days=dias)).strftime("%Y-%m-%d")
+    filas, inicio = [], 0
+    while True:
+        lote = (supabase.table("precios_historicos").select("*").gte("date", desde)
+                .order("date", desc=True).order("ticker").range(inicio, inicio + 999).execute().data or [])
+        filas += lote
+        if len(lote) < 1000:
+            break
+        inicio += 1000
+    ultimas = {}
+    for f in filas:  # de la más reciente a la más antigua: queda la última de cada activo
+        ultimas.setdefault(f['ticker'], f)
+    return list(ultimas.values())
+
 def get_fundamentals(ticker):
     """P/E, dividendo y deuda/patrimonio (en %), cada uno con su fuente o el motivo por el que no aplica:
     la web no muestra un dato en blanco sin explicar por qué."""
@@ -316,17 +334,21 @@ def run_serverless_screener():
             logging.error("❌ No hay precios guardados.")
             sys.exit(1)
         max_date = res_date.data[0]['date']
+        activos_hoy = ultimas_filas(max_date)
+        # Cuántos activos ya tienen el cierre más reciente: si Yahoo publicó después los de la otra bolsa, la
+        # fecha es la misma pero los precios no, y el análisis se rehace
+        al_dia = sum(1 for r in activos_hoy if r['date'] == max_date)
 
         # La corrida de respaldo no repite el análisis (ni gasta cuota de Gemini) si ya se hizo con estos precios
         if not os.getenv("FORZAR_ANALISIS"):
-            ultimo = (supabase.table("analisis_ia").select("candidatos_json->fecha_precios")
+            ultimo = (supabase.table("analisis_ia").select("candidatos_json->fecha_precios, candidatos_json->activos_al_dia")
                       .order("fecha", desc=True).limit(1).execute().data)
-            if ultimo and ultimo[0].get("fecha_precios") == max_date:
+            if ultimo and ultimo[0].get("fecha_precios") == max_date and ultimo[0].get("activos_al_dia") == al_dia:
                 logging.info(f"✅ El análisis con los precios del {max_date[:10]} ya está hecho; no se repite.")
                 return
-
-        res_activos = supabase.table("precios_historicos").select("*").eq("date", max_date).execute()
-        activos_hoy = res_activos.data
+        rezagados = len(activos_hoy) - al_dia
+        if rezagados:
+            logging.info(f"{rezagados} activos sin cierre del {max_date[:10]} (feriado o Yahoo atrasado): se usa su último cierre.")
     except Exception as e:
         logging.error(f"Error consultando Supabase: {e}")
         sys.exit(1)
@@ -364,7 +386,8 @@ def run_serverless_screener():
                 'price': close,
                 'rsi': rsi,
                 'distancia_ema200': pvc_ema200,
-                'score': score
+                'score': score,
+                'fecha_precio': row['date'][:10]
             }
             if ticker.endswith(".SN"):
                 all_cl.append(data_dict)
@@ -530,7 +553,8 @@ Incluye todos los tickers en sus respectivos diccionarios/listas."""
         "diagnostico_portafolio": ia_data.get("diagnostico_mi_portafolio", "Sin diagnóstico específico."),
         "recomendaciones_portafolio": ia_data.get("recomendaciones_mi_portafolio", []),
         # Con qué precios se hizo: la corrida de respaldo no repite el análisis si no hay precios nuevos
-        "fecha_precios": max_date
+        "fecha_precios": max_date,
+        "activos_al_dia": al_dia
     }
     
     try:
