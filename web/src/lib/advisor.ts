@@ -560,8 +560,8 @@ export async function buildAdvisorReport(
       if (fundamental.veredicto === 'favorable') evFundamentales.push(evidencia('fundamental_favorable', mercado, 1, 'Veredicto fundamental favorable'));
       else if (fundamental.veredicto === 'débil') evFundamentales.push(evidencia('fundamental_debil', mercado, -1, 'Veredicto fundamental débil'));
       const q = mercado === 'EE.UU.' ? calidad[p.ticker] : undefined;
-      if (q && q.p >= 0.8) evFundamentales.push(evidencia('calidad_alta', mercado, 1, `Utilidad respaldada por caja (20% superior de su sector)`));
-      else if (q && q.p <= 0.2) evFundamentales.push(evidencia('calidad_baja', mercado, -1, `Utilidad poco respaldada por caja (20% inferior de su sector)`));
+      if (q && q.p >= 0.8) evFundamentales.push(evidencia('calidad_alta', mercado, 1, 'Utilidad respaldada por caja, en el 20% superior de su sector'));
+      else if (q && q.p <= 0.2) evFundamentales.push(evidencia('calidad_baja', mercado, -1, 'Utilidad poco respaldada por caja, en el 20% inferior de su sector'));
       if ((f?.payout ?? 0) > 1 || q?.pa) evFundamentales.push(evidencia('payout_alto', mercado, -1, 'Reparte en dividendos más que su utilidad'));
     }
     const decision = decidir({ diversificado, tipo, peso, pesoEfectivo, distSma200, vol, pnl, tecnico, fundamental, riesgo, evTecnica, evEstirado, evFundamentales });
