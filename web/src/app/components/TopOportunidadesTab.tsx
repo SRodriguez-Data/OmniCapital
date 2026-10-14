@@ -5,6 +5,7 @@ import { ShieldAlert, Sparkles, AlertTriangle, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import ReactMarkdown from 'react-markdown';
 import { usePortfolio } from '../context/PortfolioContext';
+import { evidenciaTop5 } from '@/lib/evidencia';
 
 // Candidato tal como lo guarda el bot en analisis_ia.candidatos_json
 interface Candidato {
@@ -91,6 +92,26 @@ function textoResultados(iso?: string | null): { texto: string; pronto: boolean 
   if (dias < 0) return null;
   const cuando = dias === 0 ? 'hoy' : dias === 1 ? 'mañana' : `en ${dias} días`;
   return { texto: `${fechaCorta(iso)} (${cuando})`, pronto: dias <= 7 };
+}
+
+// Cómo le fue a este mismo método en los últimos 10 años (laboratorio de evidencia)
+function HistorialMetodo() {
+  const filas = (['EE.UU.', 'Chile'] as const).map(m => ({ m, e: evidenciaTop5(m) })).filter(x => x.e);
+  if (!filas.length) return null;
+  const pct = (x: number) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%`;
+  return (
+    <div className="mt-4 text-left text-xs font-sans text-zinc-600 dark:text-[#a1a1aa] border-t border-zinc-200 dark:border-[#27272a] pt-3 space-y-1">
+      <p className="font-semibold text-zinc-800 dark:text-[#e4e4e7]">Cómo le fue a este método ({filas[0].e!.anios}, 5 ideas por mes, 3 meses después, frente a su mercado)</p>
+      {filas.map(({ m, e }) => (
+        <p key={m}>
+          {m}: {pct(e!.exceso)} en promedio, pero en la idea típica {pct(e!.mediana)}; le ganó al mercado {(e!.acierto * 100).toFixed(0)}% de las veces (una acción cualquiera: {(e!.base * 100).toFixed(0)}%).
+        </p>
+      ))}
+      <p className="text-[11px] text-zinc-500 dark:text-[#71717a]">
+        El promedio lo suben unos pocos rebotes grandes, y la medición favorece a las acciones que se recuperaron (las que siguieron cayendo y salieron del índice no están en los datos). Úsalas como ideas para investigar.
+      </p>
+    </div>
+  );
 }
 
 const SECTOR: Record<string, string> = {
@@ -246,6 +267,7 @@ export default function TopOportunidadesTab() {
         <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] mt-4 uppercase">
           Última actualización: {new Date(fecha).toLocaleString()}
         </p>
+        <HistorialMetodo />
       </div>
 
       <div className="space-y-4">
