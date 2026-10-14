@@ -254,6 +254,55 @@ def descargar(tickers: list[str], periodo: str) -> dict[str, pd.DataFrame]:
         time.sleep(1)
     return datos
 
+DIAS_BARRAS_HORA = 725   # Yahoo guarda barras por hora de los últimos 730 días
+
+def reparar_con_horas(descargas: dict[str, pd.DataFrame]) -> int:
+    """Yahoo deja semanas sin actualizar en el historial diario de varias acciones chilenas (el mismo cierre con
+    volumen 0), pero sus barras por hora de esos mismos días sí traen los precios reales. Cada día con volumen 0
+    se rearma con sus barras (apertura, máximo, mínimo, último precio y volumen sumado). Devuelve los días
+    reparados; los que tampoco tienen barras quedan como estaban."""
+    limite = (pd.Timestamp.now() - pd.Timedelta(days=DIAS_BARRAS_HORA)).strftime("%Y-%m-%d")
+    malos = {}
+    for t, df in descargas.items():
+        if t.endswith(".SN"):
+            m = df["volume"].fillna(0).eq(0) & (df["date"] >= limite)
+            if m.any():
+                malos[t] = df.loc[m, "date"].tolist()
+    if not malos:
+        return 0
+    inicio = min(min(v) for v in malos.values())
+    reparados = 0
+    tickers = sorted(malos)
+    for i in range(0, len(tickers), 25):
+        lote = tickers[i:i + 25]
+        try:
+            horas = yf.download(lote, start=inicio, interval="1h", group_by="ticker", auto_adjust=False,
+                                threads=True, progress=False)
+        except Exception as e:
+            logging.warning(f"Sin barras por hora para reparar {len(lote)} acciones chilenas: {str(e)[:120]}")
+            continue
+        for t in lote:
+            if isinstance(horas.columns, pd.MultiIndex):
+                if t not in horas.columns.get_level_values(0):
+                    continue
+                parte = horas[t]
+            else:
+                parte = horas
+            parte = parte.dropna(subset=["Close"])
+            if parte.empty:
+                continue
+            indice = parte.index.tz_convert("America/Santiago") if parte.index.tz is not None else parte.index
+            dias = parte.groupby(indice.strftime("%Y-%m-%d")).agg(
+                open=("Open", "first"), high=("High", "max"), low=("Low", "min"), close=("Close", "last"),
+                volume=("Volume", "sum"))
+            df = descargas[t]
+            for d in malos[t]:
+                if d in dias.index and dias.at[d, "volume"] > 0:
+                    df.loc[df["date"] == d, COLUMNAS_PRECIO] = dias.loc[d, COLUMNAS_PRECIO].to_numpy(dtype=float)
+                    reparados += 1
+        time.sleep(1)
+    return reparados
+
 def leer_guardado(desde: str) -> dict[str, pd.DataFrame]:
     """Los últimos días guardados de cada activo (precios y lo necesario para seguir los indicadores), en
     páginas de 1000 filas en vez de una consulta por activo."""
@@ -381,7 +430,9 @@ def reescribir_historial(ticker: str, filas: list[dict], hasta: str | None = Non
 
 def cargar_completo(ticker: str) -> bool:
     """Activo nuevo, sin datos recientes o cuyo historial guardado ya no calza: se baja completo y se reescribe."""
-    df = descargar([ticker], PERIODO_COMPLETO).get(ticker)
+    bajado = descargar([ticker], PERIODO_COMPLETO)
+    reparar_con_horas(bajado)
+    df = bajado.get(ticker)
     if df is None:
         return False
     guardar_dividendos({ticker: df})
@@ -467,6 +518,9 @@ def run_miner():
     if faltan:
         logging.info(f"Reintentando {len(faltan)} activos que Yahoo no entregó en su lote.")
         descargas.update(descargar(faltan, PERIODO_RECIENTE))
+    reparados = reparar_con_horas(descargas)
+    if reparados:
+        logging.info(f"🔧 {reparados} días chilenos congelados en el historial diario de Yahoo se rearmaron con sus barras por hora.")
     try:
         guardar_dividendos(descargas)
     except Exception as e:
