@@ -76,7 +76,7 @@ function textoDeuda(c: Candidato): string {
   const d = typeof c.deuda === 'number' ? c.deuda : parseFloat(String(c.deuda));
   // Escaneos anteriores guardaban 0 cuando Yahoo no informaba la deuda: ese 0 no significa "sin deuda"
   if (!Number.isFinite(d) || (d === 0 && !c.deuda_fuente)) return 'Sin dato en Yahoo';
-  const partes = [`${Math.round(d)}% del patrimonio`];
+  const partes = [d > 0 && d < 1 ? 'Menos de 1% del patrimonio' : `${Math.round(d)}% del patrimonio`];
   if (c.deuda_fuente?.startsWith('balance ')) partes.push(`calculada del balance al ${fechaCorta(c.deuda_fuente.slice(8))}`);
   if (typeof c.patrimonio_activos === 'number') partes.push(`en un banco la deuda es parte del negocio: su patrimonio es ${c.patrimonio_activos.toFixed(1)}% de sus activos`);
   return partes.join(' · ');
@@ -84,7 +84,10 @@ function textoDeuda(c: Candidato): string {
 
 function textoResultados(iso?: string | null): { texto: string; pronto: boolean } | null {
   if (!iso) return null;
-  const dias = Math.round((new Date(`${iso}T12:00:00Z`).getTime() - Date.now()) / 86400000);
+  // Días de calendario contados desde la fecha local de quien mira, no desde la hora UTC
+  const hoy = new Date();
+  const [a, m, d] = iso.slice(0, 10).split('-').map(Number);
+  const dias = Math.round((Date.UTC(a, m - 1, d) - Date.UTC(hoy.getFullYear(), hoy.getMonth(), hoy.getDate())) / 86400000);
   if (dias < 0) return null;
   const cuando = dias === 0 ? 'hoy' : dias === 1 ? 'mañana' : `en ${dias} días`;
   return { texto: `${fechaCorta(iso)} (${cuando})`, pronto: dias <= 7 };
