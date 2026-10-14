@@ -94,6 +94,40 @@ function textoResultados(iso?: string | null): { texto: string; pronto: boolean 
   return { texto: `${fechaCorta(iso)} (${cuando})`, pronto: dias <= 7 };
 }
 
+// Calificación de las ideas que el Top ya mostró (la calcula el bot con los escaneos guardados)
+interface Resumen { ideas: number; exceso_promedio: number; mediana: number; acierto: number }
+interface Historial {
+  desde: string; hasta: string; escaneos: number; excluidas_precio_congelado: number;
+  un_mes: Record<'EE.UU.' | 'Chile', Resumen | null>;
+  a_la_fecha: Record<'EE.UU.' | 'Chile', Resumen | null>;
+}
+const MINIMO_IDEAS = 20;
+const INDICE_NOMBRE = { 'EE.UU.': 'S&P 500', Chile: 'el ETF del IPSA' } as const;
+
+function HistorialReal({ h }: { h: Historial }) {
+  const pct = (x: number) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%`;
+  const linea = (m: 'EE.UU.' | 'Chile') => {
+    const r1 = h.un_mes[m], rh = h.a_la_fecha[m];
+    const [r, plazo] = r1 && r1.ideas >= MINIMO_IDEAS ? [r1, 'un mes después'] : rh && rh.ideas >= MINIMO_IDEAS ? [rh, 'hasta hoy'] : [null, ''];
+    if (!r) return `${m}: todavía muy pocas ideas medibles para sacar conclusiones.`;
+    return `${m}: ${r.ideas} ideas, ${plazo}: ${pct(r.exceso_promedio)} frente a ${INDICE_NOMBRE[m]} en promedio (la típica ${pct(r.mediana)}); le ganaron ${(r.acierto * 100).toFixed(0)}% de las veces.`;
+  };
+  return (
+    <div className="mt-4 text-left text-xs font-sans text-zinc-600 dark:text-[#a1a1aa] border-t border-zinc-200 dark:border-[#27272a] pt-3 space-y-1">
+      <p className="font-semibold text-zinc-800 dark:text-[#e4e4e7]">
+        Historial real de las ideas publicadas aquí (desde {fechaCorta(h.desde)}, {h.escaneos} escaneos, comprando al cierre del día del escaneo)
+      </p>
+      <p>{linea('EE.UU.')}</p>
+      <p>{linea('Chile')}</p>
+      {h.excluidas_precio_congelado > 0 && (
+        <p className="text-[11px] text-zinc-500 dark:text-[#71717a]">
+          {h.excluidas_precio_congelado} ideas no se pudieron medir porque Yahoo tiene congelado su precio (casi todas chilenas).
+        </p>
+      )}
+    </div>
+  );
+}
+
 // Cómo le fue a este mismo método en los últimos 10 años (laboratorio de evidencia)
 function HistorialMetodo() {
   const filas = (['EE.UU.', 'Chile'] as const).map(m => ({ m, e: evidenciaTop5(m) })).filter(x => x.e);
@@ -124,6 +158,7 @@ export default function TopOportunidadesTab() {
   const { items } = usePortfolio();
   const [oportunidades, setOportunidades] = useState<TopOpportunity[]>([]);
   const [fecha, setFecha] = useState<string>('');
+  const [historial, setHistorial] = useState<Historial | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedIndex, setExpandedIndex] = useState<number | null>(0);
   const [theses, setTheses] = useState<Record<string, { loading: boolean; content: string; error?: string }>>({});
@@ -141,6 +176,7 @@ export default function TopOportunidadesTab() {
         if (!error && data && data.length > 0) {
           const report = data[0];
           setFecha(report.fecha);
+          setHistorial(report.candidatos_json?.historial ?? null);
           
           let top5: TopOpportunity[] = [];
           if (report.candidatos_json) {
@@ -267,6 +303,7 @@ export default function TopOportunidadesTab() {
         <p className="text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] mt-4 uppercase">
           Última actualización: {new Date(fecha).toLocaleString()}
         </p>
+        {historial && <HistorialReal h={historial} />}
         <HistorialMetodo />
       </div>
 
