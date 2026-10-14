@@ -8,6 +8,8 @@ on:
     paths:
       - 'miner.py'
       - 'quantum_trader_serverless.py'
+      - 'fundamentales_sec.py'
+      - 'evidencia.py'
       - 'requirements.txt'
       - '.github/workflows/daily_update.yml'
   schedule:
@@ -61,6 +63,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # La SEC exige un correo de contacto para entregar los estados financieros (ideas de EE.UU.)
+          SEC_CONTACTO: ${{ secrets.SEC_CONTACTO }}
           # Un push o una corrida manual siempre rehacen el análisis; las programadas solo si hay precios nuevos
           FORZAR_ANALISIS: ${{ github.event_name != 'schedule' && '1' || '' }}
         run: |

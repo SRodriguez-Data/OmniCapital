@@ -232,15 +232,6 @@ def get_fundamentals(ticker):
         logging.error(f"Error fetching YF for {ticker}: {e}")
         return {"pe": -1, "pe_nota": "sin dato", "div_str": "0.00%", "deuda": None, "deuda_nota": "sin dato", "tipo": "accion"}
 
-def pasa_fundamentales(f):
-    """P/E bajo 40 (o sin utilidad que medir) y deuda menor a 2,5 veces el patrimonio. Una acción cuya deuda o
-    P/E no se pudo verificar queda fuera: mejor mostrar menos ideas que una con datos en blanco. A bancos y
-    aseguradoras no se les aplica el tope de deuda: se financian con deuda por naturaleza del negocio."""
-    if f.get('tipo') == 'accion' and (f.get('deuda') is None or f.get('pe_nota') == 'sin dato'):
-        return False
-    deuda_ok = f.get('deuda') is None or f['deuda'] < 250 or f.get('sector') == 'Financial Services'
-    return (f['pe'] == -1 or f['pe'] < 40) and deuda_ok
-
 def texto_fundamentales(c):
     pe = {'reit': 'P/E no aplica (REIT)', 'perdidas': 'P/E negativo (pérdidas)'}.get(c.get('pe_nota'), f"P/E {c['pe']:.1f}")
     if c.get('deuda') is not None:
@@ -249,84 +240,114 @@ def texto_fundamentales(c):
         deuda = {'etf': 'Deuda no aplica (ETF)', 'patrimonio negativo': 'Patrimonio negativo'}.get(c.get('deuda_nota'), 'Deuda sin dato')
     return f"{pe}, Dividend Yield {c['div_str']}, {deuda}"
 
-def calculate_trading_limits(candidates):
-    if not candidates or not supabase:
-        return candidates
-        
-    tickers = [c['ticker'] for c in candidates]
-    
-    try:
-        res = supabase.table("precios_historicos")\
-            .select("date, ticker, close")\
-            .in_("ticker", tickers)\
-            .order("date", desc=True)\
-            .limit(20 * len(tickers)).execute()
-            
-        if not res.data:
-            return candidates
-            
-        df = pd.DataFrame(res.data)
-        
-        for c in candidates:
-            if c.get('sin_senal_tecnica'):
-                continue
-            ticker_data = df[df['ticker'] == c['ticker']]
-            if len(ticker_data) < 5:
-                continue
-                
-            closes = ticker_data['close'].values
-            std_20 = np.std(closes)
-            sma_20 = np.mean(closes)
-            
-            c['bollinger_upper'] = sma_20 + (2 * std_20)
-            c['bollinger_lower'] = sma_20 - (2 * std_20)
-            
-            # EMA200 is available via distance
-            current_price = c['price']
-            dist = c['distancia_ema200']
-            if dist > -0.99:
-                c['ema200_abs'] = current_price / (1 + dist)
-            else:
-                c['ema200_abs'] = current_price
-                
-            # Signal Logic
-            if current_price < c['bollinger_lower']:
-                c['signal'] = 'BUY'
-                # Insert Alert
-                try:
-                    alert_msg = f"{c['ticker']} entró en Zona de Compra Extrema. Precio: ${current_price:.2f} (Soporte: ${c['bollinger_lower']:.2f})."
-                    supabase.table("alertas_mercado").insert({
-                        "ticker": c['ticker'],
-                        "tipo": "BUY_ZONE",
-                        "precio_actual": current_price,
-                        "mensaje": alert_msg
-                    }).execute()
-                    logging.info(f"🚨 ALERTA INYECTADA: {alert_msg}")
-                except Exception as e:
-                    logging.error(f"Error inyectando alerta para {c['ticker']}: {e}")
-            elif current_price > c['bollinger_upper']:
-                c['signal'] = 'SELL'
-            else:
-                c['signal'] = 'HOLD'
-                
-    except Exception as e:
-        logging.error(f"Error calculando trading limits: {e}")
-        
-    return candidates
+METODO_TOP = "v2"
+IDEAS_EEUU = 20
+IDEAS_CHILE = 5
+
+def ideas_calidad_eeuu(filas):
+    """Las acciones del S&P 500 con la utilidad más respaldada por caja frente a su sector: el método
+    calidad_eeuu de evidencia.py, el único que en 10 años le ganó al mercado de forma consistente (en las dos
+    mitades de la muestra). Excluye bancos y aseguradoras y a las que reparten más que su utilidad.
+    `filas`: ticker -> última fila de precio. Devuelve (ideas, tabla de calidad de todas las evaluadas)."""
+    import evidencia
+    import fundamentales_sec
+    sp = evidencia.tabla_sp500()
+    if sp is None:
+        return [], {}
+    sector_de = dict(zip(sp["ticker"], sp["GICS Sector"]))
+    sec = fundamentales_sec.Sec()
+    hoy = pd.Timestamp.now().normalize()
+    anual = fundamentales_sec.anuales(sec, [hoy.year - 2, hoy.year - 1, hoy.year])
+    # La última cifra anual ya conocida de cada empresa, si no tiene más de 15 meses
+    vigente = (anual[(anual["conocido"] <= hoy) & (anual["cierre"] >= hoy - pd.Timedelta(days=455))]
+               .sort_values("cierre").groupby("cik").tail(1).set_index("cik"))
+    ciks = sec.ciks()
+    regs = []
+    for t in sp["ticker"]:
+        if t not in filas or ciks.get(t) not in vigente.index or sector_de.get(t) == "Financials":
+            continue
+        f = vigente.loc[ciks[t]]
+        if not (es_numero(f.get("activos")) and f["activos"] > 0 and es_numero(f.get("flujo_operacional")) and es_numero(f.get("utilidad"))):
+            continue
+        pago = f.get("pago_en_acciones") if es_numero(f.get("pago_en_acciones")) else 0
+        div = f.get("dividendos")
+        calidad = (f["flujo_operacional"] - pago - f["utilidad"]) / f["activos"]
+        # Igual que evidencia.py: una diferencia mayor a la mitad de los activos es una cifra mal escalada
+        if abs(calidad) > 0.5:
+            logging.warning(f"{t}: calidad de utilidades implausible ({calidad:.0%} de los activos), se descarta.")
+            continue
+        regs.append({"ticker": t, "sector_gics": sector_de.get(t), "calidad": calidad,
+                     "payout_alto": bool(es_numero(div) and f["utilidad"] > 0 and div / f["utilidad"] > 1),
+                     "cierre_fiscal": f["cierre"].strftime("%Y-%m-%d")})
+    if not regs:
+        return [], {}
+    df = pd.DataFrame(regs)
+    df["percentil_sector"] = df.groupby("sector_gics")["calidad"].rank(pct=True)
+    tabla = {r.ticker: {"c": round(float(r.calidad), 4), "p": round(float(r.percentil_sector), 3), "pa": r.payout_alto}
+             for r in df.itertuples()}
+    elegidas = df[~df["payout_alto"]].sort_values(["percentil_sector", "calidad"], ascending=False).head(IDEAS_EEUU)
+    logging.info(f"Calidad de utilidades: {len(df)} acciones evaluadas, elegidas {', '.join(elegidas['ticker'])}")
+    ideas = []
+    for r in elegidas.itertuples():
+        fila = filas[r.ticker]
+        ideas.append({"ticker": r.ticker, "price": fila["close"], "fecha_precio": fila["date"][:10],
+                      "score": round(float(r.percentil_sector), 4), "calidad": round(float(r.calidad), 4),
+                      "percentil_sector": round(float(r.percentil_sector), 3), "sector_gics": r.sector_gics,
+                      "cierre_fiscal": r.cierre_fiscal, **get_fundamentals(r.ticker)})
+    return ideas, tabla
+
+def dividendos_desde(tickers, desde):
+    filas = []
+    for i in range(0, len(tickers), 50):
+        filas += (supabase.table("dividendos").select("ticker, fecha, monto").in_("ticker", tickers[i:i + 50])
+                  .gte("fecha", desde).execute().data or [])
+    por = {}
+    for f in filas:
+        por.setdefault(f["ticker"], []).append((f["fecha"][:10], f["monto"]))
+    return por
+
+def ideas_momentum_chile(filas):
+    """Las acciones chilenas con mayor retorno (con dividendos) entre hace 12 meses y hace 1 mes: el método
+    momentum_chile de evidencia.py (evidencia débil). `filas`: ticker -> última fila con volumen (precio de hoy
+    real). Yahoo deja semanas sin actualizar en Chile: se aceptan esos huecos si no son más de la mitad del año."""
+    tickers = sorted(filas)
+    if not tickers:
+        return []
+    desde = (pd.Timestamp.now() - pd.Timedelta(days=420)).strftime("%Y-%m-%d")
+    precios = cierres(tickers, desde)
+    divs = dividendos_desde(tickers, desde)
+    candidatos = []
+    for t, serie in precios.items():
+        if len(serie) < 253 or serie.iloc[-253:].nunique() < 0.5 * 253:
+            continue
+        inicio, fin = serie.index[-253], serie.index[-22]
+        pagado = sum(m for f, m in divs.get(t, []) if inicio < f <= fin)
+        candidatos.append((t, (serie.iloc[-22] + pagado) / serie.iloc[-253] - 1))
+    candidatos.sort(key=lambda x: -x[1])
+    ideas = []
+    for t, mom in candidatos[:IDEAS_CHILE]:
+        fila = filas[t]
+        ideas.append({"ticker": t, "price": fila["close"], "fecha_precio": fila["date"][:10], "score": round(float(mom), 4),
+                      "momentum": round(float(mom), 4), **get_fundamentals(t)})
+    logging.info(f"Momentum Chile: {len(candidatos)} acciones evaluadas, elegidas {', '.join(i['ticker'] for i in ideas)}")
+    return ideas
 
 def linea_prompt(c):
-    if c.get('sin_senal_tecnica'):
-        return f"- {c['ticker']}: Precio ${c['price']:.2f}, SIN señal técnica (precios congelados en la fuente), {texto_fundamentales(c)}"
-    return f"- {c['ticker']}: Precio ${c['price']:.2f}, RSI {c['rsi']:.1f}, Distancia EMA200 {c['distancia_ema200']*100:.1f}%, Score {c['score']:.1f}, {texto_fundamentales(c)}"
+    if 'calidad' in c:
+        return (f"- {c['ticker']} ({c.get('sector_gics')}): utilidad respaldada por caja {c['calidad']*100:.1f}% de los activos "
+                f"(percentil {c['percentil_sector']*100:.0f} de su sector), {texto_fundamentales(c)}")
+    return f"- {c['ticker']}: alza de {c['momentum']*100:.1f}% entre hace 12 meses y hace 1 mes, {texto_fundamentales(c)}"
 
 # Índice con el que se compara cada idea (precio sin dividendos, igual que los cierres guardados de las acciones)
 INDICE_DE = {'EE.UU.': '^GSPC', 'Chile': 'CFMITNIPSA.SN'}
 DIAS_UN_MES = 21
 
 def ideas_mostradas(cj):
-    """Las ideas que mostró la web con ese escaneo (TopOportunidadesTab.tsx): las 5 de mayor puntaje entre
-    EE.UU. y Chile, más la mejor chilena si no había ninguna."""
+    """Las ideas que mostró la web con ese escaneo (TopOportunidadesTab.tsx). Con el método actual, todas; con el
+    anterior, las 5 de mayor puntaje entre EE.UU. y Chile, más la mejor chilena si no había ninguna."""
     us, cl = cj.get('us') or [], cj.get('cl') or []
+    if cj.get('metodo') == METODO_TOP:
+        return us + cl
     clave = lambda c: c['score'] if isinstance(c.get('score'), (int, float)) else float('-inf')
     top = sorted(us + cl, key=clave, reverse=True)[:5]
     if cl and not any(c['ticker'].endswith('.SN') for c in top):
@@ -359,16 +380,23 @@ def resumen_excesos(excesos):
             "acierto": round(float((e > 0).mean()), 3)}
 
 def historial_ideas():
+    """Historial del método actual y del anterior, por separado: no se mezclan dos formas de elegir."""
+    filas = (supabase.table("analisis_ia").select("fecha, metodo:candidatos_json->metodo").order("fecha").execute().data or [])
+    actual = [f["fecha"] for f in filas if f.get("metodo") == METODO_TOP]
+    return {"metodo": METODO_TOP, "desde_metodo_actual": actual[0][:10] if actual else None,
+            "actual": historial_de(lambda m: m == METODO_TOP), "anterior": historial_de(lambda m: m != METODO_TOP)}
+
+def historial_de(es_del_metodo):
     """Cómo les fue de verdad a las ideas que mostró el Top: cada escaneo guardado se compra al cierre de su fecha
     y se compara con el índice de su mercado a un mes y hasta hoy. Se usan los cierres guardados hoy (ya
     corregidos), no el precio del escaneo, que en los primeros meses a veces era uno de mitad de jornada."""
-    filas = (supabase.table("analisis_ia").select("fecha, us:candidatos_json->us, cl:candidatos_json->cl, fp:candidatos_json->fecha_precios")
+    filas = (supabase.table("analisis_ia").select("fecha, us:candidatos_json->us, cl:candidatos_json->cl, fp:candidatos_json->fecha_precios, metodo:candidatos_json->metodo")
              .order("fecha").execute().data or [])
-    filas = [f for f in filas if (f.get('us') or f.get('cl'))]
+    filas = [f for f in filas if (f.get('us') or f.get('cl')) and es_del_metodo(f.get('metodo'))]
     if not filas:
         return None
     desde = filas[0]['fecha'][:10]
-    tickers = sorted({c['ticker'] for f in filas for c in ideas_mostradas({'us': f.get('us'), 'cl': f.get('cl')})} | set(INDICE_DE.values()))
+    tickers = sorted({c['ticker'] for f in filas for c in ideas_mostradas({'us': f.get('us'), 'cl': f.get('cl'), 'metodo': f.get('metodo')})} | set(INDICE_DE.values()))
     precios = cierres(tickers, (pd.Timestamp(desde) - pd.Timedelta(days=10)).strftime("%Y-%m-%d"))
     calendario = {m: list(precios[t].index) if t in precios else [] for m, t in INDICE_DE.items()}
 
@@ -378,7 +406,7 @@ def historial_ideas():
         cal = calendario['EE.UU.']
         entrada = (f.get('fp') or '')[:10] or next((d for d in reversed(cal) if d < f['fecha'][:10]), None)
         if entrada:
-            por_fecha[entrada] = ideas_mostradas({'us': f.get('us'), 'cl': f.get('cl')})
+            por_fecha[entrada] = ideas_mostradas({'us': f.get('us'), 'cl': f.get('cl'), 'metodo': f.get('metodo')})
 
     un_mes = {'EE.UU.': [], 'Chile': []}
     a_la_fecha = {'EE.UU.': [], 'Chile': []}
@@ -406,6 +434,8 @@ def historial_ideas():
                 destino[mercado].append((p1 / p0 - 1) - (i1 / i0 - 1))
             distintas.add(c['ticker'])
 
+    if not por_fecha:
+        return None
     return {
         "desde": min(por_fecha), "hasta": max(d for cal in calendario.values() for d in cal[-1:]),
         "escaneos": len(por_fecha), "acciones_distintas": len(distintas), "excluidas_precio_congelado": excluidas,
@@ -449,110 +479,37 @@ def run_serverless_screener():
         logging.error(f"Error consultando Supabase: {e}")
         sys.exit(1)
 
-    all_us = []
-    all_cl = []
     liquidos = {}
-    
-    # 2. Filtrado Cuantitativo Separado (EE.UU. vs Chile)
+
+    # 2. Liquidez: montos transados mínimos (en Chile en pesos). Índices y monedas son referencias, no ideas
     for row in activos_hoy:
         ticker = row['ticker']
-        rsi = row.get('rsi') or 50
         close = row.get('close') or 0
-        volumen = row.get('volume') or 0
-        pvc_ema200 = row.get('pvc_ema200') or 0
-        
-        if rsi is None or pvc_ema200 is None:
+        volumen_nominal = (row.get('volume') or 0) * close
+        if ticker.startswith('^') or '=' in ticker or close <= 0:
             continue
-        # Índices (^GSPC) y monedas (CLP=X) se guardan como referencia, no son oportunidades de compra
-        if ticker.startswith('^') or '=' in ticker:
+        if volumen_nominal < (450_000_000 if ticker.endswith(".SN") else 500_000):
             continue
-            
-        volumen_nominal = volumen * close
-        if ticker.endswith(".SN") and volumen_nominal < 450_000_000:
-            continue
-        elif not ticker.endswith(".SN") and volumen_nominal < 500_000:
-            continue
-            
-        liquidos[ticker] = close
+        liquidos[ticker] = row
 
-        if rsi < 50 and pvc_ema200 > -0.20:
-            score = (50 - rsi) + (pvc_ema200 * 100)
-            data_dict = {
-                'ticker': ticker,
-                'price': close,
-                'rsi': rsi,
-                'distancia_ema200': pvc_ema200,
-                'score': score,
-                'fecha_precio': row['date'][:10]
-            }
-            if ticker.endswith(".SN"):
-                all_cl.append(data_dict)
-            else:
-                all_us.append(data_dict)
-
-    # Yahoo congela el historial de varias acciones chilenas: su RSI/EMA/Bollinger no son confiables.
-    # No se descartan: se evalúan solo por P/E y dividendo y se marcan "sin señal técnica" (RSI nulo).
+    # Yahoo congela el historial de varias acciones chilenas: sin precios reales no hay momentum que medir
     frescos = tickers_con_datos_frescos(list(liquidos), max_date)
     congelados = [t for t in liquidos if t not in frescos]
     if congelados:
-        logging.warning(f"{len(congelados)} tickers con precios congelados en Yahoo (RSI nulo): {', '.join(congelados[:30])}")
-    all_us = [c for c in all_us if c['ticker'] in frescos]
-    all_cl = [c for c in all_cl if c['ticker'] in frescos]
+        logging.warning(f"{len(congelados)} tickers con precios congelados en Yahoo: {', '.join(congelados[:30])}")
 
-    sin_senal_us, sin_senal_cl = [], []
-    for t in congelados:
-        fund = get_fundamentals(t)
-        try:
-            div = float(str(fund['div_str']).replace('%', ''))
-        except ValueError:
-            div = 0
-        if not (0 < fund['pe'] < 40 and div > 0 and pasa_fundamentales(fund)):
-            continue
-        c = {'ticker': t, 'price': liquidos[t], 'rsi': None, 'distancia_ema200': None, 'score': None,
-             'sin_senal_tecnica': True, **fund}
-        (sin_senal_cl if t.endswith('.SN') else sin_senal_us).append(c)
-    sin_senal_us.sort(key=lambda x: -float(x['div_str'].replace('%', '')))
-    sin_senal_cl.sort(key=lambda x: -float(x['div_str'].replace('%', '')))
-
-    top_us_fund = []
-    rejected_us = []
-    logging.info("⏳ Filtrando fundamentales en YFinance para US...")
-    for c in all_us:
-        fund = get_fundamentals(c['ticker'])
-        c.update(fund)
-        if pasa_fundamentales(fund):
-            top_us_fund.append(c)
-        else:
-            rejected_us.append(c)
-
-    top_cl_fund = []
-    rejected_cl = []
-    logging.info("⏳ Filtrando fundamentales en YFinance para CL...")
-    for c in all_cl:
-        fund = get_fundamentals(c['ticker'])
-        c.update(fund)
-        if pasa_fundamentales(fund):
-            top_cl_fund.append(c)
-        else:
-            rejected_cl.append(c)
-            
-    # Ordena esa lista final por RSI de menor a mayor.
-    top_us_fund.sort(key=lambda x: x['rsi'])
-    top_cl_fund.sort(key=lambda x: x['rsi'])
-    rejected_us.sort(key=lambda x: x['rsi'])
-    rejected_cl.sort(key=lambda x: x['rsi'])
-    
-    # Hasta 5 por mercado
-    # Solo lo que pasa los fundamentales: mejor mostrar menos de 5 que rellenar con lo que no los cumple
-    top_us = top_us_fund[:5]
-    top_cl = top_cl_fund[:5]
-    # Los de RSI nulo solo completan los cupos que quedan libres
-    top_us += sin_senal_us[:5 - len(top_us)]
-    top_cl += sin_senal_cl[:5 - len(top_cl)]
-    
-    # Agregar métricas institucionales (Bollinger, Max Sell, Min Buy, Signal)
-    top_us = calculate_trading_limits(top_us)
-    top_cl = calculate_trading_limits(top_cl)
+    # Ideas con evidencia medida (evidencia.py, METODOS)
+    calidad_us = {}
+    try:
+        top_us, calidad_us = ideas_calidad_eeuu({t: r for t, r in liquidos.items() if not t.endswith('.SN') and t in frescos})
+    except Exception as e:
+        logging.error(f"No se calcularon las ideas de EE.UU.: {str(e)[:200]}")
+        top_us = []
+    # El monto transado mínimo ya exige volumen hoy: el último precio chileno es real aunque haya huecos antes
+    top_cl = ideas_momentum_chile({t: r for t, r in liquidos.items() if t.endswith('.SN')})
+    if not top_us and not top_cl:
+        logging.error("❌ Ningún método entregó ideas.")
+        sys.exit(1)
 
     # 3. Matemáticas de Portafolio Real
     logging.info("🧮 Calculando Matriz de Correlación y Markowitz SOBRE MI PORTAFOLIO...")
@@ -570,7 +527,7 @@ def run_serverless_screener():
         logging.error(f"Error guardando matemáticas del portafolio en Supabase: {e}")
 
     # 4. Generación Analista Institucional (Gemini) - Mercado Global
-    prompt_us = "\n".join([linea_prompt(c) for c in top_us])
+    prompt_us = "\n".join([linea_prompt(c) for c in top_us[:5]])
     prompt_cl = "\n".join([linea_prompt(c) for c in top_cl])
     
     # Nuevo: Extraer info del portafolio del usuario
@@ -591,10 +548,10 @@ def run_serverless_screener():
     prompt_macro = f"""Eres el Estratega Cuantitativo Jefe. 
 Analiza los siguientes dos mercados y el portafolio del cliente, luego provee un reporte institucional estricto.
 
-Mercado EE.UU. (Top 5 Anomalías):
+Mercado EE.UU. (las 5 primeras de 20 acciones con la utilidad más respaldada por caja frente a su sector):
 {prompt_us}
 
-Mercado Chile (Top 5 Anomalías):
+Mercado Chile (las 5 con mayor alza de los últimos 12 meses):
 {prompt_cl}
 
 MI PORTAFOLIO ACTUAL:
@@ -612,10 +569,10 @@ Responde ESTRICTAMENTE EN ESPAÑOL, en formato JSON válido, sin bloques de cód
       {{"ticker": "TICKER_AQUI", "accion": "🟢 BUY (Aumentar) / 🟡 HOLD (Mantener) / 🔴 SELL (Recortar)", "stop_loss": "Calcula un precio exacto de salida de emergencia, justificándolo.", "analisis": "Tu análisis debe ser exhaustivo y de grado institucional. Explica el momentum técnico y justifica la decisión fuertemente."}}
   ], // NUNCA recomiendes 'BUY' ciegamente. Exige buen precio. Si la acción está sobrecomprada o el riesgo es alto, recomienda SELL o HOLD.
   "insights_us": {{
-      "TICKER_US": "Tesis de inversión institucional y predictiva de grado bancario (mínimo 2 párrafos). Explica por qué esta anomalía (RSI y EMA200) representa una oportunidad única (o un riesgo), proyección a corto plazo y setup técnico (riesgo/beneficio)."
+      "TICKER_US": "Tesis de inversión institucional y predictiva de grado bancario (mínimo 2 párrafos). Explica qué dice su criterio de selección y qué riesgos tiene, sin inventar datos que no se entregaron."
   }},
   "insights_cl": {{
-      "TICKER_CL": "Tesis de inversión institucional y predictiva de grado bancario (mínimo 2 párrafos). Explica por qué esta anomalía (RSI y EMA200) representa una oportunidad única (o un riesgo), proyección a corto plazo y setup técnico (riesgo/beneficio)."
+      "TICKER_CL": "Tesis de inversión institucional y predictiva de grado bancario (mínimo 2 párrafos). Explica qué dice su criterio de selección y qué riesgos tiene, sin inventar datos que no se entregaron."
   }}
 }}
 Incluye todos los tickers en sus respectivos diccionarios/listas."""
@@ -644,8 +601,10 @@ Incluye todos los tickers en sus respectivos diccionarios/listas."""
     # 5. Guardar en Supabase (Web Dashboard)
     # Como analisis_ia actual solo tiene candidatos_json, guardaremos un objeto combinado para no romper la DB actual.
     combined_candidates = {
+        "metodo": METODO_TOP,
         "us": top_us,
         "cl": top_cl,
+        "calidad_us": calidad_us,
         "diagnostico_portafolio": ia_data.get("diagnostico_mi_portafolio", "Sin diagnóstico específico."),
         "recomendaciones_portafolio": ia_data.get("recomendaciones_mi_portafolio", []),
         # Con qué precios se hizo: la corrida de respaldo no repite el análisis si no hay precios nuevos
