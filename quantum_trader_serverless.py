@@ -132,32 +132,104 @@ def tickers_con_datos_frescos(tickers, max_date):
                 buenos.add(t)
     return buenos
 
+def es_numero(x):
+    return isinstance(x, (int, float)) and not pd.isna(x)
+
+def deuda_desde_balance(tk):
+    """Yahoo no informa debtToEquity en bancos y otras financieras (ni en algunas empresas): se calcula con el
+    último balance, trimestral o anual, que traiga deuda y patrimonio. Devuelve (deuda/patrimonio en %,
+    patrimonio/activos en %, fecha del balance); deuda/patrimonio es None si el patrimonio es negativo."""
+    for balance in (tk.quarterly_balance_sheet, tk.balance_sheet):
+        if balance is None or balance.empty or 'Stockholders Equity' not in balance.index or 'Total Debt' not in balance.index:
+            continue
+        for col in sorted(balance.columns, reverse=True):
+            patrimonio, deuda = balance.at['Stockholders Equity', col], balance.at['Total Debt', col]
+            if not (es_numero(patrimonio) and es_numero(deuda)) or patrimonio == 0:
+                continue
+            activos = balance.at['Total Assets', col] if 'Total Assets' in balance.index else None
+            pat_activos = patrimonio / activos * 100 if es_numero(activos) and activos > 0 else None
+            return (deuda / patrimonio * 100 if patrimonio > 0 else None), pat_activos, col.strftime('%Y-%m-%d')
+    return None, None, None
+
+def proximos_resultados(info):
+    """Fecha del próximo reporte trimestral, si Yahoo la conoce: comprar justo antes es apostar al resultado."""
+    ahora = time.time()
+    fechas = [info.get(k) for k in ('earningsTimestamp', 'earningsTimestampStart')]
+    futuras = [f for f in fechas if es_numero(f) and f > ahora - 86400]
+    return datetime.utcfromtimestamp(min(futuras)).strftime('%Y-%m-%d') if futuras else None
+
 def get_fundamentals(ticker):
+    """P/E, dividendo y deuda/patrimonio (en %), cada uno con su fuente o el motivo por el que no aplica:
+    la web no muestra un dato en blanco sin explicar por qué."""
     try:
-        info = yf.Ticker(ticker).info
-        pe = info.get('trailingPE', info.get('forwardPE', -1))
+        tk = yf.Ticker(ticker)
+        info = tk.info
+        tipo = 'etf' if info.get('quoteType') in ('ETF', 'MUTUALFUND') else 'accion'
+        sector = info.get('sector')
+
+        pe, pe_nota = info.get('trailingPE'), None
+        if not es_numero(pe):
+            pe, pe_nota = info.get('forwardPE'), 'estimado'
+        if not es_numero(pe) or pe <= 0:
+            eps = info.get('trailingEps')
+            pe, pe_nota = -1, 'perdidas' if es_numero(eps) and eps < 0 else 'sin dato'
+        # En inmobiliarias/REITs el P/E (ganancia contable) no mide su valor: se valoran por su flujo (FFO)
+        if sector == 'Real Estate':
+            pe, pe_nota = -1, 'reit'
+
         # Yahoo cambió 'dividendYield' a porcentaje (3.46 = 3,46%); multiplicarlo por 100 daba 346%.
         # Se calcula como dividendo anual / precio, que no depende de ese formato.
         rate = info.get('dividendRate')
         price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
-        if isinstance(rate, (int, float)) and isinstance(price, (int, float)) and price > 0:
+        if es_numero(rate) and es_numero(price) and price > 0:
             div_pct = rate / price * 100
         else:
             div = info.get('dividendYield')
-            div_pct = div if isinstance(div, (int, float)) else 0
+            div_pct = div if es_numero(div) else 0
         div_str = f"{div_pct:.2f}%"
-        deuda = info.get('debtToEquity', 0)
-        # En inmobiliarias/REITs el P/E (ganancia contable) no mide su valor: se trata como dato desconocido
-        if info.get('sector') == 'Real Estate':
-            pe = -1
-        
-        if not isinstance(pe, (int, float)): pe = -1
-        if not isinstance(deuda, (int, float)): deuda = 0
-        
-        return {"pe": pe, "div_str": div_str, "deuda": deuda}
+
+        deuda, deuda_fuente, deuda_nota, pat_activos = None, None, None, None
+        if tipo == 'etf':
+            deuda_nota = 'etf'
+        else:
+            if es_numero(info.get('debtToEquity')):
+                deuda, deuda_fuente = info['debtToEquity'], 'yahoo'
+            # En bancos y aseguradoras la deuda es parte del negocio: su colchón se mide como patrimonio / activos
+            financiera = sector == 'Financial Services'
+            if deuda is None or financiera:
+                dte, pat_activos, fecha = deuda_desde_balance(tk)
+                if deuda is None and fecha:
+                    deuda, deuda_fuente = dte, f'balance {fecha}'
+                    if dte is None:
+                        deuda_nota = 'patrimonio negativo'
+                if not financiera:
+                    pat_activos = None
+            if deuda is None and deuda_nota is None:
+                deuda_nota = 'sin dato'
+
+        return {"pe": pe, "pe_nota": pe_nota, "div_str": div_str, "deuda": deuda, "deuda_fuente": deuda_fuente,
+                "deuda_nota": deuda_nota, "patrimonio_activos": pat_activos, "tipo": tipo, "sector": sector,
+                "industria": info.get('industry'), "proximos_resultados": proximos_resultados(info)}
     except Exception as e:
         logging.error(f"Error fetching YF for {ticker}: {e}")
-        return {"pe": -1, "div_str": "0.00%", "deuda": 0}
+        return {"pe": -1, "pe_nota": "sin dato", "div_str": "0.00%", "deuda": None, "deuda_nota": "sin dato", "tipo": "accion"}
+
+def pasa_fundamentales(f):
+    """P/E bajo 40 (o sin utilidad que medir) y deuda menor a 2,5 veces el patrimonio. Una acción cuya deuda o
+    P/E no se pudo verificar queda fuera: mejor mostrar menos ideas que una con datos en blanco. A bancos y
+    aseguradoras no se les aplica el tope de deuda: se financian con deuda por naturaleza del negocio."""
+    if f.get('tipo') == 'accion' and (f.get('deuda') is None or f.get('pe_nota') == 'sin dato'):
+        return False
+    deuda_ok = f.get('deuda') is None or f['deuda'] < 250 or f.get('sector') == 'Financial Services'
+    return (f['pe'] == -1 or f['pe'] < 40) and deuda_ok
+
+def texto_fundamentales(c):
+    pe = {'reit': 'P/E no aplica (REIT)', 'perdidas': 'P/E negativo (pérdidas)'}.get(c.get('pe_nota'), f"P/E {c['pe']:.1f}")
+    if c.get('deuda') is not None:
+        deuda = f"Deuda/Patrimonio {c['deuda']:.0f}%"
+    else:
+        deuda = {'etf': 'Deuda no aplica (ETF)', 'patrimonio negativo': 'Patrimonio negativo'}.get(c.get('deuda_nota'), 'Deuda sin dato')
+    return f"{pe}, Dividend Yield {c['div_str']}, {deuda}"
 
 def calculate_trading_limits(candidates):
     if not candidates or not supabase:
@@ -226,8 +298,8 @@ def calculate_trading_limits(candidates):
 
 def linea_prompt(c):
     if c.get('sin_senal_tecnica'):
-        return f"- {c['ticker']}: Precio ${c['price']:.2f}, SIN señal técnica (precios congelados en la fuente), P/E {c['pe']:.1f}, Dividend Yield {c['div_str']}"
-    return f"- {c['ticker']}: Precio ${c['price']:.2f}, RSI {c['rsi']:.1f}, Distancia EMA200 {c['distancia_ema200']*100:.1f}%, Score {c['score']:.1f}"
+        return f"- {c['ticker']}: Precio ${c['price']:.2f}, SIN señal técnica (precios congelados en la fuente), {texto_fundamentales(c)}"
+    return f"- {c['ticker']}: Precio ${c['price']:.2f}, RSI {c['rsi']:.1f}, Distancia EMA200 {c['distancia_ema200']*100:.1f}%, Score {c['score']:.1f}, {texto_fundamentales(c)}"
 
 def run_serverless_screener():
     logging.info("🚀 Iniciando Quantum Trader Serverless (Institucional)...")
@@ -315,7 +387,7 @@ def run_serverless_screener():
             div = float(str(fund['div_str']).replace('%', ''))
         except ValueError:
             div = 0
-        if not (0 < fund['pe'] < 40 and div > 0):
+        if not (0 < fund['pe'] < 40 and div > 0 and pasa_fundamentales(fund)):
             continue
         c = {'ticker': t, 'price': liquidos[t], 'rsi': None, 'distancia_ema200': None, 'score': None,
              'sin_senal_tecnica': True, **fund}
@@ -329,7 +401,7 @@ def run_serverless_screener():
     for c in all_us:
         fund = get_fundamentals(c['ticker'])
         c.update(fund)
-        if (fund['pe'] == -1 or fund['pe'] < 40) and (fund['deuda'] == 0 or fund['deuda'] < 250):
+        if pasa_fundamentales(fund):
             top_us_fund.append(c)
         else:
             rejected_us.append(c)
@@ -340,7 +412,7 @@ def run_serverless_screener():
     for c in all_cl:
         fund = get_fundamentals(c['ticker'])
         c.update(fund)
-        if (fund['pe'] == -1 or fund['pe'] < 40) and (fund['deuda'] == 0 or fund['deuda'] < 250):
+        if pasa_fundamentales(fund):
             top_cl_fund.append(c)
         else:
             rejected_cl.append(c)
