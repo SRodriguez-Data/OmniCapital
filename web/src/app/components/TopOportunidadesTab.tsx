@@ -6,29 +6,11 @@ import { supabase } from '@/lib/supabase';
 import ReactMarkdown from 'react-markdown';
 import { usePortfolio } from '../context/PortfolioContext';
 import { evidenciaTop5 } from '@/lib/evidencia';
-
-// Candidato tal como lo guarda el bot en analisis_ia.candidatos_json
-interface Candidato {
-  ticker: string;
-  price: number;
-  rsi: number | null;
-  score: number | null;
-  distancia_ema200: number | null;
-  sin_senal_tecnica?: boolean;
-  bollinger_lower?: number;
-  bollinger_upper?: number;
-  pe?: string | number;
-  pe_nota?: 'estimado' | 'perdidas' | 'reit' | 'sin dato' | null;
-  div_str?: string;
-  deuda?: string | number | null;   // deuda / patrimonio en %
-  deuda_fuente?: string | null;     // 'yahoo' o 'balance AAAA-MM-DD' (calculada del balance)
-  deuda_nota?: 'etf' | 'patrimonio negativo' | 'sin dato' | null;
-  patrimonio_activos?: number | null; // solo bancos y aseguradoras, en %
-  tipo?: 'accion' | 'etf';
-  sector?: string | null;
-  industria?: string | null;
-  proximos_resultados?: string | null; // AAAA-MM-DD
-}
+import TopIdeasV2 from './TopIdeasV2';
+import {
+  type Candidato, type Historiales, type HistorialMetodo, SECTOR, fechaCorta, historialAnterior, lineaHistorial, normalizeYield,
+  textoDeuda, textoPE, textoResultados,
+} from './topFormato';
 
 interface TopOpportunity {
   ticker: string;
@@ -53,65 +35,9 @@ const precioDe = (ticker: string, n: number) => ticker.endsWith('.SN')
   ? `$${Math.round(n).toLocaleString('es-CL')}`
   : `US$${n.toFixed(2)}`;
 
-function normalizeYield(divStr?: string): string {
-  const value = parseFloat(String(divStr ?? '').replace('%', ''));
-  if (!Number.isFinite(value)) return 'Sin dato en Yahoo';
-  if (value === 0) return '0% (no reparte)';
-  return `${(value > 25 ? value / 100 : value).toFixed(2)}%`;
-}
-
-const fechaCorta = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00Z`).toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' });
-
-// Cada dato dice de dónde sale o por qué no aplica: nunca un "N/A" sin explicación
-function textoPE(c: Candidato): string {
-  if (c.pe_nota === 'reit') return 'No aplica (REIT: se valora por su flujo, no por la utilidad contable)';
-  const pe = typeof c.pe === 'number' ? c.pe : parseFloat(String(c.pe));
-  if (Number.isFinite(pe) && pe > 0) return `${pe.toFixed(1)}${c.pe_nota === 'estimado' ? ' (sobre utilidad estimada)' : ''}`;
-  if (c.pe_nota === 'perdidas') return 'Negativo (la empresa tiene pérdidas)';
-  return 'Sin dato en Yahoo';
-}
-
-function textoDeuda(c: Candidato): string {
-  if (c.deuda_nota === 'etf' || c.tipo === 'etf') return 'No aplica (ETF)';
-  if (c.deuda_nota === 'patrimonio negativo') return 'Patrimonio negativo (deuda mayor que sus activos netos)';
-  const d = typeof c.deuda === 'number' ? c.deuda : parseFloat(String(c.deuda));
-  // Escaneos anteriores guardaban 0 cuando Yahoo no informaba la deuda: ese 0 no significa "sin deuda"
-  if (!Number.isFinite(d) || (d === 0 && !c.deuda_fuente)) return 'Sin dato en Yahoo';
-  const partes = [d > 0 && d < 1 ? 'Menos de 1% del patrimonio' : `${Math.round(d)}% del patrimonio`];
-  if (c.deuda_fuente?.startsWith('balance ')) partes.push(`calculada del balance al ${fechaCorta(c.deuda_fuente.slice(8))}`);
-  if (typeof c.patrimonio_activos === 'number') partes.push(`en un banco la deuda es parte del negocio: su patrimonio es ${c.patrimonio_activos.toFixed(1)}% de sus activos`);
-  return partes.join(' · ');
-}
-
-function textoResultados(iso?: string | null): { texto: string; pronto: boolean } | null {
-  if (!iso) return null;
-  // Días de calendario contados desde la fecha local de quien mira, no desde la hora UTC
-  const hoy = new Date();
-  const [a, m, d] = iso.slice(0, 10).split('-').map(Number);
-  const dias = Math.round((Date.UTC(a, m - 1, d) - Date.UTC(hoy.getFullYear(), hoy.getMonth(), hoy.getDate())) / 86400000);
-  if (dias < 0) return null;
-  const cuando = dias === 0 ? 'hoy' : dias === 1 ? 'mañana' : `en ${dias} días`;
-  return { texto: `${fechaCorta(iso)} (${cuando})`, pronto: dias <= 7 };
-}
-
-// Calificación de las ideas que el Top ya mostró (la calcula el bot con los escaneos guardados)
-interface Resumen { ideas: number; exceso_promedio: number; mediana: number; acierto: number }
-interface Historial {
-  desde: string; hasta: string; escaneos: number; excluidas_precio_congelado: number;
-  un_mes: Record<'EE.UU.' | 'Chile', Resumen | null>;
-  a_la_fecha: Record<'EE.UU.' | 'Chile', Resumen | null>;
-}
-const MINIMO_IDEAS = 20;
-const INDICE_NOMBRE = { 'EE.UU.': 'S&P 500', Chile: 'el ETF del IPSA' } as const;
-
-function HistorialReal({ h }: { h: Historial }) {
-  const pct = (x: number) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%`;
-  const linea = (m: 'EE.UU.' | 'Chile') => {
-    const r1 = h.un_mes[m], rh = h.a_la_fecha[m];
-    const [r, plazo] = r1 && r1.ideas >= MINIMO_IDEAS ? [r1, 'un mes después'] : rh && rh.ideas >= MINIMO_IDEAS ? [rh, 'hasta hoy'] : [null, ''];
-    if (!r) return `${m}: todavía muy pocas ideas medibles para sacar conclusiones.`;
-    return `${m}: ${r.ideas} ideas, ${plazo}: ${pct(r.exceso_promedio)} frente a ${INDICE_NOMBRE[m]} en promedio (la típica ${pct(r.mediana)}); le ganaron ${(r.acierto * 100).toFixed(0)}% de las veces.`;
-  };
+// Historial del método anterior (escaneos antes del método v2)
+function HistorialReal({ h }: { h: HistorialMetodo }) {
+  const linea = (m: 'EE.UU.' | 'Chile') => lineaHistorial(h, m);
   return (
     <div className="mt-4 text-left text-xs font-sans text-zinc-600 dark:text-[#a1a1aa] border-t border-zinc-200 dark:border-[#27272a] pt-3 space-y-1">
       <p className="font-semibold text-zinc-800 dark:text-[#e4e4e7]">
@@ -148,17 +74,13 @@ function HistorialMetodo() {
   );
 }
 
-const SECTOR: Record<string, string> = {
-  'Financial Services': 'Financiero', Healthcare: 'Salud', 'Real Estate': 'Inmobiliario', Industrials: 'Industrial',
-  'Consumer Defensive': 'Consumo básico', 'Consumer Cyclical': 'Consumo discrecional', Technology: 'Tecnología',
-  'Communication Services': 'Comunicaciones', Utilities: 'Servicios básicos', Energy: 'Energía', 'Basic Materials': 'Materiales',
-};
-
 export default function TopOportunidadesTab() {
   const { items } = usePortfolio();
   const [oportunidades, setOportunidades] = useState<TopOpportunity[]>([]);
   const [fecha, setFecha] = useState<string>('');
-  const [historial, setHistorial] = useState<Historial | null>(null);
+  const [historial, setHistorial] = useState<HistorialMetodo | null>(null);
+  // Escaneo con el método actual (v2): otra vista, con su evidencia
+  const [v2, setV2] = useState<{ us: Candidato[]; cl: Candidato[]; historial: Historiales | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedIndex, setExpandedIndex] = useState<number | null>(0);
   const [theses, setTheses] = useState<Record<string, { loading: boolean; content: string; error?: string }>>({});
@@ -176,7 +98,11 @@ export default function TopOportunidadesTab() {
         if (!error && data && data.length > 0) {
           const report = data[0];
           setFecha(report.fecha);
-          setHistorial(report.candidatos_json?.historial ?? null);
+          setHistorial(historialAnterior(report.candidatos_json?.historial));
+          if (report.candidatos_json?.metodo === 'v2') {
+            setV2({ us: report.candidatos_json.us ?? [], cl: report.candidatos_json.cl ?? [], historial: report.candidatos_json.historial ?? null });
+            return;
+          }
           
           let top5: TopOpportunity[] = [];
           if (report.candidatos_json) {
@@ -199,8 +125,8 @@ export default function TopOportunidadesTab() {
               target_price: c.bollinger_upper ? precioDe(c.ticker, c.bollinger_upper) : 'N/D',
               riesgo: c.distancia_ema200 == null ? 'N/D' : c.distancia_ema200 < -0.1 ? 'ALTO' : 'MODERADO',
               price: c.price,
-              rsi: c.rsi,
-              distancia_ema200: c.distancia_ema200,
+              rsi: c.rsi ?? null,
+              distancia_ema200: c.distancia_ema200 ?? null,
               score: c.score,
               sinSenal: c.rsi == null,
               pe: textoPE(c),
@@ -276,6 +202,8 @@ export default function TopOportunidadesTab() {
   }, [expandedIndex, oportunidades]);
 
   if (loading) return <div className="text-center p-12 font-mono text-zinc-600 dark:text-[#a1a1aa]">Escaneando el mercado en busca de oportunidades...</div>;
+
+  if (v2) return <TopIdeasV2 us={v2.us} cl={v2.cl} historial={v2.historial} fecha={fecha} />;
 
   if (oportunidades.length === 0) {
     return (

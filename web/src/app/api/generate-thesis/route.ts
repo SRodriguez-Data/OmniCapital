@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { price, rsi, ema200, pe, div_str, deuda, sector, resultados, portfolio } = body;
+    const { price, rsi, ema200, pe, div_str, deuda, sector, resultados, criterio, portfolio } = body;
     const ticker = typeof body.ticker === 'string' ? body.ticker.trim().toUpperCase() : '';
 
     if (!TICKER_RE.test(ticker)) {
@@ -42,15 +42,19 @@ export async function POST(req: Request) {
       typeof resultados === 'string' && resultados.trim() ? `Publica sus resultados trimestrales el ${texto(resultados, 60)}.` : '',
     ].filter(Boolean).join(' ');
 
-    const prompt = `Actúa como el Director de Estrategia de un Fondo Cuantitativo. Genera una tesis de inversión para la oportunidad detectada en ${ticker}.
+    const prompt = `Actúa como el Director de Estrategia de un Fondo Cuantitativo. Genera una tesis de inversión para la idea seleccionada en ${ticker}.
 ${portafolioContext}
 
-Datos de ${ticker}: Precio actual: ${num(price)}, RSI(14): ${num(rsi, 1)}, Distancia a la EMA200: ${emaDist}, P/E: ${texto(pe)}, Dividend Yield: ${texto(div_str, 40)}, Deuda/Patrimonio: ${texto(deuda)}.
+Datos de ${ticker}: Precio actual: ${num(price)}${typeof rsi === 'number' ? `, RSI(14): ${num(rsi, 1)}, Distancia a la EMA200: ${emaDist}` : ''}, P/E: ${texto(pe)}, Dividend Yield: ${texto(div_str, 40)}, Deuda/Patrimonio: ${texto(deuda)}.
 ${contexto}
 
+${typeof criterio === 'string' && criterio.trim() ? `Criterio con que el sistema la eligió (medido en 10 años de datos): ${texto(criterio, 600)}
+
 Tu respuesta debe ser quirúrgica y estrictamente en 3 viñetas markdown:
+1. 🎯 Por qué está en la lista (explica el criterio en palabras simples y qué podría hacer que no se cumpla).
+2. ⚖️ Valoración y riesgos (Analiza P/E, dividendos y deuda; si publica resultados en los próximos días, advierte que ese día el precio puede moverse fuerte).` : `Tu respuesta debe ser quirúrgica y estrictamente en 3 viñetas markdown:
 1. 🎯 Catalizador de Valor (Analiza P/E, dividendos y deuda; si publica resultados en los próximos días, advierte que ese día el precio puede moverse fuerte).
-2. 📊 Estructura Técnica (Analiza el RSI y la distancia a la EMA200).
+2. 📊 Estructura Técnica (Analiza el RSI y la distancia a la EMA200).`}
 3. 🔗 Sinergia con Portafolio (Analiza OBLIGATORIAMENTE cómo ${ticker} beneficia o diversifica el portafolio actual del usuario. Si el usuario ya lo tiene, explica si acumular más tiene sentido).
 Usa solo los datos entregados, con sus unidades; si un dato no aplica o falta, explica por qué en vez de inventarlo.`;
 
