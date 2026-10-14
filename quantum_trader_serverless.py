@@ -319,6 +319,102 @@ def linea_prompt(c):
         return f"- {c['ticker']}: Precio ${c['price']:.2f}, SIN señal técnica (precios congelados en la fuente), {texto_fundamentales(c)}"
     return f"- {c['ticker']}: Precio ${c['price']:.2f}, RSI {c['rsi']:.1f}, Distancia EMA200 {c['distancia_ema200']*100:.1f}%, Score {c['score']:.1f}, {texto_fundamentales(c)}"
 
+# Índice con el que se compara cada idea (precio sin dividendos, igual que los cierres guardados de las acciones)
+INDICE_DE = {'EE.UU.': '^GSPC', 'Chile': 'CFMITNIPSA.SN'}
+DIAS_UN_MES = 21
+
+def ideas_mostradas(cj):
+    """Las ideas que mostró la web con ese escaneo (TopOportunidadesTab.tsx): las 5 de mayor puntaje entre
+    EE.UU. y Chile, más la mejor chilena si no había ninguna."""
+    us, cl = cj.get('us') or [], cj.get('cl') or []
+    clave = lambda c: c['score'] if isinstance(c.get('score'), (int, float)) else float('-inf')
+    top = sorted(us + cl, key=clave, reverse=True)[:5]
+    if cl and not any(c['ticker'].endswith('.SN') for c in top):
+        top.append(max(cl, key=clave))
+    return top
+
+def cierres(tickers, desde):
+    """Cierres guardados desde `desde`, como {ticker: Serie por fecha}."""
+    filas = []
+    for i in range(0, len(tickers), 20):
+        inicio = 0
+        while True:
+            lote = (supabase.table("precios_historicos").select("ticker, date, close").in_("ticker", tickers[i:i + 20])
+                    .gte("date", desde).order("date").order("ticker").range(inicio, inicio + 999).execute().data or [])
+            filas += lote
+            if len(lote) < 1000:
+                break
+            inicio += 1000
+    if not filas:
+        return {}
+    df = pd.DataFrame(filas)
+    df['date'] = df['date'].str[:10]
+    return {t: g.set_index('date')['close'].sort_index() for t, g in df.groupby('ticker')}
+
+def resumen_excesos(excesos):
+    if not excesos:
+        return None
+    e = pd.Series(excesos)
+    return {"ideas": int(len(e)), "exceso_promedio": round(float(e.mean()), 4), "mediana": round(float(e.median()), 4),
+            "acierto": round(float((e > 0).mean()), 3)}
+
+def historial_ideas():
+    """Cómo les fue de verdad a las ideas que mostró el Top: cada escaneo guardado se compra al cierre de su fecha
+    y se compara con el índice de su mercado a un mes y hasta hoy. Se usan los cierres guardados hoy (ya
+    corregidos), no el precio del escaneo, que en los primeros meses a veces era uno de mitad de jornada."""
+    filas = (supabase.table("analisis_ia").select("fecha, us:candidatos_json->us, cl:candidatos_json->cl, fp:candidatos_json->fecha_precios")
+             .order("fecha").execute().data or [])
+    filas = [f for f in filas if (f.get('us') or f.get('cl'))]
+    if not filas:
+        return None
+    desde = filas[0]['fecha'][:10]
+    tickers = sorted({c['ticker'] for f in filas for c in ideas_mostradas({'us': f.get('us'), 'cl': f.get('cl')})} | set(INDICE_DE.values()))
+    precios = cierres(tickers, (pd.Timestamp(desde) - pd.Timedelta(days=10)).strftime("%Y-%m-%d"))
+    calendario = {m: list(precios[t].index) if t in precios else [] for m, t in INDICE_DE.items()}
+
+    # Un escaneo por fecha de precios (el último de ese día); los antiguos sin fecha usan el cierre previo al escaneo
+    por_fecha = {}
+    for f in filas:
+        cal = calendario['EE.UU.']
+        entrada = (f.get('fp') or '')[:10] or next((d for d in reversed(cal) if d < f['fecha'][:10]), None)
+        if entrada:
+            por_fecha[entrada] = ideas_mostradas({'us': f.get('us'), 'cl': f.get('cl')})
+
+    un_mes = {'EE.UU.': [], 'Chile': []}
+    a_la_fecha = {'EE.UU.': [], 'Chile': []}
+    distintas, excluidas = set(), 0
+    for entrada, ideas in por_fecha.items():
+        for c in ideas:
+            mercado = 'Chile' if c['ticker'].endswith('.SN') else 'EE.UU.'
+            serie, indice = precios.get(c['ticker']), precios.get(INDICE_DE[mercado])
+            cal = calendario[mercado]
+            if serie is None or indice is None or not cal:
+                continue
+            serie = serie[serie.index >= entrada]
+            dias = [d for d in cal if d >= entrada]
+            # Acciones con el precio congelado en la fuente no tienen un retorno real que medir
+            if len(serie) < 2 or len(dias) < 2 or serie.nunique() < 0.5 * len(serie):
+                excluidas += 1
+                continue
+            p0 = serie.iloc[0]
+            i0 = indice[indice.index <= dias[0]].iloc[-1]
+            for destino, salida in ((a_la_fecha, dias[-1]), (un_mes, dias[DIAS_UN_MES] if len(dias) > DIAS_UN_MES else None)):
+                if salida is None:
+                    continue
+                p1 = serie[serie.index <= salida].iloc[-1]
+                i1 = indice[indice.index <= salida].iloc[-1]
+                destino[mercado].append((p1 / p0 - 1) - (i1 / i0 - 1))
+            distintas.add(c['ticker'])
+
+    return {
+        "desde": min(por_fecha), "hasta": max(d for cal in calendario.values() for d in cal[-1:]),
+        "escaneos": len(por_fecha), "acciones_distintas": len(distintas), "excluidas_precio_congelado": excluidas,
+        "indices": INDICE_DE,
+        "un_mes": {m: resumen_excesos(v) for m, v in un_mes.items()},
+        "a_la_fecha": {m: resumen_excesos(v) for m, v in a_la_fecha.items()},
+        "un_mes_total": resumen_excesos(un_mes['EE.UU.'] + un_mes['Chile']),
+    }
+
 def run_serverless_screener():
     logging.info("🚀 Iniciando Quantum Trader Serverless (Institucional)...")
     
@@ -556,6 +652,10 @@ Incluye todos los tickers en sus respectivos diccionarios/listas."""
         "fecha_precios": max_date,
         "activos_al_dia": al_dia
     }
+    try:
+        combined_candidates["historial"] = historial_ideas()
+    except Exception as e:
+        logging.warning(f"No se calculó el historial de las ideas: {str(e)[:160]}")
     
     try:
         supabase.table("analisis_ia").insert({
