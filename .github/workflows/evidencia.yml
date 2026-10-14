@@ -41,13 +41,13 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           # La SEC exige un correo de contacto para entregar los estados financieros (fundamentales de EE.UU.)
           SEC_CONTACTO: ${{ secrets.SEC_CONTACTO }}
-        run: python evidencia.py --salida web/src/data/evidencia.json
+        run: python evidencia.py --web web/src/data
 
       - name: Guardar el resultado
         run: |
           git config user.name "Sebas7w7"
           git config user.email "247446013+Sebas7w7@users.noreply.github.com"
-          git add web/src/data/evidencia.json
+          git add web/src/data/evidencia_reglas.json web/src/data/evidencia_metodos.json
           if git diff --cached --quiet; then
             echo "La evidencia no cambió."
             exit 0

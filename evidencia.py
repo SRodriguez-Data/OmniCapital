@@ -17,7 +17,7 @@ Sesgos que no se pueden quitar con datos gratis, y que el informe declara:
 - Fundamentales: solo EE.UU., con los estados financieros de la SEC tal como se conocían en cada fecha
   (fundamentales_sec.py). Para Chile no hay una fuente histórica gratuita: ahí solo se miden señales de precio.
 
-Uso: python evidencia.py [--cache archivo.pkl] [--cache-sec carpeta] [--salida archivo.json]
+Uso: python evidencia.py [--cache archivo.pkl] [--cache-sec carpeta] [--salida archivo.json] [--web carpeta]
 """
 import argparse
 import json
@@ -463,11 +463,32 @@ def evaluar(crudos: pd.DataFrame, sec: "fundamentales_sec.Sec | None" = None) ->
     return salida
 
 
+def para_web(res: dict) -> tuple[dict, dict]:
+    """Lo que usa la web, en dos archivos: las reglas (solo el servidor, para el asesor) y los métodos del Top (lo
+    único que descarga el navegador). Los factores continuos quedan solo en el resultado completo."""
+    corto = lambda m: {k: m[k] for k in ("exceso_promedio", "t", "acierto", "casos") if k in m}
+    reglas = {
+        "calculado": res["calculado"], "muestra": res["muestra"],
+        "base": {mk: {"3m": {"acierto": v["3m"]["acierto"]}} for mk, v in res["base"].items()},
+        "reglas": {k: {"nombre": v["nombre"], **{mk: {h: corto(x) for h, x in v[mk].items() if h in ("3m", "6m")}
+                                                for mk in v if mk != "nombre"}} for k, v in res["reglas"].items()},
+    }
+    metodos = {
+        "calculado": res["calculado"], "muestra": res["muestra"], "sesgos": res["sesgos"],
+        "base": reglas["base"],
+        "metodos": {k: {"nombre": m["nombre"], "mercado": m["mercado"], "n": m["n"],
+                        "3m": {**corto(m["3m"]), "meses_positivos": m["3m"]["meses_positivos"], "mitades": m["3m"]["mitades"]}}
+                    for k, m in res["metodos"].items() if "3m" in m},
+    }
+    return reglas, metodos
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", help="Pickle con los precios ya descargados (para iterar sin volver a bajar)")
     ap.add_argument("--cache-sec", help="Carpeta donde guardar las respuestas de la SEC (para iterar)")
-    ap.add_argument("--salida", default="evidencia.json")
+    ap.add_argument("--salida", default="evidencia.json", help="Resultado completo")
+    ap.add_argument("--web", help="Carpeta donde escribir evidencia_reglas.json y evidencia_metodos.json para la web")
     args = ap.parse_args()
     if args.cache and os.path.exists(args.cache):
         precios = pd.read_pickle(args.cache)
@@ -485,6 +506,11 @@ def main():
     with open(args.salida, "w", encoding="utf-8") as f:
         json.dump(resultado, f, ensure_ascii=False, indent=1)
     logging.info(f"Evidencia guardada en {args.salida}")
+    if args.web:
+        for nombre, datos in zip(("evidencia_reglas.json", "evidencia_metodos.json"), para_web(resultado)):
+            with open(os.path.join(args.web, nombre), "w", encoding="utf-8") as f:
+                json.dump(datos, f, ensure_ascii=False, separators=(",", ":"))
+        logging.info(f"Archivos de la web guardados en {args.web}")
 
 
 if __name__ == "__main__":

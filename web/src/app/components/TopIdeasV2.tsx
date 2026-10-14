@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { AlertTriangle, ChevronDown, ChevronUp, Loader2, Sparkles } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
-import { evidenciaMetodo, sesgosEvidencia, type ClaveMetodo, type Nivel } from '@/lib/evidencia';
+import { evidenciaMetodo, sesgosEvidencia, type ClaveMetodo, type Nivel } from '@/lib/evidenciaMetodos';
 import {
   type Candidato, type Historiales, SECTOR, fechaCorta, lineaHistorial, normalizeYield, pctSigno, textoDeuda, textoPE, textoResultados,
 } from './topFormato';
