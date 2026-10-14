@@ -108,7 +108,7 @@ export default function NotificationBell() {
                     >
                       <div className="flex gap-3">
                         <div className="mt-0.5">
-                          <AlertTriangle className={`w-4 h-4 ${alert.tipo === 'BUY_ZONE' ? 'text-[#34d399]' : 'text-[#f59e0b]'}`} />
+                          <AlertTriangle className={`w-4 h-4 ${alert.tipo === 'ENTRA_LISTA' ? 'text-[#34d399]' : 'text-[#f59e0b]'}`} />
                         </div>
                         <div className="flex-1">
                           <div className="flex justify-between items-start">

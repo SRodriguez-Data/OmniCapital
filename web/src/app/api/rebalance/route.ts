@@ -31,18 +31,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
 
-    // Las 5 mejores oportunidades del último escaneo del bot, evaluadas con las mismas reglas
+    // Las mejores ideas del último escaneo del bot, evaluadas con las mismas reglas: 3 de EE.UU. y 2 de Chile. Cada
+    // lista viene ordenada por su propio criterio (percentil en su sector, alza de 12 meses): mezclar los puntajes
+    // de las dos dejaría siempre fuera a las chilenas
     const { data: iaData } = await supabase
       .from('analisis_ia')
-      .select('candidatos_json')
+      .select('us:candidatos_json->us, cl:candidatos_json->cl')
       .order('fecha', { ascending: false })
       .limit(1);
-    const scan: Candidate[] = [...(iaData?.[0]?.candidatos_json?.us || []), ...(iaData?.[0]?.candidatos_json?.cl || [])];
-    const oportunidades = scan
+    const mejores = (lista: unknown, n: number) => ((Array.isArray(lista) ? lista : []) as Candidate[])
       .filter((c): c is { ticker: string; score: number } => typeof c?.ticker === 'string' && typeof c?.score === 'number')
       .sort((a, b) => b.score - a.score)
-      .slice(0, 5)
+      .slice(0, n)
       .map(c => c.ticker.toUpperCase());
+    const fila = iaData?.[0] as { us?: unknown; cl?: unknown } | undefined;
+    const oportunidades = [...mejores(fila?.us, 3), ...mejores(fila?.cl, 2)];
 
     const { modelo: riesgo, ...report } = await buildAdvisorReport(parsed.items, oportunidades);
     const plan = planPurchases(report, riesgo, budget, currency, { fraccionar });
