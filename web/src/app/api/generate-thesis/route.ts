@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { price, rsi, ema200, pe, div_str, deuda, sector, resultados, criterio, portfolio } = body;
+    const { price, pe, div_str, deuda, sector, resultados, criterio, portfolio } = body;
     const ticker = typeof body.ticker === 'string' ? body.ticker.trim().toUpperCase() : '';
 
     if (!TICKER_RE.test(ticker)) {
@@ -33,8 +33,6 @@ export async function POST(req: Request) {
       ? `El portafolio actual del usuario contiene: [${portfolio.slice(0, 1000)}].`
       : "El usuario no tiene activos en su portafolio aún.";
 
-    // distancia_ema200 viene del bot como fracción (-0.09 = 9% bajo la EMA200)
-    const emaDist = typeof ema200 === 'number' && Number.isFinite(ema200) ? `${(ema200 * 100).toFixed(1)}%` : 'sin dato';
     // Los textos llegan ya explicados desde la web (p. ej. "75% del patrimonio · calculada del balance al ...")
     const texto = (v: unknown, max = 220) => (typeof v === 'string' || typeof v === 'number' ? String(v).slice(0, max) : 'sin dato');
     const contexto = [
@@ -45,16 +43,14 @@ export async function POST(req: Request) {
     const prompt = `Actúa como el Director de Estrategia de un Fondo Cuantitativo. Genera una tesis de inversión para la idea seleccionada en ${ticker}.
 ${portafolioContext}
 
-Datos de ${ticker}: Precio actual: ${num(price)}${typeof rsi === 'number' ? `, RSI(14): ${num(rsi, 1)}, Distancia a la EMA200: ${emaDist}` : ''}, P/E: ${texto(pe)}, Dividend Yield: ${texto(div_str, 40)}, Deuda/Patrimonio: ${texto(deuda)}.
+Datos de ${ticker}: Precio actual: ${num(price)}, P/E: ${texto(pe)}, Dividend Yield: ${texto(div_str, 40)}, Deuda/Patrimonio: ${texto(deuda)}.
 ${contexto}
 
 ${typeof criterio === 'string' && criterio.trim() ? `Criterio con que el sistema la eligió (medido en 10 años de datos): ${texto(criterio, 600)}
-
+` : ''}
 Tu respuesta debe ser quirúrgica y estrictamente en 3 viñetas markdown:
-1. 🎯 Por qué está en la lista (explica el criterio en palabras simples y qué podría hacer que no se cumpla).
-2. ⚖️ Valoración y riesgos (Analiza P/E, dividendos y deuda; si publica resultados en los próximos días, advierte que ese día el precio puede moverse fuerte).` : `Tu respuesta debe ser quirúrgica y estrictamente en 3 viñetas markdown:
-1. 🎯 Catalizador de Valor (Analiza P/E, dividendos y deuda; si publica resultados en los próximos días, advierte que ese día el precio puede moverse fuerte).
-2. 📊 Estructura Técnica (Analiza el RSI y la distancia a la EMA200).`}
+1. 🎯 Por qué está en la lista (explica el criterio en palabras simples y qué podría hacer que deje de cumplirse).
+2. ⚖️ Valoración y riesgos (Analiza P/E, dividendos y deuda; si publica resultados en los próximos días, advierte que ese día el precio puede moverse fuerte).
 3. 🔗 Sinergia con Portafolio (Analiza OBLIGATORIAMENTE cómo ${ticker} beneficia o diversifica el portafolio actual del usuario. Si el usuario ya lo tiene, explica si acumular más tiene sentido).
 Usa solo los datos entregados, con sus unidades; si un dato no aplica o falta, explica por qué en vez de inventarlo.`;
 

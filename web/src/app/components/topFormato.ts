@@ -4,12 +4,7 @@
 export interface Candidato {
   ticker: string;
   price: number;
-  rsi?: number | null;
   score: number | null;
-  distancia_ema200?: number | null;
-  sin_senal_tecnica?: boolean;
-  bollinger_lower?: number;
-  bollinger_upper?: number;
   pe?: string | number;
   pe_nota?: 'estimado' | 'perdidas' | 'reit' | 'sin dato' | null;
   div_str?: string;
@@ -22,7 +17,6 @@ export interface Candidato {
   industria?: string | null;
   proximos_resultados?: string | null; // AAAA-MM-DD
   fecha_precio?: string;
-  // Método actual (v2)
   calidad?: number;           // (flujo de caja - pago en acciones - utilidad) / activos
   percentil_sector?: number;
   sector_gics?: string;
@@ -34,7 +28,7 @@ export function normalizeYield(divStr?: string): string {
   const value = parseFloat(String(divStr ?? '').replace('%', ''));
   if (!Number.isFinite(value)) return 'Sin dato en Yahoo';
   if (value === 0) return '0% (no reparte)';
-  // Escaneos antiguos del bot guardaron el dividend yield multiplicado dos veces por 100 ("346.00%" en vez de 3,46%)
+  // Por si un dividendo llega multiplicado dos veces por 100 ("346.00%" en vez de 3,46%), como en escaneos antiguos
   return `${(value > 25 ? value / 100 : value).toFixed(2)}%`;
 }
 
@@ -89,12 +83,8 @@ export interface HistorialMetodo {
   un_mes: Record<'EE.UU.' | 'Chile', Resumen | null>;
   a_la_fecha: Record<'EE.UU.' | 'Chile', Resumen | null>;
 }
-// Desde el método v2 el bot guarda el historial de cada método por separado; antes, uno solo
+// El bot guarda el historial del método actual y del anterior por separado
 export interface Historiales { metodo?: string; desde_metodo_actual?: string | null; actual?: HistorialMetodo | null; anterior?: HistorialMetodo | null }
-export const historialAnterior = (h: unknown): HistorialMetodo | null => {
-  if (!h || typeof h !== 'object') return null;
-  return 'anterior' in h || 'actual' in h ? ((h as Historiales).anterior ?? null) : (h as HistorialMetodo);
-};
 
 const MINIMO_IDEAS = 20;
 const INDICE_NOMBRE = { 'EE.UU.': 'S&P 500', Chile: 'el ETF del IPSA' } as const;
