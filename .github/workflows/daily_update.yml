@@ -58,11 +58,10 @@ jobs:
         run: |
           python miner.py
 
-      - name: Run AI Analysis (Generate Top 5 Opportunities)
+      - name: Pick the Top ideas with the measured methods
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # La SEC exige un correo de contacto para entregar los estados financieros (ideas de EE.UU.)
           SEC_CONTACTO: ${{ secrets.SEC_CONTACTO }}
           # Un push o una corrida manual siempre rehacen el análisis; las programadas solo si hay precios nuevos

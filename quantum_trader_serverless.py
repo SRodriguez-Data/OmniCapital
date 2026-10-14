@@ -2,15 +2,11 @@ import os
 import sys
 import time
 import importlib
-import requests
-import json
 import logging
 import pandas as pd
 import yfinance as yf
-import numpy as np
 from datetime import datetime
 from supabase import create_client, Client
-import google.generativeai as genai
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -33,7 +29,6 @@ ALPACA_BASE_URL = 'https://paper-api.alpaca.markets'
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SECRET_KEY")
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Tickers will be dynamically fetched from mi_portafolio
 
@@ -41,78 +36,6 @@ if SUPABASE_URL and SUPABASE_KEY:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 else:
     supabase = None
-
-# Si un modelo falla o se agota su cuota gratis, se usa el siguiente. gemini-3.5-flash no tiene cuota gratis con
-# esta clave (429) y el SDK reintentaba varios minutos antes de rendirse: por eso el tope de tiempo por modelo
-MODELOS_GEMINI = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite']
-TIEMPO_MAXIMO_GEMINI = 180
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-
-def compute_quant_math(tickers):
-    if not tickers or not supabase:
-        return {}, []
-    try:
-        res = supabase.table("precios_historicos")\
-            .select("date, ticker, close")\
-            .in_("ticker", tickers)\
-            .order("date", desc=True)\
-            .limit(100 * len(tickers)).execute()
-            
-        if not res.data:
-            return {}, []
-            
-        df = pd.DataFrame(res.data)
-        df_pivot = df.pivot_table(index="date", columns="ticker", values="close")
-        df_pivot = df_pivot.sort_index()
-        
-        returns = df_pivot.pct_change().dropna()
-        if returns.empty:
-            return {}, []
-            
-        corr_matrix = returns.corr().round(2)
-        # Un precio congelado no varía y su correlación sale NaN, que no se puede guardar como JSON
-        corr_json = {t: {k: (None if pd.isna(v) else v) for k, v in corr_matrix[t].items()} for t in corr_matrix.columns}
-            
-        num_portfolios = 3000
-        risk_free_rate = 0.04
-        mean_returns = returns.mean() * 252
-        cov_matrix = returns.cov() * 252
-        
-        results = []
-        num_assets = len(returns.columns)
-        np.random.seed(42)
-        
-        for _ in range(num_portfolios):
-            weights = np.random.random(num_assets)
-            weights /= np.sum(weights)
-            
-            port_return = np.sum(mean_returns * weights)
-            port_std_dev = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-            port_sharpe = (port_return - risk_free_rate) / port_std_dev
-            
-            w_dict = {returns.columns[i]: round(weights[i], 3) for i in range(num_assets)}
-            
-            results.append({
-                "riesgo": round(port_std_dev * 100, 2),
-                "retorno": round(port_return * 100, 2),
-                "sharpe": round(port_sharpe, 2),
-                "pesos": w_dict
-            })
-            
-        import random
-        max_sharpe = max(results, key=lambda x: x["sharpe"])
-        min_vol = min(results, key=lambda x: x["riesgo"])
-        
-        sample_results = random.sample(results, min(300, len(results)))
-        if max_sharpe not in sample_results: sample_results.append(max_sharpe)
-        if min_vol not in sample_results: sample_results.append(min_vol)
-        
-        return corr_json, sample_results
-    except Exception as e:
-        logging.error(f"Error calculando Matemáticas Cuantitativas: {e}")
-        return {}, []
-
 
 def tickers_con_datos_frescos(tickers, max_date):
     """Yahoo a veces repite el mismo cierre por semanas en acciones chilenas; un RSI calculado sobre eso es falso
@@ -232,14 +155,6 @@ def get_fundamentals(ticker):
         logging.error(f"Error fetching YF for {ticker}: {e}")
         return {"pe": -1, "pe_nota": "sin dato", "div_str": "0.00%", "deuda": None, "deuda_nota": "sin dato", "tipo": "accion"}
 
-def texto_fundamentales(c):
-    pe = {'reit': 'P/E no aplica (REIT)', 'perdidas': 'P/E negativo (pérdidas)'}.get(c.get('pe_nota'), f"P/E {c['pe']:.1f}")
-    if c.get('deuda') is not None:
-        deuda = f"Deuda/Patrimonio {c['deuda']:.0f}%"
-    else:
-        deuda = {'etf': 'Deuda no aplica (ETF)', 'patrimonio negativo': 'Patrimonio negativo'}.get(c.get('deuda_nota'), 'Deuda sin dato')
-    return f"{pe}, Dividend Yield {c['div_str']}, {deuda}"
-
 METODO_TOP = "v2"
 IDEAS_EEUU = 20
 IDEAS_CHILE = 5
@@ -331,12 +246,6 @@ def ideas_momentum_chile(filas):
                       "momentum": round(float(mom), 4), **get_fundamentals(t)})
     logging.info(f"Momentum Chile: {len(candidatos)} acciones evaluadas, elegidas {', '.join(i['ticker'] for i in ideas)}")
     return ideas
-
-def linea_prompt(c):
-    if 'calidad' in c:
-        return (f"- {c['ticker']} ({c.get('sector_gics')}): utilidad respaldada por caja {c['calidad']*100:.1f}% de los activos "
-                f"(percentil {c['percentil_sector']*100:.0f} de su sector), {texto_fundamentales(c)}")
-    return f"- {c['ticker']}: alza de {c['momentum']*100:.1f}% entre hace 12 meses y hace 1 mes, {texto_fundamentales(c)}"
 
 # Índice con el que se compara cada idea (precio sin dividendos, igual que los cierres guardados de las acciones)
 INDICE_DE = {'EE.UU.': '^GSPC', 'Chile': 'CFMITNIPSA.SN'}
@@ -445,12 +354,31 @@ def historial_de(es_del_metodo):
         "un_mes_total": resumen_excesos(un_mes['EE.UU.'] + un_mes['Chile']),
     }
 
+def avisar_cambios(top_us, top_cl, liquidos):
+    """Avisos de la campana (alertas_mercado): una acción que entra o sale de las ideas con evidencia frente al
+    último escaneo del mismo método. Un escaneo repetido con los mismos precios da las mismas listas: sin avisos."""
+    previo = (supabase.table("analisis_ia").select("us:candidatos_json->us, cl:candidatos_json->cl, metodo:candidatos_json->metodo")
+              .order("fecha", desc=True).limit(1).execute().data or [])
+    if not previo or previo[0].get("metodo") != METODO_TOP:
+        return  # primer escaneo del método: no hay contra qué comparar
+    antes = {c["ticker"] for c in (previo[0].get("us") or []) + (previo[0].get("cl") or [])}
+    ahora = {c["ticker"]: c for c in top_us + top_cl}
+    lista = lambda t: "Chile, mayor alza de 12 meses" if t.endswith(".SN") else "EE.UU., utilidad respaldada por caja"
+    precio = lambda t: float(ahora[t]["price"]) if t in ahora else float((liquidos.get(t) or {}).get("close") or 0)
+    filas = [{"ticker": t, "tipo": "ENTRA_LISTA", "precio_actual": precio(t),
+              "mensaje": f"{t} entró a las ideas con evidencia ({lista(t)})."} for t in ahora if t not in antes]
+    filas += [{"ticker": t, "tipo": "SALE_LISTA", "precio_actual": precio(t),
+               "mensaje": f"{t} salió de las ideas con evidencia ({lista(t)}): ya no cumple el criterio."} for t in sorted(antes - set(ahora))]
+    if filas:
+        supabase.table("alertas_mercado").insert(filas).execute()
+        logging.info(f"🔔 {len(filas)} avisos: {', '.join(f['ticker'] + (' entra' if f['tipo'] == 'ENTRA_LISTA' else ' sale') for f in filas)}")
+
 def run_serverless_screener():
     logging.info("🚀 Iniciando Quantum Trader Serverless (Institucional)...")
     
     # Sin credenciales o sin datos el job debe quedar en rojo en GitHub Actions, no en verde sin hacer nada
-    if not supabase or not GEMINI_API_KEY:
-        logging.error("❌ Faltan credenciales clave (Supabase o Gemini).")
+    if not supabase:
+        logging.error("❌ Faltan las credenciales de Supabase.")
         sys.exit(1)
 
     # 1. Extraer los datos más recientes
@@ -511,102 +439,17 @@ def run_serverless_screener():
         logging.error("❌ Ningún método entregó ideas.")
         sys.exit(1)
 
-    # 3. Matemáticas de Portafolio Real
-    logging.info("🧮 Calculando Matriz de Correlación y Markowitz SOBRE MI PORTAFOLIO...")
     try:
-        res_tickers = supabase.table("mi_portafolio").select("ticker").execute()
-        if res_tickers.data:
-            portfolio_tickers = list(set([row['ticker'] for row in res_tickers.data]))
-            if portfolio_tickers:
-                corr_json, frontier_points = compute_quant_math(portfolio_tickers)
-                if corr_json:
-                    supabase.table("correlaciones").insert({"matriz_json": corr_json}).execute()
-                if frontier_points:
-                    supabase.table("frontera_eficiente").insert({"puntos_json": frontier_points}).execute()
+        avisar_cambios(top_us, top_cl, liquidos)
     except Exception as e:
-        logging.error(f"Error guardando matemáticas del portafolio en Supabase: {e}")
+        logging.warning(f"No se generaron los avisos de la campana: {str(e)[:160]}")
 
-    # 4. Generación Analista Institucional (Gemini) - Mercado Global
-    prompt_us = "\n".join([linea_prompt(c) for c in top_us[:5]])
-    prompt_cl = "\n".join([linea_prompt(c) for c in top_cl])
-    
-    # Nuevo: Extraer info del portafolio del usuario
-    portfolio_data = []
-    if 'portfolio_tickers' in locals() and portfolio_tickers:
-        for t in portfolio_tickers:
-            try:
-                res_t = supabase.table("precios_historicos").select("*").eq("ticker", t).order("date", desc=True).limit(1).execute()
-                if res_t.data:
-                    portfolio_data.append(res_t.data[0])
-            except Exception as e:
-                logging.error(f"Error fetching latest data for {t}: {e}")
-                
-    prompt_mi_portafolio = "Portafolio Vacío"
-    if portfolio_data:
-        prompt_mi_portafolio = "\\n".join([f"- {r['ticker']}: Precio ${r.get('close',0):.2f}, RSI {r.get('rsi',0):.1f}, Dist. EMA200 {(r.get('pvc_ema200',0)*100):.1f}%" for r in portfolio_data])
-
-    prompt_macro = f"""Eres el Estratega Cuantitativo Jefe. 
-Analiza los siguientes dos mercados y el portafolio del cliente, luego provee un reporte institucional estricto.
-
-Mercado EE.UU. (las 5 primeras de 20 acciones con la utilidad más respaldada por caja frente a su sector):
-{prompt_us}
-
-Mercado Chile (las 5 con mayor alza de los últimos 12 meses):
-{prompt_cl}
-
-MI PORTAFOLIO ACTUAL:
-{prompt_mi_portafolio}
-
-Responde ESTRICTAMENTE EN ESPAÑOL, en formato JSON válido, sin bloques de código markdown, con la siguiente estructura exacta:
-{{
-  "contexto_macro": "Análisis macroeconómico de 2 párrafos (tasas, inflación, etc).",
-  "vision_radar": "Resumen de las anomalías detectadas en los mercados globales.",
-  "seleccion_fondo": "Tu selección #1 global justificando su ventaja (Moat).",
-  "setup_tecnico": "Evaluación técnica del riesgo de mercado actual.",
-  "diagnostico_mi_portafolio": "Un diagnóstico crítico y duro sobre MI PORTAFOLIO ACTUAL. Tu análisis debe ser exhaustivo y de grado institucional. El apartado de ANÁLISIS debe contener al menos 2 párrafos robustos detallando el momentum técnico, riesgos macroeconómicos y justificación de la decisión (BUY/HOLD/SELL). No escatimes en detalles. Usa un tono de banquero de inversión.",
-  "recomendaciones_mi_portafolio": [
-      // REGLA ABSOLUTA: DEBES incluir un objeto por CADA UNO de los siguientes tickers: {", ".join(portfolio_tickers) if 'portfolio_tickers' in locals() else "ninguno"}
-      {{"ticker": "TICKER_AQUI", "accion": "🟢 BUY (Aumentar) / 🟡 HOLD (Mantener) / 🔴 SELL (Recortar)", "stop_loss": "Calcula un precio exacto de salida de emergencia, justificándolo.", "analisis": "Tu análisis debe ser exhaustivo y de grado institucional. Explica el momentum técnico y justifica la decisión fuertemente."}}
-  ], // NUNCA recomiendes 'BUY' ciegamente. Exige buen precio. Si la acción está sobrecomprada o el riesgo es alto, recomienda SELL o HOLD.
-  "insights_us": {{
-      "TICKER_US": "Tesis de inversión institucional y predictiva de grado bancario (mínimo 2 párrafos). Explica qué dice su criterio de selección y qué riesgos tiene, sin inventar datos que no se entregaron."
-  }},
-  "insights_cl": {{
-      "TICKER_CL": "Tesis de inversión institucional y predictiva de grado bancario (mínimo 2 párrafos). Explica qué dice su criterio de selección y qué riesgos tiene, sin inventar datos que no se entregaron."
-  }}
-}}
-Incluye todos los tickers en sus respectivos diccionarios/listas."""
-
-    ia_data = None
-    for modelo in MODELOS_GEMINI:
-        try:
-            response = genai.GenerativeModel(modelo).generate_content(
-                prompt_macro,
-                generation_config={"response_mime_type": "application/json", "temperature": 0.0},
-                request_options={"timeout": TIEMPO_MAXIMO_GEMINI}
-            )
-            texto_ia = response.text.replace("```json", "").replace("```", "").strip()
-            ia_data = json.loads(texto_ia)
-            logging.info(f"🧠 Análisis generado con {modelo}.")
-            break
-        except Exception as e:
-            logging.warning(f"{modelo} no respondió: {str(e)[:160]}")
-    if ia_data is None:
-        logging.error("Error generando IA: ningún modelo de Gemini respondió.")
-        ia_data = {
-            "contexto_macro": "Error", "vision_radar": "Error", "seleccion_fondo": "Error", "setup_tecnico": "Error",
-            "insights_us": {}, "insights_cl": {}
-        }
-
-    # 5. Guardar en Supabase (Web Dashboard)
-    # Como analisis_ia actual solo tiene candidatos_json, guardaremos un objeto combinado para no romper la DB actual.
+    # 3. Guardar el escaneo (la web lee candidatos_json; el asesor, calidad_us)
     combined_candidates = {
         "metodo": METODO_TOP,
         "us": top_us,
         "cl": top_cl,
         "calidad_us": calidad_us,
-        "diagnostico_portafolio": ia_data.get("diagnostico_mi_portafolio", "Sin diagnóstico específico."),
-        "recomendaciones_portafolio": ia_data.get("recomendaciones_mi_portafolio", []),
         # Con qué precios se hizo: la corrida de respaldo no repite el análisis si no hay precios nuevos
         "fecha_precios": max_date,
         "activos_al_dia": al_dia
@@ -617,16 +460,13 @@ Incluye todos los tickers en sus respectivos diccionarios/listas."""
         logging.warning(f"No se calculó el historial de las ideas: {str(e)[:160]}")
     
     try:
+        # Las columnas de texto venían de Gemini, que ya no se usa: quedan vacías
         supabase.table("analisis_ia").insert({
             "candidatos_json": combined_candidates,
-            "vision_radar": ia_data.get("vision_radar", ""),
-            "seleccion_fondo": ia_data.get("seleccion_fondo", ""),
-            "setup_tecnico": ia_data.get("setup_tecnico", ""),
-            "contexto_macro": ia_data.get("contexto_macro", ""),
-            "insights_tickers": {**ia_data.get("insights_us", {}), **ia_data.get("insights_cl", {})}
+            "vision_radar": "", "seleccion_fondo": "", "setup_tecnico": "",
         }).execute()
     except Exception as e:
-        logging.error(f"Error guardando IA en Supabase: {e}")
+        logging.error(f"Error guardando el escaneo en Supabase: {e}")
         sys.exit(1)
             
     logging.info("✅ Pipeline Institucional Finalizado.")

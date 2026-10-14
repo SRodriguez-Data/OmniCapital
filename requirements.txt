@@ -5,7 +5,6 @@ scipy
 requests
 alpha-vantage==2.3.1
 supabase
-google-generativeai
 python-dotenv
 fastapi
 uvicorn
