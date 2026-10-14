@@ -1391,7 +1391,7 @@
  "muestra": {
   "EE.UU.": {
    "desde": "2016-10-14",
-   "hasta": "2026-10-12",
+   "hasta": "2026-10-13",
    "fechas_evaluadas": 102,
    "acciones": 575
   },
@@ -1407,5 +1407,5 @@
   "Solo señales de precio: Yahoo no entrega los fundamentales de cada fecha pasada.",
   "Exceso frente al promedio simple de cada mercado, antes de comisiones e impuestos."
  ],
- "calculado": "2026-10-14T01:39:43.849232+00:00"
+ "calculado": "2026-10-14T01:48:08.156849+00:00"
 }
