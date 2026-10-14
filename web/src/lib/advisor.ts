@@ -11,6 +11,7 @@ import { ETF_CONOCIDOS, FONDOS_CHILE, fundamentales, type Fundamentales, type Ti
 import { contextoMercado, type ContextoMercado } from './mercado';
 import { adecuacion, type Adecuacion, type PerfilInversionista } from './perfil';
 import { evidencia, mercadoDe, type Evidencia, type Mercado } from './evidencia';
+import { supabase } from './supabase';
 
 // Motor de recomendaciones: todas las cifras salen de datos reales (precios ajustados por dividendos,
 // fundamentales y consenso de analistas de Yahoo Finance) y las decisiones de reglas explícitas en cuatro
@@ -322,21 +323,38 @@ function pilarFundamental(f: Fundamentales | null, tipo: TipoActivo, perMercado:
 
 interface Decision { accion: Accion; conviccion: Conviccion; puntaje: number; motivos: string[] }
 
+// Calidad de utilidades de las acciones del S&P 500 (la calcula el bot con la SEC: flujo de caja menos pago en
+// acciones, sobre la utilidad, frente a su sector). p = percentil en su sector, pa = reparte más que su utilidad
+type CalidadEeuu = Record<string, { c: number; p: number; pa: boolean }>;
+let calidadCache: { at: number; datos: CalidadEeuu } | null = null;
+async function calidadEeuu(): Promise<CalidadEeuu> {
+  if (calidadCache && Date.now() - calidadCache.at < 6 * 60 * 60 * 1000) return calidadCache.datos;
+  try {
+    const { data, error } = await supabase.from('analisis_ia').select('calidad:candidatos_json->calidad_us').order('fecha', { ascending: false }).limit(1);
+    if (error) throw error;
+    const datos = ((data?.[0] as { calidad?: CalidadEeuu } | undefined)?.calidad ?? {}) as CalidadEeuu;
+    calidadCache = { at: Date.now(), datos };
+    return datos;
+  } catch (e) {
+    console.warn('Sin calidad de utilidades:', e instanceof Error ? e.message.slice(0, 120) : e);
+    return {};
+  }
+}
+
 // Combina los pilares en una acción. La regla de riesgo manda (no se compra lo que ya pesa demasiado).
 // El precio solo decide cuando el laboratorio de evidencia midió que esa señal anticipó retornos en el mercado
 // del activo (`evTecnica.decide`); si no, se informa, pero la acción sale de los fundamentales y del riesgo.
 function decidir(a: {
   diversificado: boolean; tipo: TipoActivo; peso: number; pesoEfectivo: number; distSma200: number | null; vol: number | null; pnl: number | null;
   tecnico: Pilar<VeredictoTecnico>; fundamental: Pilar<VeredictoFundamental>; riesgo: Pilar<VeredictoRiesgo>;
-  evTecnica: Evidencia | null; evEstirado: Evidencia | null;
+  evTecnica: Evidencia | null; evEstirado: Evidencia | null; evFundamentales: Evidencia[];
 }): Decision {
   const tMedido = a.tecnico.veredicto, f = a.fundamental.veredicto, r = a.riesgo.veredicto;
   const motivos: string[] = [];
   // El veredicto técnico que cuenta para decidir: sin evidencia en este mercado, como si fuera neutral
   const pesaTecnico = a.evTecnica?.decide ?? false;
   const t: VeredictoTecnico = tMedido === 'sin datos' || pesaTecnico ? tMedido : 'neutral';
-  const tecnicoSolido = pesaTecnico && a.evTecnica?.nivel === 'sólida';
-  const puntaje = (t === 'alcista' ? 1 : t === 'bajista' ? -1 : t === 'quiebre' ? -2 : 0) + (f === 'favorable' ? 1 : f === 'débil' ? -1 : 0);
+  let puntaje = (t === 'alcista' ? 1 : t === 'bajista' ? -1 : t === 'quiebre' ? -2 : 0) + (f === 'favorable' ? 1 : f === 'débil' ? -1 : 0);
   const estirado = a.distSma200 !== null && a.distSma200 > 0.25;
   const estiradoFrena = estirado && (a.evEstirado?.decide ?? false);
 
@@ -357,40 +375,39 @@ function decidir(a: {
     } else {
       motivos.push('Costo anual alto: para tus próximos aportes conviene un fondo equivalente más barato.');
     }
-  } else if (tMedido === 'quiebre' && !pesaTecnico) {
-    motivos.push('Rompió su stop de volatilidad, pero en 10 años eso no anticipó peores retornos en este mercado: no es razón para vender por sí solo. Revisa si cambió la razón por la que la compraste y no aumentes hasta que se estabilice.');
-  } else if (t === 'quiebre') {
-    if (f === 'favorable') {
-      motivos.push('Rompió su stop, pero sus fundamentales son buenos: revisa si hay una noticia que lo explique antes de vender; no aumentes por ahora.');
-    } else {
-      accion = 'REDUCIR';
-      conviccion = f === 'débil' && tecnicoSolido ? 'alta' : 'media';
-      motivos.push(`Rompió su stop de volatilidad${f === 'débil' ? ' y sus fundamentales son débiles' : ''}: proteger la ganancia o cortar la pérdida es lo prudente.`);
-    }
-  } else if (f === 'favorable' && t !== 'bajista' && !estiradoFrena) {
-    accion = 'AUMENTAR';
-    conviccion = t === 'alcista' && tecnicoSolido && r === 'holgado' ? 'alta' : 'media';
-    motivos.push(t === 'alcista'
-      ? 'Buenos fundamentales y una tendencia que en este mercado sí ha anticipado retornos: los dos pilares acompañan.'
-      : 'Buenos fundamentales, sin una señal de precio con evidencia en contra.');
-  } else if (t === 'alcista' && f === 'neutral' && !estiradoFrena) {
-    accion = 'AUMENTAR';
-    conviccion = 'baja';
-    motivos.push('Tendencia alcista, que en este mercado sí ha anticipado retornos, con fundamentales normales: se puede aumentar, con montos moderados.');
-  } else if (t === 'bajista' && f !== 'favorable') {
-    accion = 'REDUCIR';
-    conviccion = f === 'débil' && tecnicoSolido ? 'alta' : f === 'débil' || tecnicoSolido ? 'media' : 'baja';
-    motivos.push(`Tendencia bajista, que en este mercado ha anticipado retornos bajo el promedio,${f === 'débil' ? ' y fundamentales débiles' : ' sin fundamentales que la compensen'}: el precio y el negocio no acompañan.`);
-  } else if (t === 'bajista' && f === 'favorable') {
-    motivos.push('Buena empresa en una mala racha: mantener y esperar que la tendencia se dé vuelta antes de aumentar.');
-  } else if (estiradoFrena && (t === 'alcista' || f === 'favorable')) {
-    motivos.push(`Está ${pct(a.distSma200!)} sobre su media de 200 días, muy estirado: mejor esperar un retroceso para aumentar.`);
-  } else if (f === 'débil') {
-    motivos.push('Fundamentales débiles sin tendencia que los compense: no aumentes.');
-  } else if (tMedido !== 'neutral' && !pesaTecnico) {
-    motivos.push('Fundamentales normales, y su señal de precio no ha anticipado retornos en este mercado: mantener.');
   } else {
-    motivos.push('Sin señales claras en precio ni fundamentales: mantener.');
+    // Cada señal con evidencia en este mercado suma (o resta) 1 si es débil y 2 si es sólida; las demás se informan
+    const senales = [a.evTecnica, ...a.evFundamentales].filter((e): e is Evidencia => e !== null && e.decide);
+    const fuerza = (e: Evidencia) => (e.nivel === 'sólida' ? 2 : 1) * e.signo;
+    const total = senales.reduce((acc, e) => acc + fuerza(e), 0);
+    const aFavor = senales.filter(e => e.signo > 0).map(e => `${e.etiqueta.toLowerCase()} (${e.nivel})`);
+    const enContra = senales.filter(e => e.signo < 0).map(e => `${e.etiqueta.toLowerCase()} (${e.nivel})`);
+    puntaje = total;
+    if (!senales.length) {
+      motivos.push('Ninguna de sus señales ha anticipado retornos en 10 años en este mercado: no hay base con evidencia para aumentar ni para vender. Para aportes nuevos, un fondo diversificado tiene mejor respaldo.');
+    } else {
+      if (aFavor.length) motivos.push(`Con evidencia a favor: ${aFavor.join('; ')}.`);
+      if (enContra.length) motivos.push(`Con evidencia en contra: ${enContra.join('; ')}.`);
+    }
+    if (total >= 2) { accion = 'AUMENTAR'; conviccion = total >= 3 && r === 'holgado' ? 'alta' : 'media'; }
+    else if (total === 1) { accion = 'AUMENTAR'; conviccion = 'baja'; }
+    else if (total <= -2) { accion = 'REDUCIR'; conviccion = total <= -3 ? 'alta' : 'media'; }
+    else if (total === -1) motivos.push('La evidencia en contra es débil: no alcanza para vender, pero no aumentes.');
+
+    if (accion === 'AUMENTAR' && tMedido === 'quiebre') {
+      accion = 'MANTENER'; conviccion = 'media';
+      motivos.push('Rompió su stop de volatilidad: espera que se estabilice y revisa si hay una noticia que lo explique antes de aumentar.');
+    } else if (tMedido === 'quiebre' && !pesaTecnico) {
+      motivos.push('Rompió su stop de volatilidad, pero en 10 años eso no anticipó peores retornos en este mercado: no es razón para vender por sí solo; revisa si cambió la razón por la que la compraste.');
+    }
+    if (accion === 'AUMENTAR' && estiradoFrena) {
+      accion = 'MANTENER'; conviccion = 'media';
+      motivos.push(`Está ${pct(a.distSma200!)} sobre su media de 200 días, muy estirado: mejor esperar un retroceso para aumentar.`);
+    }
+    if (accion === 'AUMENTAR' && f === 'débil') {
+      conviccion = 'baja';
+      motivos.push('Sus fundamentales clásicos (PER, ROE, deuda, crecimiento) son débiles, aunque en 10 años ese veredicto no anticipó retornos: aumenta con montos pequeños.');
+    }
   }
   if (accion === 'AUMENTAR' && estirado && !estiradoFrena && !a.diversificado) {
     motivos.push(`Está ${pct(a.distSma200!)} sobre su media de 200 días; en 10 años las acciones así de estiradas no rindieron menos que su mercado, pero si compras, hazlo en partes.`);
@@ -427,7 +444,7 @@ export async function buildAdvisorReport(
   const fxDays = Math.max(3 * 365 + 10, oldest ? Math.min(15 * 365, Math.ceil((Date.now() - new Date(oldest).getTime()) / DAY_MS) + 10) : 0);
   const DIAS_HISTORIA = 3 * 365 + 10; // tres años: riesgo más estable que con uno solo
 
-  const [histories, fx, benchUS, benchCL, benchGlobal, quotes, rf, dolar, fund, mercado] = await Promise.all([
+  const [histories, fx, benchUS, benchCL, benchGlobal, quotes, rf, dolar, fund, mercado, calidad] = await Promise.all([
     Promise.all(tickers.map(t => dailyHistory(t, DIAS_HISTORIA))),
     dailyHistory(FX_TICKER, fxDays),
     dailyHistory(BENCH_US, DIAS_HISTORIA),
@@ -438,6 +455,7 @@ export async function buildAdvisorReport(
     dolarObservado(),
     fundamentales([...tickers, BENCH_CL, 'VOO']).catch(() => new Map<string, Fundamentales>()),
     contextoMercado().catch(() => null),
+    calidadEeuu(),
   ]);
   const usdClp = dolar ?? fx?.closes.at(-1) ?? null;
   if (!usdClp) throw new Error('No se pudo obtener el tipo de cambio del dólar.');
@@ -536,8 +554,18 @@ export async function buildAdvisorReport(
       motivos: [`Pesa ${pct(peso)} de tu patrimonio${pesoEfectivo > peso + 0.005 ? ` (${pct(pesoEfectivo)} contando lo que tienes dentro de tus fondos)` : ''}; máximo prudente ${pct(limite, 0)}${diversificado ? ' para un fondo diversificado' : ' para una sola empresa'}.`],
     };
     if (vol !== null) riesgo.motivos.push(`Volatilidad ${pct(vol, 0)} anual${beta !== null ? `, beta ${beta.toFixed(2)} vs. ${benchTicker === BENCH_CL ? 'IPSA' : 'S&P 500'}` : ''}.`);
-    const decision = decidir({ diversificado, tipo, peso, pesoEfectivo, distSma200, vol, pnl, tecnico, fundamental, riesgo, evTecnica, evEstirado });
-    const evid = diversificado ? [] : [evTecnica, evEstirado, ...evidRsi].filter((e): e is Evidencia => e !== null);
+    // Fundamentales con lo que midió el laboratorio: veredicto clásico, calidad de utilidades (SEC) y dividendo
+    const evFundamentales: Evidencia[] = [];
+    if (!diversificado && tipo === 'accion') {
+      if (fundamental.veredicto === 'favorable') evFundamentales.push(evidencia('fundamental_favorable', mercado, 1, 'Veredicto fundamental favorable'));
+      else if (fundamental.veredicto === 'débil') evFundamentales.push(evidencia('fundamental_debil', mercado, -1, 'Veredicto fundamental débil'));
+      const q = mercado === 'EE.UU.' ? calidad[p.ticker] : undefined;
+      if (q && q.p >= 0.8) evFundamentales.push(evidencia('calidad_alta', mercado, 1, `Utilidad respaldada por caja (20% superior de su sector)`));
+      else if (q && q.p <= 0.2) evFundamentales.push(evidencia('calidad_baja', mercado, -1, `Utilidad poco respaldada por caja (20% inferior de su sector)`));
+      if ((f?.payout ?? 0) > 1 || q?.pa) evFundamentales.push(evidencia('payout_alto', mercado, -1, 'Reparte en dividendos más que su utilidad'));
+    }
+    const decision = decidir({ diversificado, tipo, peso, pesoEfectivo, distSma200, vol, pnl, tecnico, fundamental, riesgo, evTecnica, evEstirado, evFundamentales });
+    const evid = diversificado ? [] : [evTecnica, ...evFundamentales, evEstirado, ...evidRsi].filter((e): e is Evidencia => e !== null);
 
     return {
       ticker: p.ticker, nombre, tipo, sector: f?.sector ?? (tipo === 'etf' ? f?.categoria : undefined),

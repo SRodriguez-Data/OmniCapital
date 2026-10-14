@@ -8,7 +8,9 @@ export type Mercado = 'EE.UU.' | 'Chile';
 export type Nivel = 'sólida' | 'débil' | 'sin evidencia' | 'en contra';
 export type ClaveRegla =
   | 'veredicto_alcista' | 'veredicto_bajista' | 'stop_roto' | 'estirado' | 'rsi30_alcista' | 'rsi30_bajista'
-  | 'rsi70' | 'momentum_positivo' | 'momentum_negativo' | 'tendencia_alcista' | 'tendencia_bajista';
+  | 'rsi70' | 'momentum_positivo' | 'momentum_negativo' | 'tendencia_alcista' | 'tendencia_bajista'
+  | 'calidad_alta' | 'calidad_baja' | 'payout_alto' | 'fundamental_favorable' | 'fundamental_debil';
+export type ClaveMetodo = 'calidad_eeuu' | 'momentum_chile';
 
 interface Medicion { exceso_promedio: number | null; t: number | null; acierto: number | null; mediana: number | null; casos: number; meses: number }
 type PorHorizonte = Partial<Record<'1m' | '3m' | '6m', Medicion>>;
@@ -17,6 +19,9 @@ interface Datos {
   base: Record<Mercado, Record<'1m' | '3m' | '6m', { acierto: number | null; mediana: number | null; casos: number }>>;
   reglas: Record<string, { nombre: string } & Partial<Record<Mercado, PorHorizonte>>>;
   top5: Partial<Record<Mercado, PorHorizonte & Record<string, unknown>>>;
+  metodos?: Partial<Record<ClaveMetodo, { nombre: string; mercado: Mercado; n: number } & Partial<Record<'1m' | '3m' | '6m', Medicion & {
+    meses_positivos: number; mitades?: Record<string, { desde: string; hasta: string; exceso_promedio: number; t: number }>;
+  }>>>>;
   muestra: Partial<Record<Mercado, { desde: string; hasta: string; fechas_evaluadas: number; acciones: number }>>;
   sesgos: string[];
 }
@@ -26,6 +31,8 @@ export interface Evidencia {
   regla: ClaveRegla;
   nivel: Nivel;
   decide: boolean; // la evidencia acompaña a la regla: puede pesar en la acción
+  signo: 1 | -1;   // lo que la regla supone: +1 rinde más que su mercado, -1 rinde menos
+  etiqueta: string;
   texto: string;
 }
 
@@ -46,8 +53,13 @@ export function evidencia(regla: ClaveRegla, mercado: Mercado, signo: 1 | -1, de
   const m3 = D.reglas[regla]?.[mercado]?.['3m'];
   const m6 = D.reglas[regla]?.[mercado]?.['6m'];
   const base = D.base[mercado]?.['3m']?.acierto;
+  const sin = (texto: string): Evidencia => ({ regla, nivel: 'sin evidencia', decide: false, signo, etiqueta: describe, texto });
+  // Medida en otro mercado pero no en este (fundamentales: solo hay historia gratuita de EE.UU.)
+  if (D.reglas[regla] && !D.reglas[regla][mercado]) {
+    return sin(`${describe}: no se pudo medir en ${DE_MERCADO[mercado]} (no hay estados financieros históricos gratuitos); no se usa para decidir.`);
+  }
   if (!m3 || m3.exceso_promedio === null || m3.t === null || m3.acierto === null || base == null || m3.casos < 30) {
-    return { regla, nivel: 'sin evidencia', decide: false, texto: `${describe}: en ${anioEvidencia()} hubo muy pocos casos en ${DE_MERCADO[mercado]} para medirla; no se usa para decidir.` };
+    return sin(`${describe}: en ${anioEvidencia()} hubo muy pocos casos en ${DE_MERCADO[mercado]} para medirla; no se usa para decidir.`);
   }
   const dir = Math.sign(m3.exceso_promedio);
   // El promedio, el plazo de 6 meses y la tasa de acierto deben apuntar al mismo lado: un promedio inflado por
@@ -63,7 +75,7 @@ export function evidencia(regla: ClaveRegla, mercado: Mercado, signo: 1 | -1, de
     'en contra': 'La evidencia va en contra de lo que supone la regla: no se usa para decidir.',
   }[nivel];
   return {
-    regla, nivel, decide: nivel === 'sólida' || nivel === 'débil',
+    regla, nivel, decide: nivel === 'sólida' || nivel === 'débil', signo, etiqueta: describe,
     texto: `${describe}: en ${anioEvidencia()}, las ${DE_MERCADO[mercado]} en esa situación rindieron ${signed(m3.exceso_promedio)} frente a su mercado en los 3 meses siguientes y le ganaron ${pct(m3.acierto, 0)} de las veces (una cualquiera: ${pct(base, 0)}; ${miles(m3.casos)} casos). ${cierre}`,
   };
 }
@@ -77,3 +89,18 @@ export function evidenciaTop5(mercado: Mercado): { exceso: number; mediana: numb
 }
 
 export const sesgosEvidencia = () => D.sesgos;
+
+/** Lo que midió el laboratorio sobre un método del Top: exceso a 3 meses, su fuerza y cada mitad de la muestra. */
+export function evidenciaMetodo(clave: ClaveMetodo) {
+  const m = D.metodos?.[clave];
+  const x = m?.['3m'];
+  const base = m ? D.base[m.mercado]?.['3m']?.acierto : null;
+  if (!m || !x || x.exceso_promedio === null || x.t === null || x.acierto === null || base == null) return null;
+  const fuerza = Math.abs(x.t);
+  const mitades = Object.values(x.mitades ?? {});
+  const nivel: Nivel = x.exceso_promedio <= 0 || fuerza < 1 ? 'sin evidencia' : fuerza >= 2 && mitades.every(v => v.exceso_promedio > 0) ? 'sólida' : 'débil';
+  return {
+    nombre: m.nombre, n: m.n, mercado: m.mercado, nivel, exceso: x.exceso_promedio, t: x.t, acierto: x.acierto, base,
+    mesesPositivos: x.meses_positivos, mitades, anios: anioEvidencia(),
+  };
+}
