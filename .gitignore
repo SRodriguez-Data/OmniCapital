@@ -21,4 +21,4 @@ cooldown_list.json
 
 # Notas de traspaso entre asistentes
 HANDOFF*.md
-evidencia.json
+/evidencia.json

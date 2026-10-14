@@ -1,0 +1,79 @@
+import datos from '@/data/evidencia.json';
+
+// Lo que midió el laboratorio de evidencia (evidencia.py en la raíz del repo): cuánto rindieron frente a su
+// mercado, en los 3 meses siguientes, las acciones en que se cumplía cada regla del asesor durante 10 años.
+// Una regla solo decide si su evidencia va en la dirección que la regla supone; si no, se muestra como dato.
+
+export type Mercado = 'EE.UU.' | 'Chile';
+export type Nivel = 'sólida' | 'débil' | 'sin evidencia' | 'en contra';
+export type ClaveRegla =
+  | 'veredicto_alcista' | 'veredicto_bajista' | 'stop_roto' | 'estirado' | 'rsi30_alcista' | 'rsi30_bajista'
+  | 'rsi70' | 'momentum_positivo' | 'momentum_negativo' | 'tendencia_alcista' | 'tendencia_bajista';
+
+interface Medicion { exceso_promedio: number | null; t: number | null; acierto: number | null; mediana: number | null; casos: number; meses: number }
+type PorHorizonte = Partial<Record<'1m' | '3m' | '6m', Medicion>>;
+interface Datos {
+  calculado: string;
+  base: Record<Mercado, Record<'1m' | '3m' | '6m', { acierto: number | null; mediana: number | null; casos: number }>>;
+  reglas: Record<string, { nombre: string } & Partial<Record<Mercado, PorHorizonte>>>;
+  top5: Partial<Record<Mercado, PorHorizonte & Record<string, unknown>>>;
+  muestra: Partial<Record<Mercado, { desde: string; hasta: string; fechas_evaluadas: number; acciones: number }>>;
+  sesgos: string[];
+}
+const D = datos as unknown as Datos;
+
+export interface Evidencia {
+  regla: ClaveRegla;
+  nivel: Nivel;
+  decide: boolean; // la evidencia acompaña a la regla: puede pesar en la acción
+  texto: string;
+}
+
+export const mercadoDe = (moneda: 'USD' | 'CLP'): Mercado => (moneda === 'CLP' ? 'Chile' : 'EE.UU.');
+const DE_MERCADO: Record<Mercado, string> = { 'EE.UU.': 'acciones de EE.UU.', Chile: 'acciones chilenas' };
+
+const pct = (x: number, d = 1) => `${(x * 100).toFixed(d)}%`;
+const signed = (x: number) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%`;
+const miles = (n: number) => n.toLocaleString('es-CL');
+
+export const anioEvidencia = () => {
+  const m = D.muestra['EE.UU.'] ?? D.muestra.Chile;
+  return m ? `${m.desde.slice(0, 4)}–${m.hasta.slice(0, 4)}` : '';
+};
+
+/** `signo`: +1 si la regla supone que esas acciones rinden más que su mercado, -1 si supone que rinden menos. */
+export function evidencia(regla: ClaveRegla, mercado: Mercado, signo: 1 | -1, describe: string): Evidencia {
+  const m3 = D.reglas[regla]?.[mercado]?.['3m'];
+  const m6 = D.reglas[regla]?.[mercado]?.['6m'];
+  const base = D.base[mercado]?.['3m']?.acierto;
+  if (!m3 || m3.exceso_promedio === null || m3.t === null || m3.acierto === null || base == null || m3.casos < 30) {
+    return { regla, nivel: 'sin evidencia', decide: false, texto: `${describe}: en ${anioEvidencia()} hubo muy pocos casos en ${DE_MERCADO[mercado]} para medirla; no se usa para decidir.` };
+  }
+  const dir = Math.sign(m3.exceso_promedio);
+  // El promedio, el plazo de 6 meses y la tasa de acierto deben apuntar al mismo lado: un promedio inflado por
+  // unos pocos rebotes enormes (con aciertos bajo lo normal) no cuenta como evidencia
+  const coherente = (m6?.exceso_promedio == null || Math.sign(m6.exceso_promedio) === dir) && Math.sign(m3.acierto - base) === dir;
+  const fuerza = Math.abs(m3.t);
+  const medida: Nivel = !coherente || fuerza < 1 ? 'sin evidencia' : fuerza >= 2 ? 'sólida' : 'débil';
+  const nivel: Nivel = medida !== 'sin evidencia' && dir !== signo ? 'en contra' : medida;
+  const cierre = {
+    'sólida': 'Evidencia sólida.',
+    'débil': 'Evidencia débil: pesa poco en la decisión.',
+    'sin evidencia': 'No anticipó nada de forma confiable: no se usa para decidir.',
+    'en contra': 'La evidencia va en contra de lo que supone la regla: no se usa para decidir.',
+  }[nivel];
+  return {
+    regla, nivel, decide: nivel === 'sólida' || nivel === 'débil',
+    texto: `${describe}: en ${anioEvidencia()}, las ${DE_MERCADO[mercado]} en esa situación rindieron ${signed(m3.exceso_promedio)} frente a su mercado en los 3 meses siguientes y le ganaron ${pct(m3.acierto, 0)} de las veces (una cualquiera: ${pct(base, 0)}; ${miles(m3.casos)} casos). ${cierre}`,
+  };
+}
+
+/** Historial del método del Top 5 del bot, para mostrarlo junto a sus ideas. */
+export function evidenciaTop5(mercado: Mercado): { exceso: number; mediana: number; acierto: number; base: number; casos: number; anios: string } | null {
+  const m = D.top5[mercado]?.['3m'] as Medicion | undefined;
+  const base = D.base[mercado]?.['3m']?.acierto;
+  if (!m || m.exceso_promedio === null || m.mediana === null || m.acierto === null || base == null) return null;
+  return { exceso: m.exceso_promedio, mediana: m.mediana, acierto: m.acierto, base, casos: m.casos, anios: anioEvidencia() };
+}
+
+export const sesgosEvidencia = () => D.sesgos;

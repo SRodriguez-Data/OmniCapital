@@ -109,6 +109,7 @@ function buildPrompt(r: AdvisorReport): { prompt: string; cifras: Map<string, nu
       `fundamental ${p.fundamental.veredicto} (${lineaFundamental(p)}): ${p.fundamental.motivos.join(' ')}`,
       `riesgo ${p.riesgo.veredicto}: ${p.riesgo.motivos.join(' ')}`,
       `motivos de la decisión: ${p.motivos.join(' ')}`,
+      `evidencia medida: ${p.evidencia.map(e => `${e.nivel}: ${e.texto}`).join(' ')}`,
     ].join(' | ');
     cifras.set(p.ticker, numerosDe(linea));
     return linea;

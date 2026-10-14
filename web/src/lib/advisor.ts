@@ -10,6 +10,7 @@ import {
 import { ETF_CONOCIDOS, FONDOS_CHILE, fundamentales, type Fundamentales, type TipoActivo } from './fundamentals';
 import { contextoMercado, type ContextoMercado } from './mercado';
 import { adecuacion, type Adecuacion, type PerfilInversionista } from './perfil';
+import { evidencia, mercadoDe, type Evidencia, type Mercado } from './evidencia';
 
 // Motor de recomendaciones: todas las cifras salen de datos reales (precios ajustados por dividendos,
 // fundamentales y consenso de analistas de Yahoo Finance) y las decisiones de reglas explícitas en cuatro
@@ -71,6 +72,7 @@ export interface AssetReport {
   conviccion: Conviccion;
   puntaje: number;
   motivos: string[]; // los que deciden la acción
+  evidencia: Evidencia[]; // lo que midió el laboratorio sobre las reglas que aplican a este activo
   conDatos: boolean;
   gemeloDe?: string; // activo casi idéntico de mayor peso donde conviene concentrar las compras
 }
@@ -205,10 +207,11 @@ interface DatosTecnicos {
 }
 
 // Tendencia con banda de ±3% sobre la media de 200 días (evita cambiar de opinión por ruido) y momentum 12-1,
-// ambos con precios ajustados por dividendos. El RSI solo sugiere el momento de entrada.
-function pilarTecnico(t: DatosTecnicos): Pilar<VeredictoTecnico> {
-  if (!t.conDatos) return { veredicto: 'sin datos', motivos: [t.sinDatosMotivo ?? 'No hay historial de precios suficiente para evaluar la tendencia.'] };
+// ambos con precios ajustados por dividendos. El RSI se describe junto con lo que midió el laboratorio.
+function pilarTecnico(t: DatosTecnicos, mercado: Mercado): { pilar: Pilar<VeredictoTecnico>; evid: Evidencia[] } {
+  if (!t.conDatos) return { pilar: { veredicto: 'sin datos', motivos: [t.sinDatosMotivo ?? 'No hay historial de precios suficiente para evaluar la tendencia.'] }, evid: [] };
   const motivos: string[] = [];
+  const evid: Evidencia[] = [];
   let votos = 0;
   if (t.distSma200 !== null) {
     if (t.distSma200 > 0.03) { votos++; motivos.push(`Cotiza ${pct(t.distSma200)} sobre su media de 200 días: tendencia de largo plazo alcista.`); }
@@ -220,13 +223,27 @@ function pilarTecnico(t: DatosTecnicos): Pilar<VeredictoTecnico> {
     else if (t.momentum < -0.05) votos--;
     motivos.push(`Momentum ${t.momentumMeses}-1 meses (con dividendos): ${signed(t.momentum)}.`);
   }
-  if (t.rsi !== null && t.rsi < 30) motivos.push(`RSI ${t.rsi.toFixed(0)}: caída fuerte de corto plazo${votos > 0 ? ' dentro de una tendencia alcista, suele ser buen momento para comprar' : '; conviene esperar que se estabilice'}.`);
-  else if (t.rsi !== null && t.rsi > 70) motivos.push(`RSI ${t.rsi.toFixed(0)}: sobrecomprado en el corto plazo; si compras, hazlo en partes.`);
+  if (t.rsi !== null && t.rsi < 30) {
+    motivos.push(`RSI ${t.rsi.toFixed(0)}: caída fuerte de corto plazo.`);
+    if (t.distSma200 !== null && t.distSma200 > 0.03) evid.push(evidencia('rsi30_alcista', mercado, 1, 'Comprar con RSI bajo 30 en tendencia alcista'));
+    else if (t.distSma200 !== null && t.distSma200 < -0.03) evid.push(evidencia('rsi30_bajista', mercado, 1, 'Comprar con RSI bajo 30 en tendencia bajista'));
+  } else if (t.rsi !== null && t.rsi > 70) {
+    motivos.push(`RSI ${t.rsi.toFixed(0)}: subió fuerte en el corto plazo.`);
+    evid.push(evidencia('rsi70', mercado, -1, 'RSI sobre 70 como aviso de una baja'));
+  }
   if (t.stopActivado && t.stop !== null) {
     motivos.push(`Cerró dos días seguidos bajo su stop de volatilidad (${fmtMoney(t.stop, t.moneda)}): cayó desde su máximo del último mes más de 2 desviaciones estándar mensuales.`);
-    return { veredicto: 'quiebre', motivos };
+    return { pilar: { veredicto: 'quiebre', motivos }, evid };
   }
-  return { veredicto: votos >= 1 ? 'alcista' : votos <= -1 ? 'bajista' : 'neutral', motivos };
+  return { pilar: { veredicto: votos >= 1 ? 'alcista' : votos <= -1 ? 'bajista' : 'neutral', motivos }, evid };
+}
+
+// Lo que midió el laboratorio sobre el veredicto técnico en el mercado del activo
+function evidenciaVeredicto(v: VeredictoTecnico, mercado: Mercado): Evidencia | null {
+  if (v === 'alcista') return evidencia('veredicto_alcista', mercado, 1, 'Tendencia y momentum a favor');
+  if (v === 'bajista') return evidencia('veredicto_bajista', mercado, -1, 'Tendencia y momentum en contra');
+  if (v === 'quiebre') return evidencia('stop_roto', mercado, -1, 'Romper el stop de volatilidad');
+  return null;
 }
 
 // Valoración frente a su mercado, rentabilidad, crecimiento, salud del dividendo y consenso de analistas.
@@ -306,66 +323,77 @@ function pilarFundamental(f: Fundamentales | null, tipo: TipoActivo, perMercado:
 interface Decision { accion: Accion; conviccion: Conviccion; puntaje: number; motivos: string[] }
 
 // Combina los pilares en una acción. La regla de riesgo manda (no se compra lo que ya pesa demasiado).
+// El precio solo decide cuando el laboratorio de evidencia midió que esa señal anticipó retornos en el mercado
+// del activo (`evTecnica.decide`); si no, se informa, pero la acción sale de los fundamentales y del riesgo.
 function decidir(a: {
   diversificado: boolean; tipo: TipoActivo; peso: number; pesoEfectivo: number; distSma200: number | null; vol: number | null; pnl: number | null;
   tecnico: Pilar<VeredictoTecnico>; fundamental: Pilar<VeredictoFundamental>; riesgo: Pilar<VeredictoRiesgo>;
+  evTecnica: Evidencia | null; evEstirado: Evidencia | null;
 }): Decision {
-  const t = a.tecnico.veredicto, f = a.fundamental.veredicto, r = a.riesgo.veredicto;
+  const tMedido = a.tecnico.veredicto, f = a.fundamental.veredicto, r = a.riesgo.veredicto;
   const motivos: string[] = [];
+  // El veredicto técnico que cuenta para decidir: sin evidencia en este mercado, como si fuera neutral
+  const pesaTecnico = a.evTecnica?.decide ?? false;
+  const t: VeredictoTecnico = tMedido === 'sin datos' || pesaTecnico ? tMedido : 'neutral';
+  const tecnicoSolido = pesaTecnico && a.evTecnica?.nivel === 'sólida';
   const puntaje = (t === 'alcista' ? 1 : t === 'bajista' ? -1 : t === 'quiebre' ? -2 : 0) + (f === 'favorable' ? 1 : f === 'débil' ? -1 : 0);
   const estirado = a.distSma200 !== null && a.distSma200 > 0.25;
+  const estiradoFrena = estirado && (a.evEstirado?.decide ?? false);
 
-  if (t === 'sin datos') return { accion: 'MANTENER', conviccion: 'baja', puntaje: 0, motivos: ['Sin precios confiables al día: no se recomienda comprar ni vender hasta tener datos.'] };
+  if (tMedido === 'sin datos') return { accion: 'MANTENER', conviccion: 'baja', puntaje: 0, motivos: ['Sin precios confiables al día: no se recomienda comprar ni vender hasta tener datos.'] };
   if (r === 'excedido') {
     return { accion: 'REDUCIR', conviccion: 'alta', puntaje, motivos: [`Pesa ${pct(a.pesoEfectivo)} de tu patrimonio${a.pesoEfectivo > a.peso + 0.005 ? ' contando lo que tienes dentro de tus fondos' : ''}, sobre el máximo prudente de ${pct(limiteDe(a), 0)}: conviene rebalancear.`] };
   }
 
   let accion: Accion = 'MANTENER';
   let conviccion: Conviccion = 'media';
-  if (t === 'quiebre') {
-    if (f === 'favorable' && !a.diversificado) {
-      motivos.push('Rompió su stop, pero sus fundamentales son buenos: revisa si hay una noticia que lo explique antes de vender; no aumentes por ahora.');
-    } else if (a.diversificado) {
-      motivos.push('Rompió su stop, pero es un fondo diversificado: una caída del mercado no es razón para vender; no aumentes por ahora.');
-    } else {
-      accion = 'REDUCIR';
-      conviccion = f === 'débil' ? 'alta' : 'media';
-      motivos.push(`Rompió su stop de volatilidad${f === 'débil' ? ' y sus fundamentales son débiles' : ''}: proteger la ganancia o cortar la pérdida es lo prudente.`);
-    }
-  } else if (a.diversificado) {
-    if (t === 'alcista' && f !== 'débil' && !estirado) {
+  if (a.diversificado) {
+    // En un fondo diversificado decide su costo, no el momento: no se midió que esperar mejore el resultado
+    if (f !== 'débil') {
       accion = 'AUMENTAR';
       conviccion = r === 'holgado' && f === 'favorable' ? 'alta' : 'media';
-      motivos.push(`Fondo diversificado en tendencia alcista${f === 'favorable' ? ' y de bajo costo' : ''}: buen lugar para tus próximos aportes.`);
-    } else if (t === 'bajista') {
-      motivos.push('Fondo diversificado en una mala racha: no es motivo para vender; espera que la tendencia mejore para aumentar.');
-    } else if (estirado) {
-      motivos.push(`Está ${pct(a.distSma200!)} sobre su media de 200 días, muy estirado: mejor aportar de a poco o esperar un retroceso.`);
+      motivos.push(`Fondo diversificado${f === 'favorable' ? ' y de bajo costo' : ''}: buen lugar para tus próximos aportes. Su tendencia no se usa para decidir: no hay evidencia de que esperar un mejor momento mejore el resultado, y aportar con regularidad evita depender de él.`);
+      if (tMedido === 'bajista' || tMedido === 'quiebre') motivos.push('Viene cayendo: para un aporte periódico, eso significa comprar más barato.');
     } else {
-      motivos.push('Fondo diversificado sin señal clara: mantener.');
+      motivos.push('Costo anual alto: para tus próximos aportes conviene un fondo equivalente más barato.');
     }
-  } else {
-    if (f === 'favorable' && t !== 'bajista' && !estirado) {
-      accion = 'AUMENTAR';
-      conviccion = t === 'alcista' && r === 'holgado' ? 'alta' : 'media';
-      motivos.push(`Buenos fundamentales${t === 'alcista' ? ' y tendencia alcista' : ' y sin tendencia en contra'}: los dos pilares acompañan.`);
-    } else if (t === 'alcista' && f === 'neutral' && !estirado) {
-      accion = 'AUMENTAR';
-      conviccion = 'baja';
-      motivos.push('Tendencia alcista con fundamentales normales: se puede aumentar, con montos moderados.');
-    } else if (t === 'bajista' && (f === 'débil' || f === 'sin datos' || f === 'neutral')) {
+  } else if (tMedido === 'quiebre' && !pesaTecnico) {
+    motivos.push('Rompió su stop de volatilidad, pero en 10 años eso no anticipó peores retornos en este mercado: no es razón para vender por sí solo. Revisa si cambió la razón por la que la compraste y no aumentes hasta que se estabilice.');
+  } else if (t === 'quiebre') {
+    if (f === 'favorable') {
+      motivos.push('Rompió su stop, pero sus fundamentales son buenos: revisa si hay una noticia que lo explique antes de vender; no aumentes por ahora.');
+    } else {
       accion = 'REDUCIR';
-      conviccion = f === 'débil' ? 'alta' : 'media';
-      motivos.push(`Tendencia bajista${f === 'débil' ? ' y fundamentales débiles' : ' sin fundamentales que la compensen'}: el precio y el negocio no acompañan.`);
-    } else if (t === 'bajista' && f === 'favorable') {
-      motivos.push('Buena empresa en una mala racha: mantener y esperar que la tendencia se dé vuelta antes de aumentar.');
-    } else if (estirado && (t === 'alcista' || f === 'favorable')) {
-      motivos.push(`Está ${pct(a.distSma200!)} sobre su media de 200 días, muy estirado: mejor esperar un retroceso para aumentar.`);
-    } else if (f === 'débil') {
-      motivos.push('Fundamentales débiles sin tendencia que los compense: no aumentes.');
-    } else {
-      motivos.push('Sin señales claras en precio ni fundamentales: mantener.');
+      conviccion = f === 'débil' && tecnicoSolido ? 'alta' : 'media';
+      motivos.push(`Rompió su stop de volatilidad${f === 'débil' ? ' y sus fundamentales son débiles' : ''}: proteger la ganancia o cortar la pérdida es lo prudente.`);
     }
+  } else if (f === 'favorable' && t !== 'bajista' && !estiradoFrena) {
+    accion = 'AUMENTAR';
+    conviccion = t === 'alcista' && tecnicoSolido && r === 'holgado' ? 'alta' : 'media';
+    motivos.push(t === 'alcista'
+      ? 'Buenos fundamentales y una tendencia que en este mercado sí ha anticipado retornos: los dos pilares acompañan.'
+      : 'Buenos fundamentales, sin una señal de precio con evidencia en contra.');
+  } else if (t === 'alcista' && f === 'neutral' && !estiradoFrena) {
+    accion = 'AUMENTAR';
+    conviccion = 'baja';
+    motivos.push('Tendencia alcista, que en este mercado sí ha anticipado retornos, con fundamentales normales: se puede aumentar, con montos moderados.');
+  } else if (t === 'bajista' && f !== 'favorable') {
+    accion = 'REDUCIR';
+    conviccion = f === 'débil' && tecnicoSolido ? 'alta' : f === 'débil' || tecnicoSolido ? 'media' : 'baja';
+    motivos.push(`Tendencia bajista, que en este mercado ha anticipado retornos bajo el promedio,${f === 'débil' ? ' y fundamentales débiles' : ' sin fundamentales que la compensen'}: el precio y el negocio no acompañan.`);
+  } else if (t === 'bajista' && f === 'favorable') {
+    motivos.push('Buena empresa en una mala racha: mantener y esperar que la tendencia se dé vuelta antes de aumentar.');
+  } else if (estiradoFrena && (t === 'alcista' || f === 'favorable')) {
+    motivos.push(`Está ${pct(a.distSma200!)} sobre su media de 200 días, muy estirado: mejor esperar un retroceso para aumentar.`);
+  } else if (f === 'débil') {
+    motivos.push('Fundamentales débiles sin tendencia que los compense: no aumentes.');
+  } else if (tMedido !== 'neutral' && !pesaTecnico) {
+    motivos.push('Fundamentales normales, y su señal de precio no ha anticipado retornos en este mercado: mantener.');
+  } else {
+    motivos.push('Sin señales claras en precio ni fundamentales: mantener.');
+  }
+  if (accion === 'AUMENTAR' && estirado && !estiradoFrena && !a.diversificado) {
+    motivos.push(`Está ${pct(a.distSma200!)} sobre su media de 200 días; en 10 años las acciones así de estiradas no rindieron menos que su mercado, pero si compras, hazlo en partes.`);
   }
 
   if (accion === 'AUMENTAR' && r === 'cerca del límite') {
@@ -496,7 +524,11 @@ export async function buildAdvisorReport(
     const vol = annualVol(returns(year));
     const pnl = costoPromedio > 0 ? precio / costoPromedio - 1 : null;
 
-    const tecnico = pilarTecnico({ conDatos, sinDatosMotivo, distSma200, momentum: mom?.valor ?? null, momentumMeses: mom?.meses ?? null, rsi, stop: stopCalc?.stop ?? null, stopActivado, moneda: p.moneda });
+    const mercado = mercadoDe(p.moneda);
+    const { pilar: tecnico, evid: evidRsi } = pilarTecnico({ conDatos, sinDatosMotivo, distSma200, momentum: mom?.valor ?? null, momentumMeses: mom?.meses ?? null, rsi, stop: stopCalc?.stop ?? null, stopActivado, moneda: p.moneda }, mercado);
+    // El laboratorio mide acciones: en un fondo diversificado el momento no decide
+    const evTecnica = diversificado ? null : evidenciaVeredicto(tecnico.veredicto, mercado);
+    const evEstirado = !diversificado && distSma200 !== null && distSma200 > 0.25 ? evidencia('estirado', mercado, -1, 'Comprar más de 25% sobre su media de 200 días') : null;
     const fundamental = pilarFundamental(f, tipo, perMercado[p.moneda], p.moneda);
     const limite = diversificado ? LIMITE_FONDO : LIMITE_ACCION;
     const riesgo: Pilar<VeredictoRiesgo> = {
@@ -504,7 +536,8 @@ export async function buildAdvisorReport(
       motivos: [`Pesa ${pct(peso)} de tu patrimonio${pesoEfectivo > peso + 0.005 ? ` (${pct(pesoEfectivo)} contando lo que tienes dentro de tus fondos)` : ''}; máximo prudente ${pct(limite, 0)}${diversificado ? ' para un fondo diversificado' : ' para una sola empresa'}.`],
     };
     if (vol !== null) riesgo.motivos.push(`Volatilidad ${pct(vol, 0)} anual${beta !== null ? `, beta ${beta.toFixed(2)} vs. ${benchTicker === BENCH_CL ? 'IPSA' : 'S&P 500'}` : ''}.`);
-    const decision = decidir({ diversificado, tipo, peso, pesoEfectivo, distSma200, vol, pnl, tecnico, fundamental, riesgo });
+    const decision = decidir({ diversificado, tipo, peso, pesoEfectivo, distSma200, vol, pnl, tecnico, fundamental, riesgo, evTecnica, evEstirado });
+    const evid = diversificado ? [] : [evTecnica, evEstirado, ...evidRsi].filter((e): e is Evidencia => e !== null);
 
     return {
       ticker: p.ticker, nombre, tipo, sector: f?.sector ?? (tipo === 'etf' ? f?.categoria : undefined),
@@ -516,7 +549,7 @@ export async function buildAdvisorReport(
       rsi, sma200, distSma200,
       stop: stopCalc?.stop ?? null, stopDist: stopCalc ? stopCalc.stop / precio - 1 : null, stopActivado,
       diversificado, aporteRiesgo: null, fundamentales: f,
-      tecnico, fundamental, riesgo, ...decision, conDatos,
+      tecnico, fundamental, riesgo, ...decision, evidencia: evid, conDatos,
     };
   };
   const posiciones = base.map(b => assess(b.p, b.h, b.q, b.precio, b.valorCLP));

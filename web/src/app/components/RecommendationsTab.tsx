@@ -54,10 +54,19 @@ interface Posicion {
   accion: Accion;
   conviccion: 'alta' | 'media' | 'baja';
   motivos: string[];
+  evidencia?: { regla: string; nivel: NivelEvidencia; decide: boolean; texto: string }[];
   comentarioIa: string;
 }
 
 interface Hallazgo { nivel: 'alerta' | 'atencion' | 'ok'; titulo: string; detalle: string }
+
+type NivelEvidencia = 'sólida' | 'débil' | 'sin evidencia' | 'en contra';
+const EVIDENCIA_ESTILO: Record<NivelEvidencia, string> = {
+  'sólida': 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+  'débil': 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300',
+  'sin evidencia': 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300',
+  'en contra': 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
+};
 
 interface Informe {
   generado: string;
@@ -657,6 +666,20 @@ export default function RecommendationsTab() {
                 {p.motivos.map((m, i) => <li key={i} className="flex gap-1.5"><span className="text-zinc-400">›</span>{m}</li>)}
               </ul>
 
+              {(p.evidencia?.length ?? 0) > 0 && (
+                <div className="mt-3">
+                  <p className="text-[10px] font-mono text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Qué dice la evidencia (10 años de datos)</p>
+                  <ul className="mt-1 space-y-1.5 text-xs text-zinc-700 dark:text-zinc-300 leading-snug">
+                    {p.evidencia!.map(e => (
+                      <li key={e.regla} className="flex gap-2 items-start">
+                        <span className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded ${EVIDENCIA_ESTILO[e.nivel]}`}>{e.nivel}</span>
+                        <span>{e.texto}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {p.comentarioIa && (
                 <p className="text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed mt-3 border-l-2 border-blue-400/60 pl-3">
                   <span className="text-[10px] font-mono uppercase tracking-wider text-blue-600 dark:text-blue-400 mr-1.5">Comentario IA</span>{p.comentarioIa}
@@ -704,8 +727,9 @@ export default function RecommendationsTab() {
 
       <p className="text-[11px] text-zinc-500 dark:text-zinc-500 leading-relaxed">
         Cómo se calcula: {r.ventanaAnios} años de cierres diarios ajustados por dividendos (base del minero para Chile, Yahoo Finance para EE.UU.), solo con datos al día.
-        Técnico: precio contra su media de 200 días con una banda de ±3% y momentum 12-1; el RSI solo sugiere el momento de entrada; stop = máximo del último mes menos 2 desviaciones
-        estándar mensuales, confirmado con dos cierres. Fundamental: PER frente a su mercado, ROE, crecimiento de utilidades, salud del dividendo y consenso de analistas (Yahoo Finance);
+        Técnico: precio contra su media de 200 días con una banda de ±3% y momentum 12-1; stop = máximo del último mes menos 2 desviaciones
+        estándar mensuales, confirmado con dos cierres. Cada regla de precio se midió en 10 años de acciones de EE.UU. y Chile frente a su mercado: solo decide en el mercado
+        donde anticipó retornos; en fondos diversificados el momento no decide. Fundamental: PER frente a su mercado, ROE, crecimiento de utilidades, salud del dividendo y consenso de analistas (Yahoo Finance);
         en ETFs, costo y valoración de lo que tienen. Riesgo: peso contando lo que tienes dentro de tus fondos (máximo 20% por empresa, 40% por fondo y 35% por sector), aporte al riesgo con
         covarianza de Newey-West encogida (Ledoit-Wolf), activos que se mueven casi igual, y beta de Dimson. Mercado: tendencia del S&P 500, del IPSA y de las acciones globales, y el VIX.
         Noticias: titulares de Yahoo Finance y Google News de los últimos 30 días; no cambian las decisiones. El ETF del IPSA en Yahoo no incluye sus repartos de dividendos.

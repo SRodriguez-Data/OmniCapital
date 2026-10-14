@@ -84,10 +84,22 @@ def senales(p: pd.DataFrame) -> dict[str, pd.DataFrame]:
     ema200 = p.ewm(span=200, adjust=False, min_periods=200).mean()
     rsi = rsi_wilder(p)
     sma20, std20 = p.rolling(20).mean(), p.rolling(20).std()
+    # Stop de volatilidad del asesor (lib/quant.ts volatilityStop): máximo de 22 cierres menos 2 desviaciones
+    # mensuales (entre 5% y 35%), roto con dos cierres seguidos bajo él
+    caida = (2 * ret.rolling(126).std() * np.sqrt(21)).clip(0.05, 0.35)
+    stop = p.rolling(22).max() * (1 - caida)
+    tendencia = p / sma200 - 1
+    momentum = p.shift(21) / p.shift(252) - 1
+    # Veredicto técnico del asesor (lib/advisor.ts pilarTecnico): un voto por tendencia y uno por momentum
+    votos = ((tendencia > 0.03).astype(int) - (tendencia < -0.03).astype(int)
+             + (momentum > 0.05).astype(int) - (momentum < -0.05).astype(int)).where(tendencia.notna() & momentum.notna())
+    stop_roto = (p < stop) & (p.shift(1) < stop)
     return {
         "precio": p,
-        "momentum_12_1": p.shift(21) / p.shift(252) - 1,
-        "tendencia_sma200": p / sma200 - 1,
+        "momentum_12_1": momentum,
+        "tendencia_sma200": tendencia,
+        "votos_tecnicos": votos,
+        "stop_roto": stop_roto,
         "dist_ema200": p / ema200 - 1,
         "rsi14": rsi,
         "retorno_1m": p / p.shift(21) - 1,
@@ -115,6 +127,13 @@ REGLAS = {
     "tendencia_alcista": ("Más de 3% sobre su media de 200 días", lambda s: s["tendencia_sma200"] > 0.03),
     "tendencia_bajista": ("Más de 3% bajo su media de 200 días", lambda s: s["tendencia_sma200"] < -0.03),
     "momentum_positivo": ("Momentum 12-1 mayor a 5%", lambda s: s["momentum_12_1"] > 0.05),
+    "momentum_negativo": ("Momentum 12-1 menor a -5%", lambda s: s["momentum_12_1"] < -0.05),
+    "veredicto_alcista": ("Veredicto técnico del asesor: alcista",
+                          lambda s: (s["votos_tecnicos"] >= 1) & ~s["stop_roto"]),
+    "veredicto_bajista": ("Veredicto técnico del asesor: bajista",
+                          lambda s: (s["votos_tecnicos"] <= -1) & ~s["stop_roto"]),
+    "stop_roto": ("Dos cierres seguidos bajo el stop de volatilidad", lambda s: s["stop_roto"]),
+    "rsi70": ("RSI sobre 70 (sobrecomprada)", lambda s: s["rsi14"] > 70),
     "rsi30_alcista": ("RSI bajo 30 en tendencia alcista", lambda s: (s["rsi14"] < 30) & (s["tendencia_sma200"] > 0.03)),
     "rsi30_bajista": ("RSI bajo 30 en tendencia bajista", lambda s: (s["rsi14"] < 30) & (s["tendencia_sma200"] < -0.03)),
     "estirado": ("Más de 25% sobre su media de 200 días", lambda s: s["tendencia_sma200"] > 0.25),
@@ -155,7 +174,7 @@ def calendario(precios: pd.DataFrame) -> pd.DataFrame:
 def evaluar(crudos: pd.DataFrame) -> dict:
     mercados = {"EE.UU.": [t for t in crudos.columns if not t.endswith(".SN")],
                 "Chile": [t for t in crudos.columns if t.endswith(".SN")]}
-    salida = {"factores": {}, "reglas": {}, "top5": {}, "muestra": {}}
+    salida = {"base": {}, "factores": {}, "reglas": {}, "top5": {}, "muestra": {}}
 
     for mercado, cols in mercados.items():
         precios = calendario(crudos[cols])
@@ -168,6 +187,14 @@ def evaluar(crudos: pd.DataFrame) -> dict:
             futuro_ok = valido & (~s["congelado"][cols].shift(-n).fillna(True).astype(bool))
             f = fwd[h][cols].where(futuro_ok)
             exceso[h] = f.sub(f.mean(axis=1), axis=0)
+
+        # Lo normal: una acción cualquiera supera al promedio de su mercado menos de la mitad de las veces, porque
+        # unas pocas que suben mucho tiran el promedio hacia arriba. Cada regla se compara con esta base, no con 50%
+        salida["base"][mercado] = {}
+        for h in HORIZONTES:
+            todas = exceso[h].loc[fechas].stack().dropna()
+            salida["base"][mercado][h] = {"acierto": r((todas > 0).mean(), 3), "mediana": r(todas.median()),
+                                          "casos": int(len(todas))}
 
         for clave, (nombre, fn) in FACTORES.items():
             x = fn(s)[cols].where(valido)
