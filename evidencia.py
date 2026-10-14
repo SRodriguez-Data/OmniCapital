@@ -10,12 +10,14 @@ ese día (nada del futuro) y se compara con su retorno a 1, 3 y 6 meses, descont
 (EE.UU. o Chile) en el mismo período. Precios ajustados por dividendos y splits.
 
 Sesgos que no se pueden quitar con datos gratis, y que el informe declara:
-- Supervivencia: el universo es la lista de HOY. Las empresas que quebraron o salieron del índice no están, lo que
-  favorece a las señales que compran caídas (las que siguieron cayendo y salieron no cuentan).
-- Fundamentales: Yahoo solo entrega los actuales, no los de cada fecha pasada; aquí solo se miden señales de
-  precio. Valor y calidad se apoyan en la evidencia académica publicada.
+- Supervivencia: en EE.UU. cada fecha usa solo las empresas del S&P 500 de hoy que ya estaban en el índice ese día
+  (fecha de ingreso de Wikipedia): así no cuentan las que entraron después de subir mucho. Las que salieron del
+  índice siguen sin estar (la mayoría por caer), lo que todavía favorece a las señales que compran caídas. En Chile
+  el universo es el IPSA de hoy.
+- Fundamentales: solo EE.UU., con los estados financieros de la SEC tal como se conocían en cada fecha
+  (fundamentales_sec.py). Para Chile no hay una fuente histórica gratuita: ahí solo se miden señales de precio.
 
-Uso: python evidencia.py [--cache archivo.pkl] [--salida archivo.json]
+Uso: python evidencia.py [--cache archivo.pkl] [--cache-sec carpeta] [--salida archivo.json]
 """
 import argparse
 import json
@@ -27,7 +29,12 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 from dotenv import load_dotenv
+from io import StringIO
+
+import requests
 from scipy.stats import spearmanr
+
+import fundamentales_sec
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -143,6 +150,153 @@ REGLAS = {
 }
 
 
+LIMITE_CALIDAD = 0.5
+
+
+def rango_en_sector(x: pd.DataFrame, sector_de: dict[str, str]) -> pd.DataFrame:
+    """Percentil de cada acción frente a las de su mismo sector, cada día (1 = la mejor del sector)."""
+    salida = pd.DataFrame(index=x.index, columns=x.columns, dtype=float)
+    for sector in {sector_de.get(c) for c in x.columns}:
+        cs = [c for c in x.columns if sector_de.get(c) == sector]
+        salida[cs] = x[cs].rank(axis=1, pct=True)
+    return salida
+
+
+def calidad_utilidades(F: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Utilidad respaldada por caja: (flujo operacional - pago en acciones - utilidad) / activos. Alto = la
+    utilidad viene con caja de verdad (Sloan, 1996); el pago en acciones se descuenta porque infla el flujo de
+    caja sin ser caja libre para el accionista."""
+    caja = F["flujo_operacional"] - F["pago_en_acciones"].fillna(0)
+    calidad = ((caja - F["utilidad"]) / F["activos"]).where(F["activos"] > 0)
+    # Una diferencia mayor a la mitad de los activos es casi siempre una cifra mal escalada en la SEC
+    return calidad.where(calidad.abs() <= LIMITE_CALIDAD)
+
+
+def senales_fundamentales(F: dict[str, pd.DataFrame], financieras: set[str],
+                          sector_de: dict[str, str] | None = None) -> dict[str, pd.DataFrame]:
+    """Las razones que usa el asesor (lib/advisor.ts pilarFundamental) con las cifras vigentes cada día."""
+    ni, eq, mc, act = F["utilidad"], F["patrimonio"], F["valor_mercado"], F["activos"]
+    bruto = F["margen_bruto"].fillna(F["ventas"] - F["costo_ventas"])
+    pe = (mc / ni).where((ni > 0) & (mc > 0))
+    roe = (ni / eq).where(eq > 0)
+    crec = (ni / F["utilidad_previa"] - 1).where(F["utilidad_previa"] > 0)
+    payout = (F["dividendos"] / ni).where(ni > 0)
+    es_financiera = pd.DataFrame(False, index=ni.index, columns=ni.columns)
+    es_financiera[sorted(financieras & set(ni.columns))] = True
+    # En bancos y aseguradoras la deuda es parte del negocio: el asesor no les aplica el tope de deuda
+    deuda_pat = (F["deuda"] / eq).where((eq > 0) & ~es_financiera)
+    pe_rel = pe.div(pe.median(axis=1), axis=0)
+
+    per_barato, per_caro = pe_rel < 0.8, (pe_rel > 1.6) & ~(crec >= 0.2)
+    roe_alto, roe_bajo = roe >= 0.15, roe < 0.07
+    deuda_alta = deuda_pat > 2
+    creciendo, cayendo = crec >= 0.10, crec <= -0.15
+    payout_alto = payout > 1
+    b = lambda x: x.astype(int)
+    puntos = (b(per_barato) - b(per_caro) + b(roe_alto) - b(roe_bajo) - b(deuda_alta)
+              + b(creciendo) - b(cayendo) - b(payout_alto))
+    datos = b(pe.notna()) + b(roe.notna()) + b(crec.notna())
+    calidad = calidad_utilidades(F).where(~es_financiera)
+    return {
+        "calidad": calidad,
+        "calidad_sector": rango_en_sector(calidad, sector_de or {}),
+        "ep": (ni / mc).where(mc > 0), "bp": (eq / mc).where(mc > 0), "roe": roe,
+        "rentabilidad_bruta": (bruto / act).where(act > 0),
+        "acumulaciones": ((ni - F["flujo_operacional"]) / act).where(act > 0),
+        "crec_activos": (act / F["activos_previos"] - 1).where(F["activos_previos"] > 0),
+        "deuda_patrimonio": deuda_pat, "crec_utilidad": crec, "payout": payout,
+        "per_barato": per_barato, "per_caro": per_caro, "roe_alto": roe_alto, "roe_bajo": roe_bajo,
+        "deuda_alta": deuda_alta, "utilidad_creciendo": creciendo, "utilidad_cayendo": cayendo,
+        "payout_alto": payout_alto,
+        "fundamental_favorable": (puntos >= 2) & (datos >= 2), "fundamental_debil": (puntos <= -2) & (datos >= 2),
+    }
+
+
+FACTORES_FUND = {
+    "valor_ep": ("Utilidad sobre precio (valor)", lambda s: s["ep"]),
+    "valor_bp": ("Valor libro sobre precio (valor)", lambda s: s["bp"]),
+    "rentabilidad_roe": ("ROE (rentabilidad)", lambda s: s["roe"]),
+    "rentabilidad_bruta": ("Margen bruto sobre activos (calidad)", lambda s: s["rentabilidad_bruta"]),
+    "acumulaciones_bajas": ("Utilidad respaldada por caja (calidad)", lambda s: -s["acumulaciones"]),
+    "calidad_ajustada": ("Utilidad respaldada por caja, sin pago en acciones", lambda s: s["calidad"]),
+    "calidad_en_sector": ("Utilidad respaldada por caja frente a su sector", lambda s: s["calidad_sector"]),
+    "inversion_baja": ("Crecimiento bajo de los activos", lambda s: -s["crec_activos"]),
+    "deuda_baja": ("Deuda baja frente al patrimonio", lambda s: -s["deuda_patrimonio"]),
+    "crecimiento_utilidad": ("Crecimiento de la utilidad", lambda s: s["crec_utilidad"]),
+}
+REGLAS_FUND = {
+    "per_barato": ("PER bajo 0,8 veces el del mercado", lambda s: s["per_barato"]),
+    "per_caro": ("PER sobre 1,6 veces el del mercado sin crecimiento fuerte", lambda s: s["per_caro"]),
+    "roe_alto": ("ROE de 15% o más", lambda s: s["roe_alto"]),
+    "roe_bajo": ("ROE bajo 7%", lambda s: s["roe_bajo"]),
+    "deuda_alta": ("Deuda mayor a 2 veces el patrimonio", lambda s: s["deuda_alta"]),
+    "utilidad_creciendo": ("Utilidad creciendo 10% o más", lambda s: s["utilidad_creciendo"]),
+    "utilidad_cayendo": ("Utilidad cayendo 15% o más", lambda s: s["utilidad_cayendo"]),
+    "payout_alto": ("Reparte en dividendos más que su utilidad", lambda s: s["payout_alto"]),
+    "calidad_alta": ("Utilidad respaldada por caja: 20% superior de su sector", lambda s: s["calidad_sector"] >= 0.8),
+    "calidad_baja": ("Utilidad respaldada por caja: 20% inferior de su sector", lambda s: s["calidad_sector"] <= 0.2),
+    "fundamental_favorable": ("Veredicto fundamental del asesor: favorable", lambda s: s["fundamental_favorable"]),
+    "fundamental_debil": ("Veredicto fundamental del asesor: débil", lambda s: s["fundamental_debil"]),
+}
+
+
+def tabla_sp500() -> pd.DataFrame | None:
+    """Miembros actuales del S&P 500 con su sector GICS y su fecha de ingreso (Wikipedia)."""
+    try:
+        r = requests.get("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+                         headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}, timeout=30)
+        df = pd.read_html(StringIO(r.text))[0]
+        df["ticker"] = df["Symbol"].str.replace(".", "-")
+        df["ingreso"] = pd.to_datetime(df["Date added"].astype(str).str[:10], errors="coerce")
+        return df
+    except Exception as e:
+        logging.warning(f"Sin la lista del S&P 500: {str(e)[:120]}")
+        return None
+
+
+# Los métodos que usa el Top (quantum_trader_serverless.py): cada mes se eligen N acciones y se mide su exceso
+METODOS = {
+    "calidad_eeuu": {
+        "nombre": "EE.UU.: utilidad respaldada por caja, la mejor de cada sector",
+        "mercado": "EE.UU.", "n": 20,
+        # Percentil dentro del sector (sin bancos ni aseguradoras), sin las que reparten más que su utilidad
+        "puntaje": lambda s: s["calidad_sector"].where(~s["payout_alto"]),
+    },
+    "momentum_chile": {
+        "nombre": "Chile: las de mayor alza de los últimos 12 meses (sin el último mes)",
+        "mercado": "Chile", "n": 5,
+        "puntaje": lambda s: s["momentum_12_1"],
+    },
+}
+CORTE_MITADES = pd.Timestamp("2021-10-01")
+
+
+def medir_metodo(puntaje: pd.DataFrame, n: int, fechas, exceso: dict[str, pd.DataFrame]) -> dict:
+    """Exceso promedio de las N mejores de cada mes, con su t, su tasa de acierto, por año y por mitad de la
+    muestra (una regla elegida mirando todos los datos debe funcionar también en cada mitad)."""
+    res = {}
+    for h, dias in HORIZONTES.items():
+        por_mes, casos = {}, []
+        for d in fechas:
+            el = puntaje.loc[d].dropna().sort_values(ascending=False).index[:n]
+            e = exceso[h].loc[d, el].dropna()
+            if len(e):
+                por_mes[d] = e.mean(); casos.append(e)
+        if len(por_mes) < 12:
+            continue
+        serie, todos = pd.Series(por_mes), pd.concat(casos)
+        mitades = {etiqueta: parte for etiqueta, parte in
+                   (("antes", serie[serie.index < CORTE_MITADES]), ("despues", serie[serie.index >= CORTE_MITADES]))}
+        res[h] = {"exceso_promedio": r(serie.mean()), "t": r(t_ajustado(serie, dias), 2),
+                  "acierto": r((todos > 0).mean(), 3), "mediana": r(todos.median()),
+                  "meses_positivos": r((serie > 0).mean(), 3), "casos": int(len(todos)), "meses": len(serie),
+                  "por_anio": {str(a): r(v) for a, v in serie.groupby(serie.index.year).mean().items()},
+                  "mitades": {k: {"desde": v.index[0].strftime("%Y-%m"), "hasta": v.index[-1].strftime("%Y-%m"),
+                                  "exceso_promedio": r(v.mean()), "t": r(t_ajustado(v, dias), 2)}
+                              for k, v in mitades.items() if len(v) >= 12}}
+    return res
+
+
 def fechas_mensuales(indice: pd.DatetimeIndex, margen: int) -> list[pd.Timestamp]:
     """Último día hábil de cada mes con un año de historia detrás y `margen` días de futuro conocido."""
     fin_mes = pd.Series(indice, index=indice).groupby(indice.to_period("M")).max()
@@ -171,17 +325,34 @@ def calendario(precios: pd.DataFrame) -> pd.DataFrame:
     return precios[con_datos >= 0.5 * con_datos.max()].ffill(limit=5)
 
 
-def evaluar(crudos: pd.DataFrame) -> dict:
+def evaluar(crudos: pd.DataFrame, sec: "fundamentales_sec.Sec | None" = None) -> dict:
     mercados = {"EE.UU.": [t for t in crudos.columns if not t.endswith(".SN")],
                 "Chile": [t for t in crudos.columns if t.endswith(".SN")]}
-    salida = {"base": {}, "factores": {}, "reglas": {}, "top5": {}, "muestra": {}}
+    salida = {"base": {}, "factores": {}, "reglas": {}, "top5": {}, "metodos": {}, "muestra": {}}
 
+    sp500 = tabla_sp500()
     for mercado, cols in mercados.items():
+        miembro = None
+        if mercado == "EE.UU." and sp500 is not None:
+            # Solo el S&P 500, y cada empresa desde que entró al índice (fecha de ingreso desconocida: desde siempre)
+            ingreso = dict(zip(sp500["ticker"], sp500["ingreso"]))
+            cols = [c for c in cols if c in ingreso]
         precios = calendario(crudos[cols])
+        if mercado == "EE.UU." and sp500 is not None:
+            miembro = pd.DataFrame({c: precios.index >= (ingreso[c] if pd.notna(ingreso[c]) else pd.Timestamp.min)
+                                    for c in cols}, index=precios.index)
         s = senales(precios)
+        if mercado == "EE.UU." and sec is not None:
+            anios = list(range(precios.index[0].year - 2, precios.index[-1].year + 1))
+            F = fundamentales_sec.panel(sec, precios, anios)
+            financieras = set(sp500.loc[sp500["GICS Sector"] == "Financials", "ticker"]) if sp500 is not None else set()
+            sector_de = dict(zip(sp500["ticker"], sp500["GICS Sector"])) if sp500 is not None else {}
+            s.update(senales_fundamentales(F, financieras, sector_de))
         fwd = {h: precios.shift(-n) / precios - 1 for h, n in HORIZONTES.items()}
         fechas = fechas_mensuales(precios.index, max(HORIZONTES.values()))
         valido = (~s["congelado"][cols]) & precios[cols].notna()
+        if miembro is not None:
+            valido &= miembro
         exceso = {}
         for h, n in HORIZONTES.items():
             futuro_ok = valido & (~s["congelado"][cols].shift(-n).fillna(True).astype(bool))
@@ -196,8 +367,11 @@ def evaluar(crudos: pd.DataFrame) -> dict:
             salida["base"][mercado][h] = {"acierto": r((todas > 0).mean(), 3), "mediana": r(todas.median()),
                                           "casos": int(len(todas))}
 
-        for clave, (nombre, fn) in FACTORES.items():
-            x = fn(s)[cols].where(valido)
+        for clave, (nombre, fn) in {**FACTORES, **FACTORES_FUND}.items():
+            try:
+                x = fn(s)[cols].where(valido)
+            except KeyError:
+                continue  # fundamentales: solo EE.UU.
             res = {}
             for h, n in HORIZONTES.items():
                 ics, q5, q1, acierto = [], [], [], []
@@ -221,8 +395,11 @@ def evaluar(crudos: pd.DataFrame) -> dict:
                           "acierto_quintil_alto": r(np.nanmean(acierto), 3), "meses": len(ics)}
             salida["factores"].setdefault(clave, {"nombre": nombre})[mercado] = res
 
-        for clave, (nombre, fn) in REGLAS.items():
-            m = fn(s)[cols].astype(bool) & valido
+        for clave, (nombre, fn) in {**REGLAS, **REGLAS_FUND}.items():
+            try:
+                m = fn(s)[cols].astype(bool) & valido
+            except KeyError:
+                continue
             res = {}
             for h, n in HORIZONTES.items():
                 por_mes, eventos = [], []
@@ -258,15 +435,28 @@ def evaluar(crudos: pd.DataFrame) -> dict:
                           "meses_positivos": r((serie > 0).mean(), 3), "casos": int(len(casos)),
                           "meses": len(serie), "por_anio": por_anio}
         salida["top5"][mercado] = res
+
+        for clave, m in METODOS.items():
+            if m["mercado"] != mercado:
+                continue
+            try:
+                puntaje = m["puntaje"](s)[cols].where(valido)
+            except KeyError:
+                continue
+            salida["metodos"][clave] = {"nombre": m["nombre"], "mercado": mercado, "n": m["n"],
+                                        **medir_metodo(puntaje, m["n"], fechas, exceso)}
         salida["muestra"][mercado] = {
             "desde": precios.index[0].strftime("%Y-%m-%d"), "hasta": precios.index[-1].strftime("%Y-%m-%d"),
             "fechas_evaluadas": len(fechas), "acciones": len(cols),
+            "universo": "S&P 500 en la fecha (miembros actuales desde su ingreso)" if miembro is not None else "IPSA actual",
         }
     salida["sesgos"] = [
-        "Supervivencia: el universo es la lista actual de los índices; las empresas que quebraron o salieron no "
-        "están, lo que favorece a las señales que compran caídas. Las que entraron después de subir mucho sí "
-        "están con toda su historia, lo que favorece a las acciones volátiles y a las que ya subieron.",
-        "Solo señales de precio: Yahoo no entrega los fundamentales de cada fecha pasada.",
+        "Supervivencia: en EE.UU. cada fecha usa solo las empresas del S&P 500 actual que ya estaban en el índice; "
+        "las que salieron (la mayoría por caer) no están, lo que favorece a las señales que compran caídas. En "
+        "Chile se usa el IPSA actual con toda su historia.",
+        "Fundamentales solo de EE.UU. (SEC EDGAR, cada cifra 90 días después del cierre de su año fiscal); el valor de "
+        "mercado se estima con el valor en manos del público, así que las empresas con controlador grande salen algo "
+        "más baratas. Para Chile no hay fundamentales históricos gratuitos.",
         "Exceso frente al promedio simple de cada mercado, antes de comisiones e impuestos.",
     ]
     salida["calculado"] = datetime.now(timezone.utc).isoformat()
@@ -276,6 +466,7 @@ def evaluar(crudos: pd.DataFrame) -> dict:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", help="Pickle con los precios ya descargados (para iterar sin volver a bajar)")
+    ap.add_argument("--cache-sec", help="Carpeta donde guardar las respuestas de la SEC (para iterar)")
     ap.add_argument("--salida", default="evidencia.json")
     args = ap.parse_args()
     if args.cache and os.path.exists(args.cache):
@@ -285,7 +476,12 @@ def main():
         if args.cache:
             precios.to_pickle(args.cache)
     logging.info(f"Precios: {precios.shape[1]} activos, {precios.index[0]:%Y-%m-%d} a {precios.index[-1]:%Y-%m-%d}")
-    resultado = evaluar(precios)
+    sec = None
+    if os.getenv("SEC_CONTACTO"):
+        sec = fundamentales_sec.Sec(cache=args.cache_sec)
+    else:
+        logging.warning("Sin SEC_CONTACTO: no se miden los fundamentales.")
+    resultado = evaluar(precios, sec)
     with open(args.salida, "w", encoding="utf-8") as f:
         json.dump(resultado, f, ensure_ascii=False, indent=1)
     logging.info(f"Evidencia guardada en {args.salida}")

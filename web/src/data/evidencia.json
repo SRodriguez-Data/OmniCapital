@@ -2,19 +2,19 @@
  "base": {
   "EE.UU.": {
    "1m": {
-    "acierto": 0.476,
-    "mediana": -0.0038,
-    "casos": 56256
+    "acierto": 0.486,
+    "mediana": -0.0022,
+    "casos": 43489
    },
    "3m": {
-    "acierto": 0.465,
-    "mediana": -0.0103,
-    "casos": 56254
+    "acierto": 0.48,
+    "mediana": -0.0057,
+    "casos": 43489
    },
    "6m": {
-    "acierto": 0.444,
-    "mediana": -0.0238,
-    "casos": 56254
+    "acierto": 0.468,
+    "mediana": -0.0133,
+    "casos": 43489
    }
   },
   "Chile": {
@@ -40,36 +40,36 @@
    "nombre": "Momentum 12-1 meses",
    "EE.UU.": {
     "1m": {
-     "ic": 0.0014,
-     "ic_t": 0.07,
-     "meses_ic_positivo": 0.52,
-     "quintil_alto": 0.0035,
-     "quintil_bajo": 0.0016,
-     "diferencia": 0.0019,
-     "diferencia_t": 0.36,
-     "acierto_quintil_alto": 0.483,
+     "ic": -0.0135,
+     "ic_t": -0.62,
+     "meses_ic_positivo": 0.471,
+     "quintil_alto": -0.0001,
+     "quintil_bajo": 0.0027,
+     "diferencia": -0.0028,
+     "diferencia_t": -0.55,
+     "acierto_quintil_alto": 0.485,
      "meses": 102
     },
     "3m": {
-     "ic": 0.0139,
-     "ic_t": 0.47,
-     "meses_ic_positivo": 0.578,
-     "quintil_alto": 0.0154,
-     "quintil_bajo": 0.0025,
-     "diferencia": 0.0129,
-     "diferencia_t": 0.95,
-     "acierto_quintil_alto": 0.483,
+     "ic": -0.0102,
+     "ic_t": -0.32,
+     "meses_ic_positivo": 0.5,
+     "quintil_alto": 0.0042,
+     "quintil_bajo": 0.0048,
+     "diferencia": -0.0005,
+     "diferencia_t": -0.04,
+     "acierto_quintil_alto": 0.479,
      "meses": 102
     },
     "6m": {
-     "ic": 0.0176,
-     "ic_t": 0.42,
-     "meses_ic_positivo": 0.569,
-     "quintil_alto": 0.0299,
-     "quintil_bajo": 0.0066,
-     "diferencia": 0.0233,
-     "diferencia_t": 0.75,
-     "acierto_quintil_alto": 0.474,
+     "ic": -0.0074,
+     "ic_t": -0.16,
+     "meses_ic_positivo": 0.549,
+     "quintil_alto": 0.0098,
+     "quintil_bajo": 0.0128,
+     "diferencia": -0.003,
+     "diferencia_t": -0.1,
+     "acierto_quintil_alto": 0.48,
      "meses": 102
     }
    },
@@ -113,36 +113,36 @@
    "nombre": "Distancia a la media de 200 días",
    "EE.UU.": {
     "1m": {
-     "ic": 0.0057,
-     "ic_t": 0.29,
-     "meses_ic_positivo": 0.539,
-     "quintil_alto": 0.0041,
+     "ic": -0.0067,
+     "ic_t": -0.31,
+     "meses_ic_positivo": 0.52,
+     "quintil_alto": 0.0007,
      "quintil_bajo": 0.0015,
-     "diferencia": 0.0026,
-     "diferencia_t": 0.51,
-     "acierto_quintil_alto": 0.487,
+     "diferencia": -0.0008,
+     "diferencia_t": -0.16,
+     "acierto_quintil_alto": 0.492,
      "meses": 102
     },
     "3m": {
-     "ic": 0.0189,
-     "ic_t": 0.69,
-     "meses_ic_positivo": 0.569,
-     "quintil_alto": 0.0151,
-     "quintil_bajo": -0.0007,
-     "diferencia": 0.0158,
-     "diferencia_t": 1.19,
-     "acierto_quintil_alto": 0.481,
+     "ic": -0.0023,
+     "ic_t": -0.08,
+     "meses_ic_positivo": 0.48,
+     "quintil_alto": 0.003,
+     "quintil_bajo": 0.002,
+     "diferencia": 0.001,
+     "diferencia_t": 0.08,
+     "acierto_quintil_alto": 0.472,
      "meses": 102
     },
     "6m": {
-     "ic": 0.0394,
-     "ic_t": 1.07,
-     "meses_ic_positivo": 0.637,
-     "quintil_alto": 0.0336,
-     "quintil_bajo": -0.0035,
-     "diferencia": 0.0371,
-     "diferencia_t": 1.25,
-     "acierto_quintil_alto": 0.481,
+     "ic": 0.0088,
+     "ic_t": 0.22,
+     "meses_ic_positivo": 0.618,
+     "quintil_alto": 0.0073,
+     "quintil_bajo": 0.0054,
+     "diferencia": 0.002,
+     "diferencia_t": 0.07,
+     "acierto_quintil_alto": 0.477,
      "meses": 102
     }
    },
@@ -186,36 +186,36 @@
    "nombre": "RSI bajo (sobreventa)",
    "EE.UU.": {
     "1m": {
-     "ic": -0.0048,
-     "ic_t": -0.33,
+     "ic": 0.0047,
+     "ic_t": 0.29,
      "meses_ic_positivo": 0.539,
-     "quintil_alto": -0.0004,
-     "quintil_bajo": -0.0002,
-     "diferencia": -0.0001,
-     "diferencia_t": -0.04,
-     "acierto_quintil_alto": 0.465,
+     "quintil_alto": 0.0001,
+     "quintil_bajo": -0.002,
+     "diferencia": 0.0021,
+     "diferencia_t": 0.6,
+     "acierto_quintil_alto": 0.48,
      "meses": 102
     },
     "3m": {
-     "ic": 0.0095,
-     "ic_t": 0.39,
-     "meses_ic_positivo": 0.529,
-     "quintil_alto": 0.0025,
-     "quintil_bajo": -0.0011,
-     "diferencia": 0.0037,
-     "diferencia_t": 0.32,
-     "acierto_quintil_alto": 0.47,
+     "ic": 0.017,
+     "ic_t": 0.64,
+     "meses_ic_positivo": 0.549,
+     "quintil_alto": 0.0017,
+     "quintil_bajo": -0.0047,
+     "diferencia": 0.0064,
+     "diferencia_t": 0.64,
+     "acierto_quintil_alto": 0.486,
      "meses": 102
     },
     "6m": {
-     "ic": -0.0069,
-     "ic_t": -0.21,
-     "meses_ic_positivo": 0.373,
-     "quintil_alto": 0.0003,
-     "quintil_bajo": 0.0029,
-     "diferencia": -0.0026,
-     "diferencia_t": -0.1,
-     "acierto_quintil_alto": 0.441,
+     "ic": 0.0049,
+     "ic_t": 0.14,
+     "meses_ic_positivo": 0.402,
+     "quintil_alto": 0.0021,
+     "quintil_bajo": -0.0039,
+     "diferencia": 0.006,
+     "diferencia_t": 0.29,
+     "acierto_quintil_alto": 0.466,
      "meses": 102
     }
    },
@@ -259,36 +259,36 @@
    "nombre": "Caída del último mes (reversión)",
    "EE.UU.": {
     "1m": {
-     "ic": -0.0102,
-     "ic_t": -0.65,
-     "meses_ic_positivo": 0.49,
-     "quintil_alto": -0.0001,
-     "quintil_bajo": 0.0035,
-     "diferencia": -0.0036,
-     "diferencia_t": -0.91,
-     "acierto_quintil_alto": 0.463,
+     "ic": -0.0003,
+     "ic_t": -0.01,
+     "meses_ic_positivo": 0.5,
+     "quintil_alto": 0.0001,
+     "quintil_bajo": 0.0006,
+     "diferencia": -0.0006,
+     "diferencia_t": -0.15,
+     "acierto_quintil_alto": 0.478,
      "meses": 102
     },
     "3m": {
-     "ic": 0.0066,
-     "ic_t": 0.26,
-     "meses_ic_positivo": 0.539,
-     "quintil_alto": 0.0053,
-     "quintil_bajo": 0.0094,
-     "diferencia": -0.0041,
-     "diferencia_t": -0.32,
-     "acierto_quintil_alto": 0.472,
+     "ic": 0.0151,
+     "ic_t": 0.54,
+     "meses_ic_positivo": 0.549,
+     "quintil_alto": 0.0039,
+     "quintil_bajo": 0.0011,
+     "diferencia": 0.0028,
+     "diferencia_t": 0.24,
+     "acierto_quintil_alto": 0.492,
      "meses": 102
     },
     "6m": {
-     "ic": -0.0061,
-     "ic_t": -0.19,
-     "meses_ic_positivo": 0.451,
-     "quintil_alto": 0.008,
-     "quintil_bajo": 0.0232,
-     "diferencia": -0.0153,
-     "diferencia_t": -0.55,
-     "acierto_quintil_alto": 0.449,
+     "ic": 0.0071,
+     "ic_t": 0.2,
+     "meses_ic_positivo": 0.471,
+     "quintil_alto": 0.005,
+     "quintil_bajo": 0.0043,
+     "diferencia": 0.0007,
+     "diferencia_t": 0.03,
+     "acierto_quintil_alto": 0.47,
      "meses": 102
     }
    },
@@ -332,36 +332,36 @@
    "nombre": "Baja volatilidad",
    "EE.UU.": {
     "1m": {
-     "ic": -0.0297,
-     "ic_t": -1.25,
-     "meses_ic_positivo": 0.461,
-     "quintil_alto": -0.0054,
-     "quintil_bajo": 0.0117,
-     "diferencia": -0.017,
-     "diferencia_t": -2.67,
-     "acierto_quintil_alto": 0.453,
+     "ic": -0.0272,
+     "ic_t": -1.08,
+     "meses_ic_positivo": 0.451,
+     "quintil_alto": -0.0037,
+     "quintil_bajo": 0.0081,
+     "diferencia": -0.0118,
+     "diferencia_t": -1.94,
+     "acierto_quintil_alto": 0.472,
      "meses": 102
     },
     "3m": {
-     "ic": -0.0584,
-     "ic_t": -1.48,
-     "meses_ic_positivo": 0.382,
-     "quintil_alto": -0.0161,
-     "quintil_bajo": 0.0394,
-     "diferencia": -0.0555,
-     "diferencia_t": -2.75,
-     "acierto_quintil_alto": 0.424,
+     "ic": -0.0497,
+     "ic_t": -1.21,
+     "meses_ic_positivo": 0.441,
+     "quintil_alto": -0.0099,
+     "quintil_bajo": 0.0237,
+     "diferencia": -0.0335,
+     "diferencia_t": -1.93,
+     "acierto_quintil_alto": 0.458,
      "meses": 102
     },
     "6m": {
-     "ic": -0.0692,
-     "ic_t": -1.38,
-     "meses_ic_positivo": 0.333,
-     "quintil_alto": -0.0348,
-     "quintil_bajo": 0.0813,
-     "diferencia": -0.1161,
-     "diferencia_t": -2.82,
-     "acierto_quintil_alto": 0.393,
+     "ic": -0.0574,
+     "ic_t": -1.05,
+     "meses_ic_positivo": 0.402,
+     "quintil_alto": -0.0216,
+     "quintil_bajo": 0.0456,
+     "diferencia": -0.0673,
+     "diferencia_t": -1.86,
+     "acierto_quintil_alto": 0.442,
      "meses": 102
     }
    },
@@ -405,36 +405,36 @@
    "nombre": "Cerca de su máximo de 52 semanas",
    "EE.UU.": {
     "1m": {
-     "ic": -0.0083,
-     "ic_t": -0.4,
-     "meses_ic_positivo": 0.52,
-     "quintil_alto": -0.0019,
-     "quintil_bajo": 0.0049,
-     "diferencia": -0.0068,
-     "diferencia_t": -1.27,
-     "acierto_quintil_alto": 0.475,
+     "ic": -0.0183,
+     "ic_t": -0.82,
+     "meses_ic_positivo": 0.529,
+     "quintil_alto": -0.0028,
+     "quintil_bajo": 0.0052,
+     "diferencia": -0.008,
+     "diferencia_t": -1.5,
+     "acierto_quintil_alto": 0.48,
      "meses": 102
     },
     "3m": {
-     "ic": -0.0154,
-     "ic_t": -0.5,
-     "meses_ic_positivo": 0.51,
-     "quintil_alto": -0.0058,
-     "quintil_bajo": 0.0125,
-     "diferencia": -0.0184,
-     "diferencia_t": -1.28,
-     "acierto_quintil_alto": 0.452,
+     "ic": -0.0297,
+     "ic_t": -0.89,
+     "meses_ic_positivo": 0.461,
+     "quintil_alto": -0.008,
+     "quintil_bajo": 0.0108,
+     "diferencia": -0.0188,
+     "diferencia_t": -1.38,
+     "acierto_quintil_alto": 0.459,
      "meses": 102
     },
     "6m": {
-     "ic": -0.0056,
-     "ic_t": -0.14,
-     "meses_ic_positivo": 0.51,
-     "quintil_alto": -0.0124,
-     "quintil_bajo": 0.0253,
-     "diferencia": -0.0377,
-     "diferencia_t": -1.25,
-     "acierto_quintil_alto": 0.435,
+     "ic": -0.0219,
+     "ic_t": -0.48,
+     "meses_ic_positivo": 0.52,
+     "quintil_alto": -0.0127,
+     "quintil_bajo": 0.0198,
+     "diferencia": -0.0326,
+     "diferencia_t": -1.09,
+     "acierto_quintil_alto": 0.453,
      "meses": 102
     }
    },
@@ -478,36 +478,36 @@
    "nombre": "Puntaje del Top 5 del bot",
    "EE.UU.": {
     "1m": {
-     "ic": -0.0125,
-     "ic_t": -0.71,
-     "meses_ic_positivo": 0.49,
-     "quintil_alto": 0.0025,
-     "quintil_bajo": 0.0019,
-     "diferencia": 0.0006,
-     "diferencia_t": 0.14,
-     "acierto_quintil_alto": 0.473,
+     "ic": -0.0233,
+     "ic_t": -1.25,
+     "meses_ic_positivo": 0.52,
+     "quintil_alto": -0.0006,
+     "quintil_bajo": 0.0022,
+     "diferencia": -0.0028,
+     "diferencia_t": -0.62,
+     "acierto_quintil_alto": 0.472,
      "meses": 102
     },
     "3m": {
-     "ic": 0.0113,
-     "ic_t": 0.53,
-     "meses_ic_positivo": 0.529,
-     "quintil_alto": 0.0129,
-     "quintil_bajo": -0.0005,
-     "diferencia": 0.0134,
-     "diferencia_t": 1.18,
-     "acierto_quintil_alto": 0.477,
+     "ic": -0.0066,
+     "ic_t": -0.28,
+     "meses_ic_positivo": 0.48,
+     "quintil_alto": 0.0035,
+     "quintil_bajo": 0.002,
+     "diferencia": 0.0015,
+     "diferencia_t": 0.15,
+     "acierto_quintil_alto": 0.473,
      "meses": 102
     },
     "6m": {
-     "ic": 0.0175,
-     "ic_t": 0.53,
-     "meses_ic_positivo": 0.598,
-     "quintil_alto": 0.0259,
-     "quintil_bajo": 0.0027,
-     "diferencia": 0.0233,
-     "diferencia_t": 0.84,
-     "acierto_quintil_alto": 0.465,
+     "ic": -0.0047,
+     "ic_t": -0.13,
+     "meses_ic_positivo": 0.539,
+     "quintil_alto": 0.0068,
+     "quintil_bajo": 0.0094,
+     "diferencia": -0.0027,
+     "diferencia_t": -0.1,
+     "acierto_quintil_alto": 0.471,
      "meses": 102
     }
    },
@@ -546,6 +546,386 @@
      "meses": 99
     }
    }
+  },
+  "valor_ep": {
+   "nombre": "Utilidad sobre precio (valor)",
+   "EE.UU.": {
+    "1m": {
+     "ic": 0.0109,
+     "ic_t": 0.76,
+     "meses_ic_positivo": 0.569,
+     "quintil_alto": 0.0014,
+     "quintil_bajo": 0.0017,
+     "diferencia": -0.0004,
+     "diferencia_t": -0.1,
+     "acierto_quintil_alto": 0.495,
+     "meses": 102
+    },
+    "3m": {
+     "ic": 0.0035,
+     "ic_t": 0.13,
+     "meses_ic_positivo": 0.48,
+     "quintil_alto": 0.0036,
+     "quintil_bajo": 0.0097,
+     "diferencia": -0.0061,
+     "diferencia_t": -0.56,
+     "acierto_quintil_alto": 0.49,
+     "meses": 102
+    },
+    "6m": {
+     "ic": -0.0041,
+     "ic_t": -0.1,
+     "meses_ic_positivo": 0.5,
+     "quintil_alto": 0.0068,
+     "quintil_bajo": 0.0217,
+     "diferencia": -0.0149,
+     "diferencia_t": -0.6,
+     "acierto_quintil_alto": 0.482,
+     "meses": 102
+    }
+   }
+  },
+  "valor_bp": {
+   "nombre": "Valor libro sobre precio (valor)",
+   "EE.UU.": {
+    "1m": {
+     "ic": -0.0123,
+     "ic_t": -0.72,
+     "meses_ic_positivo": 0.441,
+     "quintil_alto": 0.001,
+     "quintil_bajo": 0.0016,
+     "diferencia": -0.0006,
+     "diferencia_t": -0.16,
+     "acierto_quintil_alto": 0.49,
+     "meses": 102
+    },
+    "3m": {
+     "ic": -0.018,
+     "ic_t": -0.58,
+     "meses_ic_positivo": 0.402,
+     "quintil_alto": 0.0035,
+     "quintil_bajo": 0.0057,
+     "diferencia": -0.0021,
+     "diferencia_t": -0.17,
+     "acierto_quintil_alto": 0.486,
+     "meses": 102
+    },
+    "6m": {
+     "ic": -0.0257,
+     "ic_t": -0.54,
+     "meses_ic_positivo": 0.382,
+     "quintil_alto": 0.0075,
+     "quintil_bajo": 0.0108,
+     "diferencia": -0.0033,
+     "diferencia_t": -0.11,
+     "acierto_quintil_alto": 0.473,
+     "meses": 102
+    }
+   }
+  },
+  "rentabilidad_roe": {
+   "nombre": "ROE (rentabilidad)",
+   "EE.UU.": {
+    "1m": {
+     "ic": 0.017,
+     "ic_t": 1.45,
+     "meses_ic_positivo": 0.578,
+     "quintil_alto": 0.0015,
+     "quintil_bajo": 0.0003,
+     "diferencia": 0.0012,
+     "diferencia_t": 0.51,
+     "acierto_quintil_alto": 0.496,
+     "meses": 102
+    },
+    "3m": {
+     "ic": 0.0148,
+     "ic_t": 0.69,
+     "meses_ic_positivo": 0.5,
+     "quintil_alto": 0.0022,
+     "quintil_bajo": 0.0025,
+     "diferencia": -0.0003,
+     "diferencia_t": -0.04,
+     "acierto_quintil_alto": 0.487,
+     "meses": 102
+    },
+    "6m": {
+     "ic": 0.0139,
+     "ic_t": 0.48,
+     "meses_ic_positivo": 0.52,
+     "quintil_alto": 0.0012,
+     "quintil_bajo": 0.009,
+     "diferencia": -0.0077,
+     "diferencia_t": -0.43,
+     "acierto_quintil_alto": 0.481,
+     "meses": 102
+    }
+   }
+  },
+  "rentabilidad_bruta": {
+   "nombre": "Margen bruto sobre activos (calidad)",
+   "EE.UU.": {
+    "1m": {
+     "ic": 0.0268,
+     "ic_t": 2.18,
+     "meses_ic_positivo": 0.569,
+     "quintil_alto": 0.001,
+     "quintil_bajo": -0.0011,
+     "diferencia": 0.0021,
+     "diferencia_t": 0.75,
+     "acierto_quintil_alto": 0.503,
+     "meses": 102
+    },
+    "3m": {
+     "ic": 0.0306,
+     "ic_t": 1.31,
+     "meses_ic_positivo": 0.549,
+     "quintil_alto": 0.0019,
+     "quintil_bajo": -0.0023,
+     "diferencia": 0.0043,
+     "diferencia_t": 0.42,
+     "acierto_quintil_alto": 0.493,
+     "meses": 102
+    },
+    "6m": {
+     "ic": 0.0381,
+     "ic_t": 1.13,
+     "meses_ic_positivo": 0.598,
+     "quintil_alto": 0.0018,
+     "quintil_bajo": -0.0013,
+     "diferencia": 0.0031,
+     "diferencia_t": 0.13,
+     "acierto_quintil_alto": 0.485,
+     "meses": 102
+    }
+   }
+  },
+  "acumulaciones_bajas": {
+   "nombre": "Utilidad respaldada por caja (calidad)",
+   "EE.UU.": {
+    "1m": {
+     "ic": 0.0075,
+     "ic_t": 0.91,
+     "meses_ic_positivo": 0.5,
+     "quintil_alto": 0.0034,
+     "quintil_bajo": 0.0006,
+     "diferencia": 0.0028,
+     "diferencia_t": 1.63,
+     "acierto_quintil_alto": 0.5,
+     "meses": 102
+    },
+    "3m": {
+     "ic": 0.0099,
+     "ic_t": 0.65,
+     "meses_ic_positivo": 0.569,
+     "quintil_alto": 0.0116,
+     "quintil_bajo": 0.0018,
+     "diferencia": 0.0098,
+     "diferencia_t": 1.73,
+     "acierto_quintil_alto": 0.501,
+     "meses": 102
+    },
+    "6m": {
+     "ic": 0.0145,
+     "ic_t": 0.65,
+     "meses_ic_positivo": 0.49,
+     "quintil_alto": 0.0234,
+     "quintil_bajo": 0.0031,
+     "diferencia": 0.0203,
+     "diferencia_t": 1.71,
+     "acierto_quintil_alto": 0.492,
+     "meses": 102
+    }
+   }
+  },
+  "calidad_ajustada": {
+   "nombre": "Utilidad respaldada por caja, sin pago en acciones",
+   "EE.UU.": {
+    "1m": {
+     "ic": 0.0034,
+     "ic_t": 0.38,
+     "meses_ic_positivo": 0.5,
+     "quintil_alto": 0.0047,
+     "quintil_bajo": 0.002,
+     "diferencia": 0.0027,
+     "diferencia_t": 1.16,
+     "acierto_quintil_alto": 0.501,
+     "meses": 102
+    },
+    "3m": {
+     "ic": 0.0074,
+     "ic_t": 0.45,
+     "meses_ic_positivo": 0.471,
+     "quintil_alto": 0.0129,
+     "quintil_bajo": 0.0058,
+     "diferencia": 0.0071,
+     "diferencia_t": 0.96,
+     "acierto_quintil_alto": 0.503,
+     "meses": 102
+    },
+    "6m": {
+     "ic": 0.0109,
+     "ic_t": 0.49,
+     "meses_ic_positivo": 0.461,
+     "quintil_alto": 0.0236,
+     "quintil_bajo": 0.0098,
+     "diferencia": 0.0138,
+     "diferencia_t": 0.83,
+     "acierto_quintil_alto": 0.489,
+     "meses": 102
+    }
+   }
+  },
+  "calidad_en_sector": {
+   "nombre": "Utilidad respaldada por caja frente a su sector",
+   "EE.UU.": {
+    "1m": {
+     "ic": 0.0023,
+     "ic_t": 0.35,
+     "meses_ic_positivo": 0.52,
+     "quintil_alto": 0.0024,
+     "quintil_bajo": 0.0007,
+     "diferencia": 0.0018,
+     "diferencia_t": 1.13,
+     "acierto_quintil_alto": 0.495,
+     "meses": 102
+    },
+    "3m": {
+     "ic": 0.0016,
+     "ic_t": 0.13,
+     "meses_ic_positivo": 0.48,
+     "quintil_alto": 0.0074,
+     "quintil_bajo": 0.0021,
+     "diferencia": 0.0054,
+     "diferencia_t": 1.02,
+     "acierto_quintil_alto": 0.488,
+     "meses": 102
+    },
+    "6m": {
+     "ic": 0.0022,
+     "ic_t": 0.14,
+     "meses_ic_positivo": 0.461,
+     "quintil_alto": 0.0138,
+     "quintil_bajo": 0.0048,
+     "diferencia": 0.0089,
+     "diferencia_t": 0.8,
+     "acierto_quintil_alto": 0.473,
+     "meses": 102
+    }
+   }
+  },
+  "inversion_baja": {
+   "nombre": "Crecimiento bajo de los activos",
+   "EE.UU.": {
+    "1m": {
+     "ic": 0.0021,
+     "ic_t": 0.2,
+     "meses_ic_positivo": 0.49,
+     "quintil_alto": 0.001,
+     "quintil_bajo": -0.0001,
+     "diferencia": 0.0011,
+     "diferencia_t": 0.45,
+     "acierto_quintil_alto": 0.487,
+     "meses": 102
+    },
+    "3m": {
+     "ic": 0.0079,
+     "ic_t": 0.4,
+     "meses_ic_positivo": 0.431,
+     "quintil_alto": 0.0042,
+     "quintil_bajo": -0.0005,
+     "diferencia": 0.0047,
+     "diferencia_t": 0.55,
+     "acierto_quintil_alto": 0.484,
+     "meses": 102
+    },
+    "6m": {
+     "ic": 0.0178,
+     "ic_t": 0.63,
+     "meses_ic_positivo": 0.51,
+     "quintil_alto": 0.0108,
+     "quintil_bajo": -0.0034,
+     "diferencia": 0.0142,
+     "diferencia_t": 0.77,
+     "acierto_quintil_alto": 0.478,
+     "meses": 102
+    }
+   }
+  },
+  "deuda_baja": {
+   "nombre": "Deuda baja frente al patrimonio",
+   "EE.UU.": {
+    "1m": {
+     "ic": 0.0029,
+     "ic_t": 0.27,
+     "meses_ic_positivo": 0.539,
+     "quintil_alto": 0.0011,
+     "quintil_bajo": -0.0002,
+     "diferencia": 0.0014,
+     "diferencia_t": 0.62,
+     "acierto_quintil_alto": 0.489,
+     "meses": 102
+    },
+    "3m": {
+     "ic": 0.0007,
+     "ic_t": 0.03,
+     "meses_ic_positivo": 0.588,
+     "quintil_alto": 0.0028,
+     "quintil_bajo": -0.0,
+     "diferencia": 0.0029,
+     "diferencia_t": 0.39,
+     "acierto_quintil_alto": 0.48,
+     "meses": 102
+    },
+    "6m": {
+     "ic": -0.0021,
+     "ic_t": -0.07,
+     "meses_ic_positivo": 0.529,
+     "quintil_alto": 0.0083,
+     "quintil_bajo": -0.0007,
+     "diferencia": 0.0089,
+     "diferencia_t": 0.52,
+     "acierto_quintil_alto": 0.473,
+     "meses": 102
+    }
+   }
+  },
+  "crecimiento_utilidad": {
+   "nombre": "Crecimiento de la utilidad",
+   "EE.UU.": {
+    "1m": {
+     "ic": 0.0004,
+     "ic_t": 0.03,
+     "meses_ic_positivo": 0.51,
+     "quintil_alto": -0.0016,
+     "quintil_bajo": 0.0006,
+     "diferencia": -0.0023,
+     "diferencia_t": -0.88,
+     "acierto_quintil_alto": 0.475,
+     "meses": 102
+    },
+    "3m": {
+     "ic": -0.0037,
+     "ic_t": -0.17,
+     "meses_ic_positivo": 0.51,
+     "quintil_alto": -0.005,
+     "quintil_bajo": 0.0025,
+     "diferencia": -0.0075,
+     "diferencia_t": -0.85,
+     "acierto_quintil_alto": 0.465,
+     "meses": 102
+    },
+    "6m": {
+     "ic": -0.0096,
+     "ic_t": -0.32,
+     "meses_ic_positivo": 0.49,
+     "quintil_alto": -0.0101,
+     "quintil_bajo": 0.0065,
+     "diferencia": -0.0167,
+     "diferencia_t": -0.93,
+     "acierto_quintil_alto": 0.448,
+     "meses": 102
+    }
+   }
   }
  },
  "reglas": {
@@ -553,27 +933,27 @@
    "nombre": "Más de 3% sobre su media de 200 días",
    "EE.UU.": {
     "1m": {
-     "exceso_promedio": 0.0007,
-     "t": 0.49,
-     "acierto": 0.479,
-     "mediana": -0.0031,
-     "casos": 31039,
+     "exceso_promedio": -0.0003,
+     "t": -0.17,
+     "acierto": 0.488,
+     "mediana": -0.0019,
+     "casos": 23819,
      "meses": 102
     },
     "3m": {
-     "exceso_promedio": 0.0031,
-     "t": 0.77,
-     "acierto": 0.469,
-     "mediana": -0.0086,
-     "casos": 31037,
+     "exceso_promedio": -0.0005,
+     "t": -0.14,
+     "acierto": 0.479,
+     "mediana": -0.0057,
+     "casos": 23819,
      "meses": 102
     },
     "6m": {
-     "exceso_promedio": 0.0068,
-     "t": 0.78,
-     "acierto": 0.456,
-     "mediana": -0.0175,
-     "casos": 31037,
+     "exceso_promedio": -0.0019,
+     "t": -0.24,
+     "acierto": 0.474,
+     "mediana": -0.0111,
+     "casos": 23819,
      "meses": 102
     }
    },
@@ -608,27 +988,27 @@
    "nombre": "Más de 3% bajo su media de 200 días",
    "EE.UU.": {
     "1m": {
-     "exceso_promedio": -0.0002,
-     "t": -0.09,
-     "acierto": 0.477,
-     "mediana": -0.0039,
-     "casos": 15665,
+     "exceso_promedio": 0.0004,
+     "t": 0.22,
+     "acierto": 0.489,
+     "mediana": -0.0019,
+     "casos": 12218,
      "meses": 102
     },
     "3m": {
-     "exceso_promedio": -0.0033,
-     "t": -0.59,
-     "acierto": 0.463,
-     "mediana": -0.0123,
-     "casos": 15666,
+     "exceso_promedio": -0.0013,
+     "t": -0.24,
+     "acierto": 0.485,
+     "mediana": -0.0043,
+     "casos": 12218,
      "meses": 102
     },
     "6m": {
-     "exceso_promedio": -0.0076,
-     "t": -0.62,
-     "acierto": 0.433,
-     "mediana": -0.0318,
-     "casos": 15666,
+     "exceso_promedio": -0.0032,
+     "t": -0.26,
+     "acierto": 0.466,
+     "mediana": -0.0151,
+     "casos": 12218,
      "meses": 102
     }
    },
@@ -663,27 +1043,27 @@
    "nombre": "Momentum 12-1 mayor a 5%",
    "EE.UU.": {
     "1m": {
-     "exceso_promedio": -0.0002,
-     "t": -0.19,
-     "acierto": 0.474,
-     "mediana": -0.0039,
-     "casos": 33474,
+     "exceso_promedio": -0.0012,
+     "t": -0.91,
+     "acierto": 0.483,
+     "mediana": -0.0027,
+     "casos": 25629,
      "meses": 102
     },
     "3m": {
-     "exceso_promedio": 0.0003,
-     "t": 0.09,
-     "acierto": 0.466,
-     "mediana": -0.0097,
-     "casos": 33471,
+     "exceso_promedio": -0.0026,
+     "t": -0.66,
+     "acierto": 0.475,
+     "mediana": -0.0066,
+     "casos": 25629,
      "meses": 102
     },
     "6m": {
-     "exceso_promedio": -0.0018,
-     "t": -0.23,
-     "acierto": 0.444,
-     "mediana": -0.0225,
-     "casos": 33472,
+     "exceso_promedio": -0.0065,
+     "t": -0.77,
+     "acierto": 0.463,
+     "mediana": -0.0149,
+     "casos": 25629,
      "meses": 102
     }
    },
@@ -718,27 +1098,27 @@
    "nombre": "Momentum 12-1 menor a -5%",
    "EE.UU.": {
     "1m": {
-     "exceso_promedio": -0.0008,
-     "t": -0.35,
-     "acierto": 0.479,
-     "mediana": -0.0037,
-     "casos": 14276,
+     "exceso_promedio": 0.0006,
+     "t": 0.25,
+     "acierto": 0.491,
+     "mediana": -0.0016,
+     "casos": 11162,
      "meses": 102
     },
     "3m": {
-     "exceso_promedio": -0.0041,
-     "t": -0.66,
-     "acierto": 0.465,
-     "mediana": -0.0116,
-     "casos": 14277,
+     "exceso_promedio": -0.0013,
+     "t": -0.19,
+     "acierto": 0.491,
+     "mediana": -0.0029,
+     "casos": 11162,
      "meses": 102
     },
     "6m": {
-     "exceso_promedio": -0.0021,
-     "t": -0.17,
-     "acierto": 0.447,
-     "mediana": -0.0244,
-     "casos": 14276,
+     "exceso_promedio": 0.0021,
+     "t": 0.15,
+     "acierto": 0.483,
+     "mediana": -0.0077,
+     "casos": 11162,
      "meses": 102
     }
    },
@@ -773,27 +1153,27 @@
    "nombre": "Veredicto técnico del asesor: alcista",
    "EE.UU.": {
     "1m": {
-     "exceso_promedio": -0.0002,
-     "t": -0.15,
-     "acierto": 0.474,
-     "mediana": -0.0037,
-     "casos": 32531,
+     "exceso_promedio": -0.0013,
+     "t": -0.81,
+     "acierto": 0.483,
+     "mediana": -0.0025,
+     "casos": 25035,
      "meses": 102
     },
     "3m": {
-     "exceso_promedio": 0.0002,
-     "t": 0.05,
-     "acierto": 0.465,
-     "mediana": -0.0099,
-     "casos": 32528,
+     "exceso_promedio": -0.0025,
+     "t": -0.64,
+     "acierto": 0.475,
+     "mediana": -0.0066,
+     "casos": 25035,
      "meses": 102
     },
     "6m": {
-     "exceso_promedio": -0.0003,
-     "t": -0.04,
-     "acierto": 0.449,
-     "mediana": -0.0199,
-     "casos": 32529,
+     "exceso_promedio": -0.0055,
+     "t": -0.66,
+     "acierto": 0.469,
+     "mediana": -0.0126,
+     "casos": 25035,
      "meses": 102
     }
    },
@@ -828,27 +1208,27 @@
    "nombre": "Veredicto técnico del asesor: bajista",
    "EE.UU.": {
     "1m": {
-     "exceso_promedio": -0.0012,
-     "t": -0.54,
-     "acierto": 0.476,
-     "mediana": -0.004,
-     "casos": 13540,
+     "exceso_promedio": -0.0006,
+     "t": -0.27,
+     "acierto": 0.486,
+     "mediana": -0.0023,
+     "casos": 10661,
      "meses": 102
     },
     "3m": {
-     "exceso_promedio": -0.0072,
-     "t": -1.2,
-     "acierto": 0.458,
-     "mediana": -0.0136,
-     "casos": 13540,
+     "exceso_promedio": -0.004,
+     "t": -0.63,
+     "acierto": 0.484,
+     "mediana": -0.0052,
+     "casos": 10661,
      "meses": 102
     },
     "6m": {
-     "exceso_promedio": -0.0105,
-     "t": -0.87,
-     "acierto": 0.436,
-     "mediana": -0.0287,
-     "casos": 13540,
+     "exceso_promedio": -0.0037,
+     "t": -0.28,
+     "acierto": 0.474,
+     "mediana": -0.0113,
+     "casos": 10661,
      "meses": 102
     }
    },
@@ -883,28 +1263,28 @@
    "nombre": "Dos cierres seguidos bajo el stop de volatilidad",
    "EE.UU.": {
     "1m": {
-     "exceso_promedio": 0.0053,
-     "t": 0.42,
-     "acierto": 0.477,
-     "mediana": -0.0055,
-     "casos": 1033,
-     "meses": 82
+     "exceso_promedio": -0.0085,
+     "t": -1.07,
+     "acierto": 0.493,
+     "mediana": -0.002,
+     "casos": 822,
+     "meses": 75
     },
     "3m": {
-     "exceso_promedio": 0.0358,
-     "t": 1.09,
-     "acierto": 0.468,
-     "mediana": -0.009,
-     "casos": 1033,
-     "meses": 82
+     "exceso_promedio": 0.0148,
+     "t": 0.75,
+     "acierto": 0.488,
+     "mediana": -0.0037,
+     "casos": 822,
+     "meses": 75
     },
     "6m": {
-     "exceso_promedio": 0.0215,
-     "t": 0.3,
-     "acierto": 0.411,
-     "mediana": -0.0514,
-     "casos": 1033,
-     "meses": 82
+     "exceso_promedio": 0.0107,
+     "t": 0.23,
+     "acierto": 0.436,
+     "mediana": -0.033,
+     "casos": 822,
+     "meses": 75
     }
    },
    "Chile": {
@@ -938,28 +1318,28 @@
    "nombre": "RSI sobre 70 (sobrecomprada)",
    "EE.UU.": {
     "1m": {
-     "exceso_promedio": 0.002,
-     "t": 0.48,
-     "acierto": 0.485,
-     "mediana": -0.002,
-     "casos": 3865,
-     "meses": 98
+     "exceso_promedio": -0.0019,
+     "t": -0.56,
+     "acierto": 0.498,
+     "mediana": -0.0002,
+     "casos": 2964,
+     "meses": 94
     },
     "3m": {
-     "exceso_promedio": 0.0112,
-     "t": 0.66,
-     "acierto": 0.459,
-     "mediana": -0.0118,
-     "casos": 3865,
-     "meses": 98
+     "exceso_promedio": -0.0036,
+     "t": -0.25,
+     "acierto": 0.469,
+     "mediana": -0.0066,
+     "casos": 2964,
+     "meses": 94
     },
     "6m": {
-     "exceso_promedio": 0.0378,
-     "t": 0.86,
-     "acierto": 0.452,
-     "mediana": -0.019,
-     "casos": 3866,
-     "meses": 98
+     "exceso_promedio": 0.0067,
+     "t": 0.22,
+     "acierto": 0.46,
+     "mediana": -0.0151,
+     "casos": 2964,
+     "meses": 94
     }
    },
    "Chile": {
@@ -993,28 +1373,28 @@
    "nombre": "RSI bajo 30 en tendencia alcista",
    "EE.UU.": {
     "1m": {
-     "exceso_promedio": -0.0155,
-     "t": -1.53,
-     "acierto": 0.491,
-     "mediana": -0.0034,
-     "casos": 114,
-     "meses": 32
+     "exceso_promedio": -0.0226,
+     "t": -2.08,
+     "acierto": 0.453,
+     "mediana": -0.0131,
+     "casos": 86,
+     "meses": 23
     },
     "3m": {
-     "exceso_promedio": -0.0218,
-     "t": -0.62,
-     "acierto": 0.482,
-     "mediana": -0.0164,
-     "casos": 114,
-     "meses": 32
+     "exceso_promedio": -0.007,
+     "t": -0.22,
+     "acierto": 0.5,
+     "mediana": -0.0003,
+     "casos": 86,
+     "meses": 23
     },
     "6m": {
-     "exceso_promedio": -0.0224,
-     "t": -0.15,
+     "exceso_promedio": -0.0411,
+     "t": -0.53,
      "acierto": 0.43,
-     "mediana": -0.0622,
-     "casos": 114,
-     "meses": 32
+     "mediana": -0.0494,
+     "casos": 86,
+     "meses": 23
     }
    },
    "Chile": {
@@ -1040,28 +1420,28 @@
    "nombre": "RSI bajo 30 en tendencia bajista",
    "EE.UU.": {
     "1m": {
-     "exceso_promedio": 0.0039,
-     "t": 0.39,
-     "acierto": 0.466,
-     "mediana": -0.006,
-     "casos": 1528,
-     "meses": 84
+     "exceso_promedio": 0.0059,
+     "t": 0.58,
+     "acierto": 0.485,
+     "mediana": -0.003,
+     "casos": 1230,
+     "meses": 81
     },
     "3m": {
-     "exceso_promedio": 0.0212,
-     "t": 0.65,
-     "acierto": 0.462,
-     "mediana": -0.0133,
-     "casos": 1528,
-     "meses": 84
+     "exceso_promedio": 0.0182,
+     "t": 0.63,
+     "acierto": 0.478,
+     "mediana": -0.0087,
+     "casos": 1230,
+     "meses": 81
     },
     "6m": {
-     "exceso_promedio": -0.0002,
-     "t": -0.0,
-     "acierto": 0.416,
-     "mediana": -0.0425,
-     "casos": 1528,
-     "meses": 84
+     "exceso_promedio": -0.0004,
+     "t": -0.01,
+     "acierto": 0.432,
+     "mediana": -0.0306,
+     "casos": 1230,
+     "meses": 81
     }
    },
    "Chile": {
@@ -1095,28 +1475,28 @@
    "nombre": "Más de 25% sobre su media de 200 días",
    "EE.UU.": {
     "1m": {
-     "exceso_promedio": 0.0143,
-     "t": 2.82,
-     "acierto": 0.492,
-     "mediana": -0.0015,
-     "casos": 4545,
-     "meses": 102
+     "exceso_promedio": 0.0051,
+     "t": 1.06,
+     "acierto": 0.485,
+     "mediana": -0.0029,
+     "casos": 2854,
+     "meses": 100
     },
     "3m": {
-     "exceso_promedio": 0.0491,
-     "t": 3.07,
-     "acierto": 0.5,
-     "mediana": -0.0001,
-     "casos": 4544,
-     "meses": 102
+     "exceso_promedio": 0.0182,
+     "t": 1.43,
+     "acierto": 0.474,
+     "mediana": -0.0079,
+     "casos": 2854,
+     "meses": 100
     },
     "6m": {
-     "exceso_promedio": 0.1076,
-     "t": 2.53,
-     "acierto": 0.509,
-     "mediana": 0.0055,
-     "casos": 4545,
-     "meses": 102
+     "exceso_promedio": 0.0437,
+     "t": 1.43,
+     "acierto": 0.492,
+     "mediana": -0.0042,
+     "casos": 2854,
+     "meses": 100
     }
    },
    "Chile": {
@@ -1150,28 +1530,28 @@
    "nombre": "Bajo su banda inferior de Bollinger",
    "EE.UU.": {
     "1m": {
-     "exceso_promedio": -0.0032,
-     "t": -0.75,
-     "acierto": 0.49,
-     "mediana": -0.0015,
-     "casos": 2735,
-     "meses": 89
+     "exceso_promedio": -0.0077,
+     "t": -1.28,
+     "acierto": 0.494,
+     "mediana": -0.0007,
+     "casos": 2124,
+     "meses": 81
     },
     "3m": {
-     "exceso_promedio": -0.0018,
-     "t": -0.09,
-     "acierto": 0.469,
-     "mediana": -0.0092,
-     "casos": 2735,
-     "meses": 89
+     "exceso_promedio": -0.0072,
+     "t": -0.48,
+     "acierto": 0.484,
+     "mediana": -0.0041,
+     "casos": 2124,
+     "meses": 81
     },
     "6m": {
-     "exceso_promedio": 0.0077,
-     "t": 0.18,
-     "acierto": 0.428,
-     "mediana": -0.0293,
-     "casos": 2735,
-     "meses": 89
+     "exceso_promedio": -0.0008,
+     "t": -0.02,
+     "acierto": 0.452,
+     "mediana": -0.0187,
+     "casos": 2124,
+     "meses": 81
     }
    },
    "Chile": {
@@ -1205,27 +1585,27 @@
    "nombre": "Filtro del bot: RSI bajo 50 y a menos de 20% bajo la EMA200",
    "EE.UU.": {
     "1m": {
-     "exceso_promedio": -0.001,
-     "t": -0.9,
-     "acierto": 0.472,
-     "mediana": -0.0046,
-     "casos": 22222,
+     "exceso_promedio": -0.0003,
+     "t": -0.25,
+     "acierto": 0.483,
+     "mediana": -0.0029,
+     "casos": 17403,
      "meses": 102
     },
     "3m": {
-     "exceso_promedio": -0.0012,
-     "t": -0.32,
-     "acierto": 0.47,
-     "mediana": -0.0094,
-     "casos": 22220,
+     "exceso_promedio": 0.0003,
+     "t": 0.09,
+     "acierto": 0.486,
+     "mediana": -0.0039,
+     "casos": 17403,
      "meses": 102
     },
     "6m": {
-     "exceso_promedio": -0.0051,
-     "t": -0.69,
-     "acierto": 0.443,
-     "mediana": -0.0247,
-     "casos": 22220,
+     "exceso_promedio": -0.0026,
+     "t": -0.35,
+     "acierto": 0.469,
+     "mediana": -0.0127,
+     "casos": 17403,
      "meses": 102
     }
    },
@@ -1255,71 +1635,419 @@
      "meses": 98
     }
    }
+  },
+  "per_barato": {
+   "nombre": "PER bajo 0,8 veces el del mercado",
+   "EE.UU.": {
+    "1m": {
+     "exceso_promedio": 0.0008,
+     "t": 0.54,
+     "acierto": 0.49,
+     "mediana": -0.0017,
+     "casos": 12811,
+     "meses": 102
+    },
+    "3m": {
+     "exceso_promedio": 0.0012,
+     "t": 0.26,
+     "acierto": 0.485,
+     "mediana": -0.0042,
+     "casos": 12811,
+     "meses": 102
+    },
+    "6m": {
+     "exceso_promedio": 0.0019,
+     "t": 0.18,
+     "acierto": 0.481,
+     "mediana": -0.009,
+     "casos": 12811,
+     "meses": 102
+    }
+   }
+  },
+  "per_caro": {
+   "nombre": "PER sobre 1,6 veces el del mercado sin crecimiento fuerte",
+   "EE.UU.": {
+    "1m": {
+     "exceso_promedio": -0.0008,
+     "t": -0.47,
+     "acierto": 0.475,
+     "mediana": -0.0043,
+     "casos": 5273,
+     "meses": 102
+    },
+    "3m": {
+     "exceso_promedio": 0.0006,
+     "t": 0.09,
+     "acierto": 0.467,
+     "mediana": -0.0087,
+     "casos": 5273,
+     "meses": 102
+    },
+    "6m": {
+     "exceso_promedio": 0.0021,
+     "t": 0.16,
+     "acierto": 0.46,
+     "mediana": -0.0174,
+     "casos": 5273,
+     "meses": 102
+    }
+   }
+  },
+  "roe_alto": {
+   "nombre": "ROE de 15% o más",
+   "EE.UU.": {
+    "1m": {
+     "exceso_promedio": 0.0003,
+     "t": 0.31,
+     "acierto": 0.489,
+     "mediana": -0.0015,
+     "casos": 19723,
+     "meses": 102
+    },
+    "3m": {
+     "exceso_promedio": -0.0002,
+     "t": -0.08,
+     "acierto": 0.483,
+     "mediana": -0.0052,
+     "casos": 19723,
+     "meses": 102
+    },
+    "6m": {
+     "exceso_promedio": -0.0026,
+     "t": -0.41,
+     "acierto": 0.47,
+     "mediana": -0.0131,
+     "casos": 19723,
+     "meses": 102
+    }
+   }
+  },
+  "roe_bajo": {
+   "nombre": "ROE bajo 7%",
+   "EE.UU.": {
+    "1m": {
+     "exceso_promedio": 0.0011,
+     "t": 0.73,
+     "acierto": 0.482,
+     "mediana": -0.0034,
+     "casos": 6637,
+     "meses": 102
+    },
+    "3m": {
+     "exceso_promedio": 0.0056,
+     "t": 1.12,
+     "acierto": 0.476,
+     "mediana": -0.0065,
+     "casos": 6637,
+     "meses": 102
+    },
+    "6m": {
+     "exceso_promedio": 0.0155,
+     "t": 1.38,
+     "acierto": 0.464,
+     "mediana": -0.0146,
+     "casos": 6637,
+     "meses": 102
+    }
+   }
+  },
+  "deuda_alta": {
+   "nombre": "Deuda mayor a 2 veces el patrimonio",
+   "EE.UU.": {
+    "1m": {
+     "exceso_promedio": 0.0005,
+     "t": 0.35,
+     "acierto": 0.492,
+     "mediana": -0.001,
+     "casos": 3433,
+     "meses": 102
+    },
+    "3m": {
+     "exceso_promedio": 0.0019,
+     "t": 0.42,
+     "acierto": 0.49,
+     "mediana": -0.0036,
+     "casos": 3433,
+     "meses": 102
+    },
+    "6m": {
+     "exceso_promedio": 0.0025,
+     "t": 0.26,
+     "acierto": 0.483,
+     "mediana": -0.0082,
+     "casos": 3433,
+     "meses": 102
+    }
+   }
+  },
+  "utilidad_creciendo": {
+   "nombre": "Utilidad creciendo 10% o más",
+   "EE.UU.": {
+    "1m": {
+     "exceso_promedio": -0.0004,
+     "t": -0.48,
+     "acierto": 0.49,
+     "mediana": -0.0014,
+     "casos": 17040,
+     "meses": 102
+    },
+    "3m": {
+     "exceso_promedio": -0.0014,
+     "t": -0.45,
+     "acierto": 0.483,
+     "mediana": -0.0048,
+     "casos": 17040,
+     "meses": 102
+    },
+    "6m": {
+     "exceso_promedio": -0.0038,
+     "t": -0.55,
+     "acierto": 0.474,
+     "mediana": -0.012,
+     "casos": 17040,
+     "meses": 102
+    }
+   }
+  },
+  "utilidad_cayendo": {
+   "nombre": "Utilidad cayendo 15% o más",
+   "EE.UU.": {
+    "1m": {
+     "exceso_promedio": 0.0007,
+     "t": 0.61,
+     "acierto": 0.477,
+     "mediana": -0.0041,
+     "casos": 9412,
+     "meses": 102
+    },
+    "3m": {
+     "exceso_promedio": 0.0022,
+     "t": 0.56,
+     "acierto": 0.474,
+     "mediana": -0.0078,
+     "casos": 9412,
+     "meses": 102
+    },
+    "6m": {
+     "exceso_promedio": 0.005,
+     "t": 0.57,
+     "acierto": 0.468,
+     "mediana": -0.0124,
+     "casos": 9412,
+     "meses": 102
+    }
+   }
+  },
+  "payout_alto": {
+   "nombre": "Reparte en dividendos más que su utilidad",
+   "EE.UU.": {
+    "1m": {
+     "exceso_promedio": -0.0028,
+     "t": -1.73,
+     "acierto": 0.472,
+     "mediana": -0.0043,
+     "casos": 3344,
+     "meses": 102
+    },
+    "3m": {
+     "exceso_promedio": -0.009,
+     "t": -1.92,
+     "acierto": 0.457,
+     "mediana": -0.0105,
+     "casos": 3344,
+     "meses": 102
+    },
+    "6m": {
+     "exceso_promedio": -0.0178,
+     "t": -1.92,
+     "acierto": 0.427,
+     "mediana": -0.027,
+     "casos": 3344,
+     "meses": 102
+    }
+   }
+  },
+  "calidad_alta": {
+   "nombre": "Utilidad respaldada por caja: 20% superior de su sector",
+   "EE.UU.": {
+    "1m": {
+     "exceso_promedio": 0.0023,
+     "t": 2.11,
+     "acierto": 0.491,
+     "mediana": -0.002,
+     "casos": 6743,
+     "meses": 102
+    },
+    "3m": {
+     "exceso_promedio": 0.0072,
+     "t": 1.81,
+     "acierto": 0.485,
+     "mediana": -0.0049,
+     "casos": 6743,
+     "meses": 102
+    },
+    "6m": {
+     "exceso_promedio": 0.0133,
+     "t": 1.48,
+     "acierto": 0.469,
+     "mediana": -0.0134,
+     "casos": 6743,
+     "meses": 102
+    }
+   }
+  },
+  "calidad_baja": {
+   "nombre": "Utilidad respaldada por caja: 20% inferior de su sector",
+   "EE.UU.": {
+    "1m": {
+     "exceso_promedio": 0.0009,
+     "t": 0.78,
+     "acierto": 0.484,
+     "mediana": -0.003,
+     "casos": 5999,
+     "meses": 102
+    },
+    "3m": {
+     "exceso_promedio": 0.0029,
+     "t": 0.81,
+     "acierto": 0.481,
+     "mediana": -0.0053,
+     "casos": 5999,
+     "meses": 102
+    },
+    "6m": {
+     "exceso_promedio": 0.0053,
+     "t": 0.67,
+     "acierto": 0.48,
+     "mediana": -0.0105,
+     "casos": 5999,
+     "meses": 102
+    }
+   }
+  },
+  "fundamental_favorable": {
+   "nombre": "Veredicto fundamental del asesor: favorable",
+   "EE.UU.": {
+    "1m": {
+     "exceso_promedio": 0.0005,
+     "t": 0.54,
+     "acierto": 0.494,
+     "mediana": -0.001,
+     "casos": 13271,
+     "meses": 102
+    },
+    "3m": {
+     "exceso_promedio": 0.0001,
+     "t": 0.04,
+     "acierto": 0.489,
+     "mediana": -0.0029,
+     "casos": 13271,
+     "meses": 102
+    },
+    "6m": {
+     "exceso_promedio": -0.0016,
+     "t": -0.26,
+     "acierto": 0.477,
+     "mediana": -0.0104,
+     "casos": 13271,
+     "meses": 102
+    }
+   }
+  },
+  "fundamental_debil": {
+   "nombre": "Veredicto fundamental del asesor: débil",
+   "EE.UU.": {
+    "1m": {
+     "exceso_promedio": -0.0005,
+     "t": -0.37,
+     "acierto": 0.473,
+     "mediana": -0.0046,
+     "casos": 5445,
+     "meses": 102
+    },
+    "3m": {
+     "exceso_promedio": -0.0009,
+     "t": -0.19,
+     "acierto": 0.466,
+     "mediana": -0.0087,
+     "casos": 5445,
+     "meses": 102
+    },
+    "6m": {
+     "exceso_promedio": -0.0002,
+     "t": -0.02,
+     "acierto": 0.445,
+     "mediana": -0.0221,
+     "casos": 5445,
+     "meses": 102
+    }
+   }
   }
  },
  "top5": {
   "EE.UU.": {
    "1m": {
-    "exceso_promedio": 0.0186,
-    "t": 2.03,
-    "acierto": 0.492,
-    "mediana": -0.0016,
+    "exceso_promedio": 0.0103,
+    "t": 1.5,
+    "acierto": 0.506,
+    "mediana": 0.0022,
     "meses_positivos": 0.5,
     "casos": 510,
     "meses": 102,
     "por_anio": {
-     "2017": 0.0195,
-     "2018": 0.008,
-     "2019": -0.0026,
-     "2020": 0.062,
-     "2021": -0.0201,
-     "2022": 0.0141,
-     "2023": 0.0157,
-     "2024": 0.0361,
-     "2025": 0.0172,
-     "2026": 0.0893
+     "2017": 0.0233,
+     "2018": 0.0054,
+     "2019": 0.0034,
+     "2020": 0.0094,
+     "2021": -0.0032,
+     "2022": 0.0168,
+     "2023": -0.0011,
+     "2024": 0.0046,
+     "2025": 0.0169,
+     "2026": 0.1169
     }
    },
    "3m": {
-    "exceso_promedio": 0.0585,
-    "t": 1.8,
-    "acierto": 0.506,
-    "mediana": 0.0022,
-    "meses_positivos": 0.618,
+    "exceso_promedio": 0.0189,
+    "t": 0.79,
+    "acierto": 0.484,
+    "mediana": -0.0033,
+    "meses_positivos": 0.529,
     "casos": 510,
     "meses": 102,
     "por_anio": {
-     "2017": 0.0821,
-     "2018": 0.0376,
-     "2019": 0.0065,
-     "2020": 0.1243,
-     "2021": -0.048,
-     "2022": -0.004,
-     "2023": 0.1568,
-     "2024": 0.0552,
-     "2025": 0.0299,
-     "2026": 0.4739
+     "2017": 0.0693,
+     "2018": -0.0022,
+     "2019": -0.0023,
+     "2020": -0.0112,
+     "2021": -0.002,
+     "2022": 0.0138,
+     "2023": 0.0359,
+     "2024": -0.0074,
+     "2025": 0.0084,
+     "2026": 0.4423
     }
    },
    "6m": {
-    "exceso_promedio": 0.122,
-    "t": 1.71,
-    "acierto": 0.524,
-    "mediana": 0.0144,
-    "meses_positivos": 0.627,
+    "exceso_promedio": 0.044,
+    "t": 0.98,
+    "acierto": 0.506,
+    "mediana": 0.0031,
+    "meses_positivos": 0.588,
     "casos": 510,
     "meses": 102,
     "por_anio": {
-     "2017": 0.1808,
-     "2018": 0.0846,
-     "2019": 0.0576,
-     "2020": 0.1986,
-     "2021": -0.0725,
-     "2022": 0.0151,
-     "2023": 0.2626,
-     "2024": 0.2109,
-     "2025": 0.188,
-     "2026": 0.1879
+     "2017": 0.1351,
+     "2018": -0.0073,
+     "2019": 0.0311,
+     "2020": -0.0047,
+     "2021": -0.021,
+     "2022": 0.0245,
+     "2023": 0.0744,
+     "2024": 0.0433,
+     "2025": 0.1225,
+     "2026": 0.3077
     }
    }
   },
@@ -1388,24 +2116,247 @@
    }
   }
  },
+ "metodos": {
+  "calidad_eeuu": {
+   "nombre": "EE.UU.: utilidad respaldada por caja, la mejor de cada sector",
+   "mercado": "EE.UU.",
+   "n": 20,
+   "1m": {
+    "exceso_promedio": 0.0071,
+    "t": 3.0,
+    "acierto": 0.51,
+    "mediana": 0.0017,
+    "meses_positivos": 0.588,
+    "casos": 2040,
+    "meses": 102,
+    "por_anio": {
+     "2017": 0.0212,
+     "2018": 0.0006,
+     "2019": 0.0015,
+     "2020": 0.0236,
+     "2021": 0.0023,
+     "2022": 0.0045,
+     "2023": -0.0038,
+     "2024": -0.0069,
+     "2025": 0.0235,
+     "2026": 0.0382
+    },
+    "mitades": {
+     "antes": {
+      "desde": "2017-10",
+      "hasta": "2021-09",
+      "exceso_promedio": 0.0085,
+      "t": 2.86
+     },
+     "despues": {
+      "desde": "2021-10",
+      "hasta": "2026-03",
+      "exceso_promedio": 0.0058,
+      "t": 1.61
+     }
+    }
+   },
+   "3m": {
+    "exceso_promedio": 0.0253,
+    "t": 2.94,
+    "acierto": 0.519,
+    "mediana": 0.0068,
+    "meses_positivos": 0.657,
+    "casos": 2040,
+    "meses": 102,
+    "por_anio": {
+     "2017": 0.041,
+     "2018": 0.0136,
+     "2019": 0.0083,
+     "2020": 0.0694,
+     "2021": 0.0093,
+     "2022": 0.0115,
+     "2023": -0.0087,
+     "2024": -0.0187,
+     "2025": 0.0773,
+     "2026": 0.1722
+    },
+    "mitades": {
+     "antes": {
+      "desde": "2017-10",
+      "hasta": "2021-09",
+      "exceso_promedio": 0.0256,
+      "t": 2.73
+     },
+     "despues": {
+      "desde": "2021-10",
+      "hasta": "2026-03",
+      "exceso_promedio": 0.0251,
+      "t": 1.78
+     }
+    }
+   },
+   "6m": {
+    "exceso_promedio": 0.0474,
+    "t": 2.13,
+    "acierto": 0.507,
+    "mediana": 0.0031,
+    "meses_positivos": 0.676,
+    "casos": 2040,
+    "meses": 102,
+    "por_anio": {
+     "2017": 0.0715,
+     "2018": 0.028,
+     "2019": 0.0356,
+     "2020": 0.1135,
+     "2021": 0.0167,
+     "2022": 0.0142,
+     "2023": -0.0194,
+     "2024": -0.026,
+     "2025": 0.2061,
+     "2026": 0.0653
+    },
+    "mitades": {
+     "antes": {
+      "desde": "2017-10",
+      "hasta": "2021-09",
+      "exceso_promedio": 0.049,
+      "t": 2.28
+     },
+     "despues": {
+      "desde": "2021-10",
+      "hasta": "2026-03",
+      "exceso_promedio": 0.046,
+      "t": 1.22
+     }
+    }
+   }
+  },
+  "momentum_chile": {
+   "nombre": "Chile: las de mayor alza de los últimos 12 meses (sin el último mes)",
+   "mercado": "Chile",
+   "n": 5,
+   "1m": {
+    "exceso_promedio": 0.0073,
+    "t": 1.87,
+    "acierto": 0.537,
+    "mediana": 0.0075,
+    "meses_positivos": 0.627,
+    "casos": 508,
+    "meses": 102,
+    "por_anio": {
+     "2017": -0.0081,
+     "2018": -0.0022,
+     "2019": -0.0106,
+     "2020": 0.0051,
+     "2021": 0.0238,
+     "2022": 0.0003,
+     "2023": 0.0099,
+     "2024": 0.0098,
+     "2025": 0.0192,
+     "2026": 0.0348
+    },
+    "mitades": {
+     "antes": {
+      "desde": "2017-10",
+      "hasta": "2021-09",
+      "exceso_promedio": 0.0032,
+      "t": 0.57
+     },
+     "despues": {
+      "desde": "2021-10",
+      "hasta": "2026-03",
+      "exceso_promedio": 0.011,
+      "t": 2.01
+     }
+    }
+   },
+   "3m": {
+    "exceso_promedio": 0.019,
+    "t": 1.56,
+    "acierto": 0.54,
+    "mediana": 0.0119,
+    "meses_positivos": 0.618,
+    "casos": 506,
+    "meses": 102,
+    "por_anio": {
+     "2017": -0.0672,
+     "2018": 0.0028,
+     "2019": -0.0456,
+     "2020": 0.0309,
+     "2021": 0.0796,
+     "2022": 0.0194,
+     "2023": 0.0031,
+     "2024": 0.0307,
+     "2025": 0.0505,
+     "2026": 0.0291
+    },
+    "mitades": {
+     "antes": {
+      "desde": "2017-10",
+      "hasta": "2021-09",
+      "exceso_promedio": 0.006,
+      "t": 0.31
+     },
+     "despues": {
+      "desde": "2021-10",
+      "hasta": "2026-03",
+      "exceso_promedio": 0.0306,
+      "t": 2.06
+     }
+    }
+   },
+   "6m": {
+    "exceso_promedio": 0.0326,
+    "t": 1.06,
+    "acierto": 0.535,
+    "mediana": 0.016,
+    "meses_positivos": 0.586,
+    "casos": 493,
+    "meses": 99,
+    "por_anio": {
+     "2017": -0.0555,
+     "2018": -0.0074,
+     "2019": -0.1048,
+     "2020": 0.0711,
+     "2021": 0.1735,
+     "2022": 0.004,
+     "2023": 0.0195,
+     "2024": 0.0932,
+     "2025": 0.0336
+    },
+    "mitades": {
+     "antes": {
+      "desde": "2017-10",
+      "hasta": "2021-09",
+      "exceso_promedio": 0.0063,
+      "t": 0.14
+     },
+     "despues": {
+      "desde": "2021-10",
+      "hasta": "2025-12",
+      "exceso_promedio": 0.0573,
+      "t": 1.38
+     }
+    }
+   }
+  }
+ },
  "muestra": {
   "EE.UU.": {
    "desde": "2016-10-14",
-   "hasta": "2026-10-13",
+   "hasta": "2026-10-12",
    "fechas_evaluadas": 102,
-   "acciones": 575
+   "acciones": 503,
+   "universo": "S&P 500 en la fecha (miembros actuales desde su ingreso)"
   },
   "Chile": {
    "desde": "2016-10-13",
    "hasta": "2026-10-13",
    "fechas_evaluadas": 102,
-   "acciones": 31
+   "acciones": 31,
+   "universo": "IPSA actual"
   }
  },
  "sesgos": [
-  "Supervivencia: el universo es la lista actual de los índices; las empresas que quebraron o salieron no están, lo que favorece a las señales que compran caídas. Las que entraron después de subir mucho sí están con toda su historia, lo que favorece a las acciones volátiles y a las que ya subieron.",
-  "Solo señales de precio: Yahoo no entrega los fundamentales de cada fecha pasada.",
+  "Supervivencia: en EE.UU. cada fecha usa solo las empresas del S&P 500 actual que ya estaban en el índice; las que salieron (la mayoría por caer) no están, lo que favorece a las señales que compran caídas. En Chile se usa el IPSA actual con toda su historia.",
+  "Fundamentales solo de EE.UU. (SEC EDGAR, cada cifra 90 días después del cierre de su año fiscal); el valor de mercado se estima con el valor en manos del público, así que las empresas con controlador grande salen algo más baratas. Para Chile no hay fundamentales históricos gratuitos.",
   "Exceso frente al promedio simple de cada mercado, antes de comisiones e impuestos."
  ],
- "calculado": "2026-10-14T01:48:08.156849+00:00"
+ "calculado": "2026-10-14T02:34:01.897248+00:00"
 }

@@ -39,6 +39,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          # La SEC exige un correo de contacto para entregar los estados financieros (fundamentales de EE.UU.)
+          SEC_CONTACTO: ${{ secrets.SEC_CONTACTO }}
         run: python evidencia.py --salida web/src/data/evidencia.json
 
       - name: Guardar el resultado
