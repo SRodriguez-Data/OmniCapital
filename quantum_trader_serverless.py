@@ -1,7 +1,6 @@
 import os
 import sys
 import time
-import importlib
 import logging
 import pandas as pd
 import yfinance as yf
@@ -11,21 +10,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-REST = None
-try:
-    REST = importlib.import_module("alpaca_trade_api").REST
-except ModuleNotFoundError:
-    REST = None
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-
-ALPACA_API_KEY = os.getenv('ALPACA_API_KEY')
-ALPACA_SECRET_KEY = os.getenv('ALPACA_SECRET_KEY')
-ALPACA_BASE_URL = 'https://paper-api.alpaca.markets'
-
+# Las órdenes en Alpaca (paper) las envía trading/main.py, no este bot: aquí solo se eligen las ideas
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SECRET_KEY")
 
