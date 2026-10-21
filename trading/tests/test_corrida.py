@@ -24,8 +24,8 @@ class Consulta:
         return lambda *a, **k: self
 
     def upsert(self, fila):
-        self.base.guardadas.append(fila)
-        self.base.tablas['paper_trading'] = [fila]
+        self.base.guardadas.append({**fila, 'tabla': self.tabla})
+        self.base.tablas[self.tabla] = [fila]
         return self
 
     def execute(self):
@@ -46,7 +46,8 @@ class SupabaseFalso:
 
 
 class BrokerFalso:
-    def __init__(self, efectivo=100_000.0, posiciones=None, ayer=None, abierto=True):
+    def __init__(self, efectivo=100_000.0, posiciones=None, ayer=None, abierto=True, real=False):
+        self.real = real
         self.efectivo = efectivo
         self.pos = dict(posiciones or {})
         self.ayer = ayer
@@ -59,7 +60,7 @@ class BrokerFalso:
 
     def cuenta(self):
         patrimonio = self.efectivo + sum(p.valor for p in self.pos.values())
-        return Cuenta('PA123', 'ACTIVE', patrimonio, self.ayer or patrimonio, self.efectivo, False, None)
+        return Cuenta('9XA123' if self.real else 'PA123', 'ACTIVE', patrimonio, self.ayer or patrimonio, self.efectivo, False, None)
 
     def posiciones(self):
         return dict(self.pos)
@@ -100,8 +101,8 @@ class BrokerFalso:
         return []
 
 
-def correr(broker, supabase, enviar=True):
-    c = Corrida(broker, supabase, enviar)
+def correr(broker, supabase, enviar=True, **opciones):
+    c = Corrida(broker, supabase, enviar, **opciones)
     return c.correr(), c
 
 
@@ -156,6 +157,29 @@ class CorridaCompleta(unittest.TestCase):
         sb = SupabaseFalso(ideas=nuevas, estado={'rebalanceo': {'mes': '2026-09'}})
         correr(b, sb)
         self.assertEqual(sorted((o.symbol, o.side.value) for o in b.enviadas), [('AAA', 'sell'), ('ZZZ', 'buy')])
+
+
+class CuentaReal(unittest.TestCase):
+    def test_invierte_solo_hasta_el_tope_y_guarda_en_la_tabla_privada(self):
+        b, sb = BrokerFalso(real=True), SupabaseFalso()
+        codigo, _ = correr(b, sb, tope=1000, dueno='u-1')
+        self.assertEqual(codigo, 0)
+        self.assertEqual(len(b.pos), 20)
+        self.assertAlmostEqual(sum(p.valor for p in b.pos.values()), 1000, delta=1)  # el resto queda en efectivo
+        self.assertEqual({g['tabla'] for g in sb.guardadas}, {'real_trading'})
+        self.assertEqual(sb.guardadas[-1]['user_id'], 'u-1')
+        self.assertEqual(sb.guardadas[-1]['datos']['tope'], 1000)
+
+    def test_con_menos_patrimonio_que_el_tope_usa_lo_que_hay(self):
+        b, sb = BrokerFalso(efectivo=400.0, real=True), SupabaseFalso()
+        correr(b, sb, tope=1000)
+        self.assertAlmostEqual(sum(p.valor for p in b.pos.values()), 398, delta=1)  # 400 menos la reserva de 0,5%
+
+    def test_el_rebalanceo_de_paper_no_cuenta_para_la_cuenta_real(self):
+        sb = SupabaseFalso(estado={'rebalanceo': {'mes': '2026-10'}})  # paper ya rebalanceó este mes
+        b = BrokerFalso(real=True)
+        correr(b, sb, tope=1000)
+        self.assertEqual(len(b.enviadas), 20)
 
 
 if __name__ == '__main__':

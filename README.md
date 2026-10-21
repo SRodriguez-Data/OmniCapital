@@ -19,7 +19,7 @@ Plataforma web que consolida las inversiones de una persona en varias corredoras
 - **Reglas a nivel de cartera:** frena las compras que empeorarían la concentración por sector (más de 35%) o en un país (más de 60%), las de activos casi idénticos a otro que ya se tiene (correlación ≥ 0,9) y las de alto riesgo cuando el mercado está defensivo.
 - **IA acotada:** Gemini solo redacta el diagnóstico a partir de los números calculados. Si el texto menciona otra acción o un porcentaje que no está en los datos, se descarta.
 - **Noticias** de los últimos 30 días por empresa (Google News y Yahoo Finance), filtradas para que de verdad hablen de la empresa, con su tono resumido.
-- **Simulación en vivo (paper trading):** cada mes compra con dinero ficticio, en una cuenta de práctica de Alpaca, las 20 acciones del Top de EE.UU. a partes iguales y compara la cartera con el S&P 500. Tiene control de riesgo propio (máximo 6% por acción, freno si el patrimonio cae 3% en un día, stop loss lejano, sin margen ni cortos) y el código no tiene modo de dinero real.
+- **Simulación en vivo (paper trading):** cada mes compra con dinero ficticio, en una cuenta de práctica de Alpaca, las 20 acciones del Top de EE.UU. a partes iguales y compara la cartera con el S&P 500. Tiene control de riesgo propio (máximo 6% por acción, freno si el patrimonio cae 3% en un día, stop loss lejano, sin margen ni cortos). El mismo sistema puede operar una cuenta de dinero real, con claves aparte, un tope de inversión obligatorio y apagado hasta activarlo a mano.
 - **Otras herramientas:** las cinco oportunidades del día según el *screener*, el calendario de dividendos, un optimizador de compras con nuevo capital y *backtesting*.
 
 | Perfil del inversionista | Mi portafolio |
@@ -39,7 +39,7 @@ flowchart LR
   API --> UI["React 19<br/>(navegador)"]
   PDF["Cartolas PDF"] --> UI
   DB -->|Top del día| PT["Simulación<br/>(GitHub Actions)"]
-  PT <-->|órdenes| AL["Alpaca<br/>paper trading"]
+  PT <-->|órdenes| AL["Alpaca<br/>paper (y real, si se activa)"]
   PT -->|estado de la cartera| DB
 ```
 
@@ -55,7 +55,7 @@ flowchart LR
 | Backend | API routes de Next.js en Vercel (Node), yahoo-finance2, pdf.js |
 | Datos | Supabase (PostgreSQL, Auth, Row Level Security) |
 | Pipeline | Python (pandas, NumPy, yfinance) en GitHub Actions |
-| Simulación | alpaca-py contra Alpaca paper trading, en GitHub Actions |
+| Simulación | alpaca-py contra Alpaca (paper, y real si se activa), en GitHub Actions |
 | IA | Google Gemini (plan gratuito), con salida en JSON validada |
 | Cuantitativo | Ledoit-Wolf, Newey-West, VaR y ES históricos, beta de Dimson, paridad de riesgo, frontera eficiente |
 
@@ -63,7 +63,7 @@ flowchart LR
 
 - Cada usuario solo ve su portafolio y su perfil (políticas RLS en Postgres). Las tablas de mercado son de solo lectura para la web; únicamente el minero escribe, con una clave que vive en los secretos de GitHub.
 - No hay claves en el código: todo va en variables de entorno de Vercel y secretos de GitHub Actions.
-- La simulación solo se conecta al servidor de paper de Alpaca y rechaza cualquier cuenta que no sea de práctica. La web nunca ve esas claves: lee el estado de la cartera desde una tabla de solo lectura.
+- La simulación solo se conecta al servidor de paper de Alpaca y rechaza cualquier cuenta que no sea de práctica. La cuenta real usa otras claves, otro servidor y otro workflow (`real_trading.yml`), que no envía órdenes hasta que la variable `TRADING_REAL` vale `activo`; su log no muestra montos porque el repositorio es público. La web nunca ve las claves de Alpaca: lee el estado de la simulación desde una tabla pública de solo lectura y el de la cuenta real desde otra que solo ve su dueño.
 - Las cartolas reales no se versionan (`Cartolas/` está en `.gitignore`) y se leen en el navegador.
 - Las rutas de la API validan tamaño y forma de lo que reciben y tienen límite de solicitudes por IP.
 
@@ -72,7 +72,7 @@ flowchart LR
 ```
 miner.py                       minero diario: precios, indicadores, dividendos y fundamentales -> Supabase
 quantum_trader_serverless.py   ideas diarias del Top con los métodos medidos en evidencia.py
-trading/                       simulación en Alpaca paper: conector, riesgo, estrategias, main.py y verify_setup.py
+trading/                       Top v2 en Alpaca (paper o real): conector, riesgo, estrategias, main.py y verify_setup.py
 supabase/                      SQL de tablas, índices y políticas de seguridad
 web/src/lib/                   motor: advisor.ts, quant.ts, CartolaParser.ts, LibroInversiones.ts, perfil.ts
 web/src/app/api/               rutas de la API (informe, redacción, noticias, precios, backtest)
@@ -95,6 +95,13 @@ pip install -r trading/requirements.txt
 python -m trading.verify_setup   # revisa claves, cuenta de práctica y Supabase; no envía órdenes
 python -m trading.main           # muestra el plan del día; con --enviar lo ejecuta en la cuenta de paper
 ```
+
+Cuenta de dinero real (opcional). Necesita una cuenta de Alpaca aprobada y con fondos, y:
+
+1. Claves de la vista **Live** del panel de Alpaca (empiezan con `AK`) en `ALPACA_REAL_API_KEY` y `ALPACA_REAL_SECRET_KEY`, y en `ALPACA_REAL_TOPE_USD` los dólares que el sistema puede invertir (enteros, por ejemplo `500`; si la cuenta tiene más, el resto queda en efectivo). En `.env` para probar en local y como *secrets* del repositorio para GitHub Actions, más `TRADING_REAL_USUARIO` (tu `user_id` de Supabase) para verla en la web.
+2. Ejecutar `supabase/real_trading.sql` en el SQL Editor de Supabase.
+3. `python -m trading.verify_setup --real` y `python -m trading.main --real` (solo muestra el plan).
+4. Activarla: variable de repositorio `TRADING_REAL` = `activo` (Settings → Secrets and variables → Actions → Variables). Para apagarla, borrar la variable.
 
 Variables necesarias en `web/.env.local`: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` y, opcionalmente, `GEMINI_API_KEY`. Más detalle en [web/README.md](web/README.md).
 

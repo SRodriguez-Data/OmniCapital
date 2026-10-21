@@ -1,0 +1,65 @@
+name: Trading real (Top v2 con dinero de verdad)
+
+# Apagado hasta que la variable del repositorio TRADING_REAL valga "activo" (Settings → Secrets and variables →
+# Actions → Variables). Sin ella las corridas programadas se saltan y una manual solo puede mostrar el plan.
+# Necesita los secrets ALPACA_REAL_API_KEY, ALPACA_REAL_SECRET_KEY y ALPACA_REAL_TOPE_USD (y TRADING_REAL_USUARIO
+# para verla en la web). Apagarlo: borrar la variable o cambiarle el valor.
+
+on:
+  schedule:
+    # Los mismos horarios que la simulación (paper_trading.yml): cuatro por si GitHub atrasa un cron; cada corrida
+    # es idempotente y solo la primera con la bolsa abierta rebalancea.
+    - cron: '47 14 * * 1-5'
+    - cron: '17 16 * * 1-5'
+    - cron: '47 17 * * 1-5'
+    - cron: '17 19 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      enviar:
+        description: 'Enviar órdenes con DINERO REAL (necesita TRADING_REAL = activo; si no, solo muestra el plan)'
+        type: boolean
+        default: false
+
+# Dos corridas a la vez podrían duplicar órdenes
+concurrency:
+  group: real-trading
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  operar:
+    if: vars.TRADING_REAL == 'activo' || (github.event_name == 'workflow_dispatch' && !inputs.enviar)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: trading/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r trading/requirements.txt
+
+      - name: Test the order plan and risk rules
+        run: python -m unittest discover -s trading/tests -t .
+
+      # El log no muestra montos (el repositorio es público): el detalle queda en la web, solo para su dueño
+      - name: Run the strategy on the real account
+        env:
+          ALPACA_REAL_API_KEY: ${{ secrets.ALPACA_REAL_API_KEY }}
+          ALPACA_REAL_SECRET_KEY: ${{ secrets.ALPACA_REAL_SECRET_KEY }}
+          ALPACA_REAL_TOPE_USD: ${{ secrets.ALPACA_REAL_TOPE_USD }}
+          TRADING_REAL_USUARIO: ${{ secrets.TRADING_REAL_USUARIO }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python -m trading.main --real ${{ vars.TRADING_REAL == 'activo' && (github.event_name == 'schedule' || inputs.enviar) && '--enviar' || '' }}

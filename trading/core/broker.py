@@ -1,8 +1,8 @@
-"""Conexión con Alpaca en modo paper (dinero ficticio).
+"""Conexión con Alpaca: la cuenta de paper (dinero ficticio) o, con `real=True`, la de dinero real.
 
-No existe un modo real: el cliente se crea siempre contra el servidor de paper y se rechaza cualquier cuenta que no
-sea de paper, así que este código no puede mover dinero de verdad. Las claves se leen del entorno (.env en local,
-secrets en GitHub Actions) y nunca se escriben en los logs.
+Cada modo tiene sus propias claves y su servidor, fijado aquí: con las claves de paper no se llega a la cuenta real ni
+al revés, y se rechaza la cuenta que no corresponde al modo. Las claves se leen del entorno (.env en local, secrets
+en GitHub Actions) y nunca se escriben en los logs.
 """
 import logging
 import math
@@ -21,8 +21,16 @@ from alpaca.trading.requests import GetOrdersRequest, GetPortfolioHistoryRequest
 FINALES = {'filled', 'canceled', 'expired', 'rejected', 'done_for_day', 'stopped', 'suspended'}
 
 
+# Variables de entorno con las claves de cada modo (real: True/False)
+CLAVES = {False: ('ALPACA_API_KEY', 'ALPACA_SECRET_KEY'), True: ('ALPACA_REAL_API_KEY', 'ALPACA_REAL_SECRET_KEY')}
+# Alpaca numera las claves de paper PK... y las de dinero real AK...
+PREFIJO = {False: 'PK', True: 'AK'}
+# Depósitos, retiros y traspasos: mueven el patrimonio sin ser ganancia ni pérdida
+FLUJOS = 'CSD,CSW,JNLC'
+
+
 class ErrorConfiguracion(RuntimeError):
-    """Faltan claves, están mal puestas o la cuenta no es de paper: no se opera."""
+    """Faltan claves, están mal puestas o la cuenta no es la del modo pedido: no se opera."""
 
 
 @dataclass
@@ -63,28 +71,37 @@ def _num(x) -> float:
 
 
 class Broker:
-    def __init__(self, clave: str | None = None, secreto: str | None = None):
-        clave = (clave if clave is not None else os.getenv('ALPACA_API_KEY', '')).strip()
-        secreto = (secreto if secreto is not None else os.getenv('ALPACA_SECRET_KEY', '')).strip()
+    def __init__(self, real: bool = False, clave: str | None = None, secreto: str | None = None):
+        self.real = real
+        var_clave, var_secreto = CLAVES[real]
+        prefijo = PREFIJO[real]
+        clave = (clave if clave is not None else os.getenv(var_clave, '')).strip()
+        secreto = (secreto if secreto is not None else os.getenv(var_secreto, '')).strip()
         if not clave or not secreto:
-            raise ErrorConfiguracion('Faltan ALPACA_API_KEY y ALPACA_SECRET_KEY (en .env o en los secrets de GitHub).')
+            raise ErrorConfiguracion(f'Faltan {var_clave} y {var_secreto} (en .env o en los secrets de GitHub).')
         if clave.startswith('http') or secreto.startswith('http'):
-            raise ErrorConfiguracion('Una de las claves es una URL: ALPACA_API_KEY lleva el Key ID (empieza con PK) y '
-                                     'ALPACA_SECRET_KEY el Secret. La URL no hace falta, el código fija la de paper.')
-        if secreto.startswith('PK'):
-            raise ErrorConfiguracion('ALPACA_SECRET_KEY tiene el Key ID (PK...): ahí va el Secret, y el Key ID en ALPACA_API_KEY.')
-        self.cliente = TradingClient(clave, secreto, paper=True)
-        if self.cliente._base_url != BaseURL.TRADING_PAPER:
-            raise ErrorConfiguracion(f'El cliente no apunta al servidor de paper ({self.cliente._base_url}).')
+            raise ErrorConfiguracion(f'Una de las claves es una URL: {var_clave} lleva el Key ID (empieza con {prefijo}) y '
+                                     f'{var_secreto} el Secret. La URL no hace falta, el código fija la del servidor.')
+        if secreto.startswith(prefijo):
+            raise ErrorConfiguracion(f'{var_secreto} tiene el Key ID ({prefijo}...): ahí va el Secret, y el Key ID en {var_clave}.')
+        if clave.startswith(PREFIJO[not real]):
+            raise ErrorConfiguracion(
+                f'{var_clave} es una clave de paper (PK...): para dinero real va una AK... de la vista Live del panel de Alpaca.'
+                if real else f'{var_clave} es una clave de dinero real (AK...): la simulación usa una de paper (PK...).')
+        self.cliente = TradingClient(clave, secreto, paper=not real)
+        servidor = BaseURL.TRADING_LIVE if real else BaseURL.TRADING_PAPER
+        if self.cliente._base_url != servidor:
+            raise ErrorConfiguracion(f'El cliente no apunta al servidor esperado ({self.cliente._base_url}, no {servidor.value}).')
         self._activos: dict[str, tuple[bool, bool]] = {}
 
     # --- Lectura ---------------------------------------------------------------------------------------------
 
     def cuenta(self) -> Cuenta:
         a = self.cliente.get_account()
-        # Las cuentas de paper de Alpaca se numeran PA...; una de dinero real no pasa de aquí
-        if not str(a.account_number or '').startswith('PA'):
-            raise ErrorConfiguracion('La cuenta no es de paper trading: no se opera.')
+        # Las cuentas de paper de Alpaca se numeran PA...: cada modo opera solo la suya
+        if str(a.account_number or '').startswith('PA') == self.real:
+            raise ErrorConfiguracion('La cuenta es de paper, no la de dinero real: no se opera.' if self.real
+                                     else 'La cuenta no es de paper trading: no se opera.')
         return Cuenta(
             numero=a.account_number, estado=str(getattr(a.status, 'value', a.status)),
             patrimonio=_num(a.equity), patrimonio_ayer=_num(a.last_equity), efectivo=_num(a.cash),
@@ -131,12 +148,11 @@ class Broker:
         return list(unicas.values())
 
     def historial(self, desde: date) -> list[tuple[str, float]]:
-        """Patrimonio al cierre de cada día desde `desde`."""
+        """Valor de la cartera al cierre de cada día desde `desde`, sin contar depósitos ni retiros como ganancia (ver
+        `indice`). Sin depósitos ni retiros, es el patrimonio."""
         h = self.cliente.get_portfolio_history(GetPortfolioHistoryRequest(
-            timeframe='1D', start=datetime.combine(desde, datetime.min.time(), tzinfo=timezone.utc)))
-        # Cada punto diario lleva la medianoche de Nueva York: en UTC sigue siendo el mismo día
-        return [(datetime.fromtimestamp(t, tz=timezone.utc).strftime('%Y-%m-%d'), float(e))
-                for t, e in zip(h.timestamp or [], h.equity or []) if e is not None]
+            timeframe='1D', start=datetime.combine(desde, datetime.min.time(), tzinfo=timezone.utc), cashflow_types=FLUJOS))
+        return indice(h.timestamp or [], h.equity or [], h.cashflow or {})
 
     # --- Órdenes ---------------------------------------------------------------------------------------------
 
@@ -186,6 +202,31 @@ class Broker:
                     del pendientes[oid]
                     listas[oid] = o
         return list(listas.values()) + [self.cliente.get_order_by_id(oid) for oid in pendientes]
+
+
+def indice(fechas: list[int], patrimonio: list, flujos: dict[str, list]) -> list[tuple[str, float]]:
+    """Encadena lo que rindió la cuenta cada día: (patrimonio de hoy − lo depositado hoy) / patrimonio de ayer. Así un
+    depósito no aparece como ganancia ni un retiro como pérdida."""
+    neto = [0.0] * len(fechas)
+    for tipo, montos in flujos.items():
+        if len(montos or []) != len(fechas):
+            continue
+        for k, m in enumerate(montos):
+            # Un depósito siempre suma y un retiro siempre resta, venga con el signo que venga
+            neto[k] += abs(_num(m)) if tipo == 'CSD' else -abs(_num(m)) if tipo == 'CSW' else _num(m)
+    puntos, valor, previo = [], None, None
+    for t, e, f in zip(fechas, patrimonio, neto):
+        if e is None:
+            continue
+        e = float(e)
+        if valor and previo and previo > 0:
+            valor *= (e - f) / previo
+        else:
+            valor = e   # primer día, o la cuenta estaba vacía: se parte del patrimonio
+        previo = e
+        # Cada punto diario lleva la medianoche de Nueva York: en UTC sigue siendo el mismo día
+        puntos.append((datetime.fromtimestamp(t, tz=timezone.utc).strftime('%Y-%m-%d'), valor))
+    return puntos
 
 
 def inicio_de_mes(hoy: date) -> datetime:
