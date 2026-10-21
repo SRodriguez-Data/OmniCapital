@@ -11,14 +11,15 @@ import MacroPanel from './components/MacroPanel';
 import NotificationBell from './components/NotificationBell';
 import BacktestTab from './components/BacktestTab';
 import DataWarehouseTab from './components/DataWarehouseTab';
+import SimulacionTab from './components/SimulacionTab';
 import { ThemeToggle } from './components/ThemeToggle';
-import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History, LogOut, Database, Landmark } from 'lucide-react';
+import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History, LogOut, Database, Landmark, FlaskConical } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { usePortfolio } from './context/PortfolioContext';
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA' | 'TOP5' | 'DIVIDENDOS' | 'BACKTEST' | 'DATA_WAREHOUSE'>('DATA_WAREHOUSE');
+  const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA' | 'TOP5' | 'DIVIDENDOS' | 'BACKTEST' | 'SIMULACION' | 'DATA_WAREHOUSE'>('DATA_WAREHOUSE');
   const [session, setSession] = useState<{ user: { id: string; email?: string } } | null>(null);
   const router = useRouter();
   const { isDemo } = usePortfolio();
@@ -158,6 +159,12 @@ export default function Home() {
         >
           <History className="w-4 h-4" /> [07] Backtesting
         </button>
+        <button 
+          onClick={() => setActiveTab('SIMULACION')}
+          className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-4 font-sans font-bold text-xs uppercase tracking-wider transition-colors border-l border-zinc-200 dark:border-[#27272a] ${activeTab === 'SIMULACION' ? 'bg-zinc-50 dark:bg-[#18181b] border-b-2 border-purple-500 text-purple-600 dark:text-purple-400' : 'text-zinc-500 dark:text-[#71717a] hover:bg-zinc-50 dark:hover:bg-[#18181b] hover:text-zinc-900 dark:hover:text-[#a1a1aa] border-b-2 border-transparent'}`}
+        >
+          <FlaskConical className="w-4 h-4" /> [08] Simulación
+        </button>
       </div>
 
       <div className="p-4 md:p-6 max-w-[1600px] mx-auto">
@@ -169,6 +176,7 @@ export default function Home() {
         {activeTab === 'BUSCADOR' && <ScreenerTab />}
         {activeTab === 'CALCULADORA' && <SizingTab />}
         {activeTab === 'BACKTEST' && <BacktestTab />}
+        {activeTab === 'SIMULACION' && <SimulacionTab />}
       </div>
     </main>
   );
