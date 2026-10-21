@@ -1,11 +1,17 @@
 'use client';
 
-import { motion, type Variants } from 'framer-motion';
+import { createContext, useContext, useEffect, useState } from 'react';
+import { AnimatePresence, motion, useReducedMotion, type Variants } from 'framer-motion';
 import { LogoMarca } from './Logo';
 import { SUAVE } from './Movimiento';
 
-// Pantalla de bienvenida al abrir la app: el logo se dibuja, el nombre aparece letra por letra y la pantalla se cierra
-// en un círculo hacia el centro, dejando ver el panel. La página decide cuándo sacarla (page.tsx); dura unos 2,2 s.
+// Pantalla de bienvenida al abrir la app, sea cual sea la página (el login o el panel): el logo se dibuja al centro,
+// el nombre aparece letra por letra y la pantalla se cierra en un círculo, dejando ver la página. Vive en el layout,
+// así que sigue corriendo aunque la página cambie debajo (el panel manda al login si no hay sesión). Dura unos 2,2 s.
+// Las páginas esperan a `terminada` para hacer su propia entrada.
+
+// Se muestra completa una vez por sesión del navegador; al recargar después, solo se desvanece
+const CLAVE = 'omni-bienvenida';
 
 // Cada letra lleva su tono del degradé de la marca (esmeralda → turquesa → cian)
 const DEGRADE = ['#34d399', '#2dd4bf', '#22d3ee'];
@@ -19,13 +25,45 @@ const LETRAS = [...'Omni'].map(l => ({ l, peso: 'font-black' })).concat([...'Cap
 
 // `rapida`: ya se vio en esta sesión, así que solo se desvanece en vez de cerrarse en círculo
 const SALIDA: Variants = {
-  visible: { clipPath: 'circle(150% at 50% 45%)', opacity: 1 },
+  visible: { clipPath: 'circle(150% at 50% 50%)', opacity: 1 },
   fuera: (rapida: boolean) => rapida
     ? { opacity: 0, transition: { duration: 0.2 } }
-    : { clipPath: 'circle(0% at 50% 45%)', transition: { duration: 0.8, ease: [0.76, 0, 0.24, 1] } },
+    : { clipPath: 'circle(0% at 50% 50%)', transition: { duration: 0.8, ease: [0.76, 0, 0.24, 1] } },
 };
 
-export default function Bienvenida() {
+const Contexto = createContext({ terminada: true });
+
+/** true cuando la bienvenida empezó a irse: la página puede hacer su entrada (se ve mientras se cierra el círculo) */
+export const useBienvenida = () => useContext(Contexto);
+
+export function ProveedorBienvenida({ children }: { children: React.ReactNode }) {
+  // Visible desde el primer render (también en el HTML del servidor): así nunca se alcanza a ver la página antes
+  const [visible, setVisible] = useState(true);
+  const [rapida, setRapida] = useState(false);
+  const reducido = useReducedMotion();
+
+  useEffect(() => {
+    let vista = false;
+    try { vista = sessionStorage.getItem(CLAVE) === '1'; } catch { /* sin almacenamiento */ }
+    const t = window.setTimeout(() => {
+      setRapida(vista);
+      setVisible(false);
+      try { sessionStorage.setItem(CLAVE, '1'); } catch { /* sin almacenamiento */ }
+    }, vista ? 0 : reducido ? 700 : 2200);
+    return () => window.clearTimeout(t);
+  }, [reducido]);
+
+  return (
+    <Contexto.Provider value={{ terminada: !visible }}>
+      {children}
+      <AnimatePresence custom={rapida}>
+        {visible && <PantallaBienvenida key="bienvenida" />}
+      </AnimatePresence>
+    </Contexto.Provider>
+  );
+}
+
+function PantallaBienvenida() {
   return (
     <motion.div
       variants={SALIDA}
@@ -35,11 +73,11 @@ export default function Bienvenida() {
       className="fixed inset-0 z-[100] flex flex-col items-center justify-center overflow-hidden bg-[#040706] text-white"
     >
       {/* Cuadrícula tenue que se desvanece hacia los bordes */}
-      <div className="absolute inset-0 opacity-[0.07] [background-image:linear-gradient(#fff_1px,transparent_1px),linear-gradient(90deg,#fff_1px,transparent_1px)] [background-size:44px_44px] [mask-image:radial-gradient(circle_at_50%_45%,black,transparent_65%)]" />
+      <div className="absolute inset-0 opacity-[0.07] [background-image:linear-gradient(#fff_1px,transparent_1px),linear-gradient(90deg,#fff_1px,transparent_1px)] [background-size:44px_44px] [mask-image:radial-gradient(circle_at_50%_50%,black,transparent_65%)]" />
 
       {/* Resplandor que se enciende detrás del logo */}
       <motion.div
-        className="absolute top-[45%] left-1/2 w-[44rem] h-[44rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(16,185,129,0.28),rgba(34,211,238,0.08)_40%,transparent_65%)]"
+        className="absolute top-1/2 left-1/2 w-[44rem] h-[44rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(16,185,129,0.28),rgba(34,211,238,0.08)_40%,transparent_65%)]"
         initial={{ scale: 0.3, opacity: 0 }}
         animate={{ scale: [0.3, 1, 0.92, 1], opacity: 1 }}
         transition={{ duration: 2.2, ease: SUAVE }}

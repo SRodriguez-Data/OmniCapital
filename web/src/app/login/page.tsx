@@ -9,8 +9,9 @@ import { usePortfolio } from '../context/PortfolioContext';
 import { useLanguage } from '../context/LanguageContext';
 import { RESORTE, SUAVE } from '../components/Movimiento';
 import { LogoMarca, LogoNombre } from '../components/Logo';
+import { useBienvenida } from '../components/Bienvenida';
 
-// La tarjeta entra primero y después sus partes, una tras otra
+// Cuando se va la bienvenida, la tarjeta entra primero y después sus partes, una tras otra
 const TARJETA: Variants = {
   oculta: { opacity: 0, y: 32, scale: 0.96 },
   visible: { opacity: 1, y: 0, scale: 1, transition: { ...RESORTE, staggerChildren: 0.07, delayChildren: 0.15 } },
@@ -29,6 +30,7 @@ export default function LoginPage() {
   const router = useRouter();
   const { refreshPortfolio, resetPortfolio } = usePortfolio();
   const { t, language, toggleLanguage } = useLanguage();
+  const { terminada } = useBienvenida();
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -97,7 +99,7 @@ export default function LoginPage() {
       {/* Language Toggle in Login */}
       <motion.button
         initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
+        animate={{ opacity: terminada ? 1 : 0 }}
         transition={{ delay: 0.6 }}
         onClick={toggleLanguage}
         className="absolute top-4 right-4 md:top-6 md:right-6 flex items-center gap-2 px-3 py-1.5 text-xs font-mono font-bold text-zinc-500 hover:text-emerald-500 transition-colors border border-transparent hover:border-zinc-200 dark:hover:border-[#27272a] rounded z-20 bg-white/50 dark:bg-black/50 backdrop-blur-sm"
@@ -108,7 +110,7 @@ export default function LoginPage() {
       <motion.div
         variants={TARJETA}
         initial="oculta"
-        animate="visible"
+        animate={terminada ? 'visible' : 'oculta'}
         className="w-full max-w-md bg-white/80 dark:bg-[#18181b]/80 backdrop-blur-md border border-zinc-200/50 dark:border-[#27272a]/50 rounded-3xl shadow-xl overflow-hidden transition-colors duration-300 z-10"
       >
 
@@ -116,12 +118,18 @@ export default function LoginPage() {
         <div className="p-6 sm:p-8 pb-6 text-center border-b border-zinc-100 dark:border-[#27272a]">
           <motion.div
             initial={{ scale: 0.6, rotate: -30 }}
-            animate={{ scale: 1, rotate: 0 }}
+            animate={terminada ? { scale: 1, rotate: 0 } : { scale: 0.6, rotate: -30 }}
             transition={{ ...RESORTE, stiffness: 200, damping: 14, delay: 0.15 }}
             whileHover={{ rotate: -10, scale: 1.08 }}
             className="mx-auto w-16 h-16 mb-4"
           >
-            <LogoMarca className="w-16 h-16 text-zinc-900 dark:text-white drop-shadow-[0_0_18px_rgba(16,185,129,0.35)]" animar retraso={0.25} duracion={1} />
+            <LogoMarca
+              key={terminada ? 'dibujo' : 'quieto'}
+              className="w-16 h-16 text-zinc-900 dark:text-white drop-shadow-[0_0_18px_rgba(16,185,129,0.35)]"
+              animar={terminada}
+              retraso={0.25}
+              duracion={1}
+            />
           </motion.div>
           <motion.h1 variants={PARTE}>
             <LogoNombre className="text-4xl" />
@@ -230,31 +238,13 @@ export default function LoginPage() {
             <span className="bg-white dark:bg-[#18181b] px-3 text-xs text-zinc-400 dark:text-[#52525b] relative z-10 font-mono">O</span>
           </motion.div>
 
-          <motion.div variants={PARTE} className="space-y-2">
+          <motion.div variants={PARTE}>
             <button
               type="button"
               onClick={handleDemoLogin}
               className="w-full flex items-center justify-center gap-2 bg-zinc-100 dark:bg-[#27272a] hover:bg-zinc-200 dark:hover:bg-[#3f3f46] text-zinc-900 dark:text-white p-3 rounded-lg text-sm font-bold font-mono transition-colors"
             >
               ENTRAR EN MODO DEMO
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                if (typeof window !== 'undefined') {
-                  localStorage.removeItem('isDemo');
-                  localStorage.removeItem('cartolaItems');
-                  localStorage.setItem('isCartolaMode', 'true');
-                  resetPortfolio();
-                  refreshPortfolio().then(() => {
-                    router.push('/');
-                  });
-                }
-              }}
-              className="w-full flex items-center justify-center gap-2 bg-transparent border border-zinc-200 dark:border-[#27272a] hover:bg-zinc-50 dark:hover:bg-[#27272a] text-zinc-500 dark:text-zinc-400 py-2 rounded-lg text-xs font-bold font-mono transition-colors"
-            >
-              PRUEBA LECTOR DE CARTOLAS (MODO VIDEO)
             </button>
           </motion.div>
 
@@ -263,7 +253,7 @@ export default function LoginPage() {
 
       <motion.p
         initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
+        animate={{ opacity: terminada ? 1 : 0 }}
         transition={{ delay: 0.9, duration: 0.6 }}
         className="mt-8 text-xs text-zinc-400 dark:text-[#52525b] font-mono text-center max-w-sm"
       >

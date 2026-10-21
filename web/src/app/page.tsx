@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { AnimatePresence, motion, useReducedMotion, type Variants } from 'framer-motion';
+import { AnimatePresence, motion, type Variants } from 'framer-motion';
 import PortfolioTab from './components/PortfolioTab';
 import RecommendationsTab from './components/RecommendationsTab';
 import ScreenerTab from './components/ScreenerTab';
@@ -13,7 +13,7 @@ import NotificationBell from './components/NotificationBell';
 import BacktestTab from './components/BacktestTab';
 import DataWarehouseTab from './components/DataWarehouseTab';
 import SimulacionTab from './components/SimulacionTab';
-import Bienvenida from './components/Bienvenida';
+import { useBienvenida } from './components/Bienvenida';
 import { LogoMarca, LogoNombre } from './components/Logo';
 import { ThemeToggle } from './components/ThemeToggle';
 import { RESORTE, SUAVE } from './components/Movimiento';
@@ -37,9 +37,6 @@ const PESTANAS: { id: Pestana; codigo: string; nombre: string; corto: string; ic
   { id: 'SIMULACION', codigo: '08', nombre: 'Simulación', corto: 'Simulación', icono: FlaskConical, texto: 'text-purple-600 dark:text-purple-400', linea: 'bg-purple-500' },
 ];
 const posicion = (id: Pestana) => PESTANAS.findIndex(p => p.id === id);
-
-// La bienvenida se muestra completa una vez por sesión del navegador; después solo se desvanece
-const CLAVE_BIENVENIDA = 'omni-bienvenida';
 
 // La pestaña nueva entra desde el lado hacia donde se avanzó en el menú y la anterior sale hacia el otro.
 // La primera (al terminar la bienvenida) sube desde abajo.
@@ -66,28 +63,14 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<Pestana>('DATA_WAREHOUSE');
   const [direccion, setDireccion] = useState(0);
   const [session, setSession] = useState<{ user: { id: string; email?: string } } | null>(null);
-  const [minimoCumplido, setMinimoCumplido] = useState(false);
-  const [rapida, setRapida] = useState(false);
-  const reducido = useReducedMotion();
   const router = useRouter();
   const { isDemo } = usePortfolio();
+  const { terminada } = useBienvenida();
   const ancla = useRef<HTMLDivElement>(null);
   const botones = useRef<Partial<Record<Pestana, HTMLButtonElement | null>>>({});
 
-  // La bienvenida sigue hasta que termina su animación y hay sesión; ahí entra el panel
-  const intro = !(minimoCumplido && session);
-  const listo = !intro;
-
-  useEffect(() => {
-    let vista = false;
-    try { vista = sessionStorage.getItem(CLAVE_BIENVENIDA) === '1'; } catch { /* sin almacenamiento */ }
-    const t = window.setTimeout(() => {
-      setRapida(vista);
-      setMinimoCumplido(true);
-      try { sessionStorage.setItem(CLAVE_BIENVENIDA, '1'); } catch { /* sin almacenamiento */ }
-    }, vista ? 0 : reducido ? 700 : 2200);
-    return () => window.clearTimeout(t);
-  }, [reducido]);
+  // El panel entra cuando la bienvenida (components/Bienvenida.tsx, en el layout) se va y ya hay sesión
+  const listo = terminada && !!session;
 
   useEffect(() => {
     // Si estamos en modo demo o modo cartola, no exigir sesión real
@@ -154,9 +137,12 @@ export default function Home() {
 
   return (
     <>
-      <AnimatePresence custom={rapida}>
-        {intro && <Bienvenida key="bienvenida" />}
-      </AnimatePresence>
+      {/* Si la sesión tarda más que la bienvenida, el logo late mientras llega (o mientras se va al login) */}
+      {terminada && !session && (
+        <div className="min-h-screen flex items-center justify-center">
+          <LogoMarca className="w-14 h-14 text-zinc-900 dark:text-white animate-pulse" />
+        </div>
+      )}
 
       {/* El panel se arma debajo de la bienvenida (así sus datos ya vienen cargando) y aparece cuando ella se va */}
       {session && (

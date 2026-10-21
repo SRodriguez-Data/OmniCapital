@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "./components/ThemeProvider";
 import { ProveedorMovimiento } from "./components/Movimiento";
+import { ProveedorBienvenida } from "./components/Bienvenida";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -51,7 +52,9 @@ export default function RootLayout({
         >
           <LanguageProvider>
             <PortfolioProvider>
-              <ProveedorMovimiento>{children}</ProveedorMovimiento>
+              <ProveedorMovimiento>
+                <ProveedorBienvenida>{children}</ProveedorBienvenida>
+              </ProveedorMovimiento>
             </PortfolioProvider>
           </LanguageProvider>
         </ThemeProvider>
