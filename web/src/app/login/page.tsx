@@ -4,10 +4,11 @@ import React, { useState, useEffect } from 'react';
 import { AnimatePresence, motion, type Variants } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
-import { Lock, Mail, ChevronRight, Landmark, Loader2 } from 'lucide-react';
+import { Lock, Mail, ChevronRight, Loader2 } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 import { useLanguage } from '../context/LanguageContext';
 import { RESORTE, SUAVE } from '../components/Movimiento';
+import { LogoMarca, LogoNombre } from '../components/Logo';
 
 // La tarjeta entra primero y después sus partes, una tras otra
 const TARJETA: Variants = {
@@ -114,16 +115,16 @@ export default function LoginPage() {
         {/* Header */}
         <div className="p-6 sm:p-8 pb-6 text-center border-b border-zinc-100 dark:border-[#27272a]">
           <motion.div
-            initial={{ scale: 0, rotate: -45 }}
+            initial={{ scale: 0.6, rotate: -30 }}
             animate={{ scale: 1, rotate: 0 }}
-            transition={{ ...RESORTE, stiffness: 260, damping: 14, delay: 0.2 }}
+            transition={{ ...RESORTE, stiffness: 200, damping: 14, delay: 0.15 }}
             whileHover={{ rotate: -10, scale: 1.08 }}
-            className="mx-auto w-14 h-14 bg-gradient-to-tr from-emerald-100 to-teal-100 dark:from-emerald-900/40 dark:to-teal-900/40 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mb-5 shadow-inner shadow-emerald-500/20"
+            className="mx-auto w-16 h-16 mb-4"
           >
-            <Landmark className="w-7 h-7" />
+            <LogoMarca className="w-16 h-16 text-zinc-900 dark:text-white drop-shadow-[0_0_18px_rgba(16,185,129,0.35)]" animar retraso={0.25} duracion={1} />
           </motion.div>
-          <motion.h1 variants={PARTE} className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-500 dark:from-emerald-400 dark:to-teal-300 bg-clip-text text-transparent">
-            OmniCapital
+          <motion.h1 variants={PARTE}>
+            <LogoNombre className="text-4xl" />
           </motion.h1>
           <motion.p variants={PARTE} className="text-zinc-500 dark:text-[#a1a1aa] text-[10px] font-mono uppercase tracking-[0.2em] mt-3">
             Wealth Management Platform

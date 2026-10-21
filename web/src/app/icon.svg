@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Ícono de OmniCapital (mismo dibujo que components/Logo.tsx, sobre fondo oscuro) -->
+  <defs>
+    <linearGradient id="fondo" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f1f1c"/>
+      <stop offset="1" stop-color="#07090a"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#fondo)"/>
+  <g transform="translate(32 32) scale(0.86) translate(-32 -32)">
+    <path d="M53.92 30.08 A22 22 0 0 1 24.48 52.67" stroke="#10b981" stroke-width="7"/>
+    <path d="M21.67 51.42 A22 22 0 0 1 12.95 21" stroke="#14b8a6" stroke-width="7"/>
+    <path d="M14.66 18.45 A22 22 0 0 1 35.82 10.33" stroke="#22d3ee" stroke-width="7"/>
+    <path d="M20 40 L28 31.5 L35 37.5 L55 12" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M47.5 14.2 L55.4 11.5 L54.6 19.8" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="20" cy="40" r="3.2" fill="#ffffff"/>
+  </g>
+</svg>

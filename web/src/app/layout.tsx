@@ -20,6 +20,8 @@ import { PortfolioProvider } from "./context/PortfolioContext";
 export const metadata: Metadata = {
   title: "OmniCapital | Wealth Management",
   description: "Institutional Wealth Management Platform",
+  // En el iPhone, "Agregar a inicio" la abre como app, con su nombre y sin la barra de Safari
+  appleWebApp: { capable: true, title: "OmniCapital", statusBarStyle: "black-translucent" },
 };
 
 // En el celular, la barra del navegador toma el color del fondo de la app
