@@ -1,0 +1,57 @@
+name: Paper Trading (simulación del Top v2)
+
+on:
+  schedule:
+    # Lunes a viernes con la bolsa de Nueva York abierta, en horario de verano (13:30-20:00 UTC) y de invierno
+    # (14:30-21:00 UTC). Son cuatro porque GitHub atrasa los cron a veces horas: cada corrida es idempotente y solo
+    # la primera con la bolsa abierta rebalancea; las otras revisan los stops y guardan el estado del día.
+    - cron: '47 14 * * 1-5'
+    - cron: '17 16 * * 1-5'
+    - cron: '47 17 * * 1-5'
+    - cron: '17 19 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      enviar:
+        description: 'Enviar órdenes a la cuenta de paper (si no, solo muestra el plan)'
+        type: boolean
+        default: true
+
+# Dos corridas a la vez podrían duplicar órdenes
+concurrency:
+  group: paper-trading
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  operar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: trading/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r trading/requirements.txt
+
+      - name: Test the order plan and risk rules
+        run: python -m unittest discover -s trading/tests -t .
+
+      - name: Run the paper trading strategy
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python -m trading.main ${{ (github.event_name == 'schedule' || inputs.enviar) && '--enviar' || '' }}

@@ -1,0 +1,4 @@
+# Solo lo que usa la simulación (trading/), con versiones fijas: el bot diario tiene su propio requirements.txt
+alpaca-py==0.44.0
+supabase==2.32.0
+python-dotenv==1.2.4
