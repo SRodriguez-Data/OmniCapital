@@ -25,6 +25,7 @@ from trading.core.registro import guardar, ultimo_estado
 from trading.strategies.top_calidad import TopCalidad
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logging.getLogger('httpx').setLevel(logging.WARNING)  # cada consulta a Supabase no aporta en el log
 
 
 def motivo(orden) -> str:

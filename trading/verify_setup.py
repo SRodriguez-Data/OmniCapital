@@ -43,7 +43,8 @@ def main() -> int:
     try:
         broker = Broker()
         revisar('claves con el formato esperado', True)
-        revisar('servidor de paper', 'paper-api' in str(broker.cliente._base_url), str(broker.cliente._base_url))
+        servidor = getattr(broker.cliente._base_url, 'value', broker.cliente._base_url)
+        revisar('servidor de paper', servidor == 'https://paper-api.alpaca.markets', servidor)
         cuenta = broker.cuenta()
         revisar('cuenta de paper (dinero ficticio)', True, f'{cuenta.numero[:4]}…, estado {cuenta.estado}')
         revisar('cuenta habilitada para operar', not cuenta.bloqueada)
