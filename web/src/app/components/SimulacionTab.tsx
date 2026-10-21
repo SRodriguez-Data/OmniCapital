@@ -6,8 +6,9 @@ import { AlertTriangle, FlaskConical, ShieldCheck } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fechaCorta, pctSigno } from './topFormato';
 
-// Simulación del Top v2 con dinero ficticio en Alpaca paper trading. La opera trading/main.py desde GitHub Actions y
-// deja su estado en la tabla paper_trading; la web solo lee esa tabla (nunca ve las claves de Alpaca).
+// El Top v2 operado en Alpaca: la simulación con dinero ficticio (tabla paper_trading, pública) y, si existe, la
+// cuenta de dinero real (tabla real_trading, que por RLS solo ve su dueño). Las opera trading/main.py desde GitHub
+// Actions; la web solo lee esas tablas (nunca ve las claves de Alpaca).
 
 interface Posicion { ticker: string; cantidad: number; valor: number; peso: number; costo: number; ganancia_pct: number }
 interface Orden {
@@ -24,7 +25,9 @@ interface Estado {
   proximo_rebalanceo: string;
   posiciones: Posicion[]; ordenes: Orden[]; eventos: Evento[]; curva: Punto[];
   limites: { peso_maximo: number; perdida_diaria_maxima: number; stop_loss: number };
+  tope?: number | null;
 }
+type Fuente = 'paper' | 'real';
 
 const tarjeta = 'bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-lg';
 const usd = (x: number, d = 0) => `US$ ${x.toLocaleString('es-CL', { minimumFractionDigits: d, maximumFractionDigits: d })}`;
@@ -58,7 +61,7 @@ function CurvaTooltip({ active, payload, label }: TooltipProps) {
   );
 }
 
-function Curva({ curva }: { curva: Punto[] }) {
+function Curva({ curva, real }: { curva: Punto[]; real: boolean }) {
   if (curva.length < 2) {
     return <p className="text-xs text-zinc-500 dark:text-[#71717a]">La curva frente al S&amp;P 500 aparece con el primer cierre después de la primera compra.</p>;
   }
@@ -68,14 +71,17 @@ function Curva({ curva }: { curva: Punto[] }) {
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-3 gap-3 text-center">
-        {([['Cartera simulada', rc], ['S&P 500', rs], ['Diferencia', rc - rs]] as const).map(([nombre, valor]) => (
+        {([[real ? 'Cartera' : 'Cartera simulada', rc], ['S&P 500', rs], ['Diferencia', rc - rs]] as const).map(([nombre, valor]) => (
           <div key={nombre} className="bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-[#27272a] rounded p-3">
             <p className="text-[10px] font-mono text-zinc-500 dark:text-[#71717a] uppercase tracking-widest">{nombre}</p>
             <p className={`text-lg font-bold font-mono ${colorSigno(valor)}`}>{pctSigno(valor)}</p>
           </div>
         ))}
       </div>
-      <p className="text-[11px] text-zinc-500 dark:text-[#71717a]">Desde el cierre del {fechaCorta(base.f)} (antes de la primera compra) al del {fechaCorta(ultimo.f)}. Ambos sin dividendos.</p>
+      <p className="text-[11px] text-zinc-500 dark:text-[#71717a]">
+        Desde el cierre del {fechaCorta(base.f)} (antes de la primera compra) al del {fechaCorta(ultimo.f)}.{' '}
+        {real ? 'Los depósitos y retiros no cuentan como ganancia. La cartera incluye los dividendos que cobra; el S&P 500, no.' : 'Ambos sin dividendos.'}
+      </p>
       <div className="h-[300px]">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={datos} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
@@ -93,16 +99,23 @@ function Curva({ curva }: { curva: Punto[] }) {
   );
 }
 
+async function ultimo(tabla: string): Promise<Estado | null> {
+  const { data, error } = await supabase.from(tabla).select('datos').order('fecha', { ascending: false }).limit(1);
+  return !error && data?.[0] ? (data[0].datos as Estado) : null;
+}
+
 export default function SimulacionTab() {
-  const [estado, setEstado] = useState<Estado | null>(null);
+  const [estados, setEstados] = useState<Record<Fuente, Estado | null>>({ paper: null, real: null });
+  const [fuente, setFuente] = useState<Fuente>('paper');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
       try {
-        // Dinero ficticio: se muestra también en modo demo
-        const { data, error } = await supabase.from('paper_trading').select('datos').order('fecha', { ascending: false }).limit(1);
-        if (!error && data?.[0]) setEstado(data[0].datos as Estado);
+        // La simulación es dinero ficticio y se muestra también en modo demo. La cuenta real solo le llega a su
+        // dueño con sesión iniciada: para cualquier otro la consulta vuelve vacía (RLS)
+        const [paper, real] = await Promise.all([ultimo('paper_trading'), ultimo('real_trading')]);
+        setEstados({ paper, real });
       } catch (e) {
         console.error(e);
       } finally {
@@ -113,12 +126,30 @@ export default function SimulacionTab() {
 
   if (loading) return <div className="text-center p-12 font-mono text-zinc-600 dark:text-[#a1a1aa]">Cargando la simulación...</div>;
 
+  const real = fuente === 'real';
+  const estado = estados[fuente];
+  const selector = estados.real && (
+    <div className="flex justify-center gap-2">
+      {([['paper', 'Simulación (ficticio)'], ['real', 'Cuenta real']] as const).map(([f, nombre]) => (
+        <button key={f} onClick={() => setFuente(f)}
+          className={`px-4 py-1.5 rounded text-xs font-bold uppercase tracking-wider border ${fuente === f
+            ? 'border-[#d946ef] text-[#d946ef] bg-fuchsia-50 dark:bg-fuchsia-950/40'
+            : 'border-zinc-200 dark:border-[#27272a] text-zinc-500 dark:text-[#71717a] hover:text-zinc-900 dark:hover:text-[#e4e4e7]'}`}>
+          {nombre}
+        </button>
+      ))}
+    </div>
+  );
+
   if (!estado) {
     return (
-      <div className={`${tarjeta} text-center p-12 max-w-4xl mx-auto`}>
-        <FlaskConical className="w-8 h-8 text-[#d946ef] mx-auto mb-4" />
-        <h3 className="text-lg font-bold tracking-tight text-zinc-900 dark:text-[#e4e4e7] mb-2">La simulación aún no tiene datos</h3>
-        <p className="text-sm text-zinc-600 dark:text-[#a1a1aa]">Empieza con la primera corrida en horario de la bolsa de Nueva York (lunes a viernes).</p>
+      <div className="max-w-4xl mx-auto space-y-6">
+        {selector}
+        <div className={`${tarjeta} text-center p-12`}>
+          <FlaskConical className="w-8 h-8 text-[#d946ef] mx-auto mb-4" />
+          <h3 className="text-lg font-bold tracking-tight text-zinc-900 dark:text-[#e4e4e7] mb-2">La simulación aún no tiene datos</h3>
+          <p className="text-sm text-zinc-600 dark:text-[#a1a1aa]">Empieza con la primera corrida en horario de la bolsa de Nueva York (lunes a viernes).</p>
+        </div>
       </div>
     );
   }
@@ -130,14 +161,23 @@ export default function SimulacionTab() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      {selector}
       <div className={`${tarjeta} p-6 space-y-4`}>
         <div className="text-center">
-          <h2 className="text-xl font-bold text-[#d946ef] uppercase tracking-widest">Simulación en vivo</h2>
-          <p className="text-zinc-600 dark:text-[#a1a1aa] text-sm max-w-2xl mx-auto mt-2">
-            Cada mes el sistema compra con dinero ficticio, en una cuenta de práctica de Alpaca, las acciones del Top de EE.UU. a partes iguales
-            y las mantiene hasta el mes siguiente. No es trading de corto plazo: sirve para ver, con órdenes reales en el mercado, si seguir el Top
-            le gana al S&amp;P 500 antes de poner plata de verdad.
-          </p>
+          <h2 className="text-xl font-bold text-[#d946ef] uppercase tracking-widest">{real ? 'Cuenta real' : 'Simulación en vivo'}</h2>
+          {real ? (
+            <p className="text-zinc-600 dark:text-[#a1a1aa] text-sm max-w-2xl mx-auto mt-2">
+              Tu cuenta de Alpaca con dinero de verdad. Cada mes el sistema compra las acciones del Top de EE.UU. a partes iguales
+              {estado.tope ? `, con hasta ${usd(estado.tope)},` : ''} y las mantiene hasta el mes siguiente, con las mismas reglas que la simulación.
+              Solo tú ves esta página.
+            </p>
+          ) : (
+            <p className="text-zinc-600 dark:text-[#a1a1aa] text-sm max-w-2xl mx-auto mt-2">
+              Cada mes el sistema compra con dinero ficticio, en una cuenta de práctica de Alpaca, las acciones del Top de EE.UU. a partes iguales
+              y las mantiene hasta el mes siguiente. No es trading de corto plazo: sirve para ver, con órdenes reales en el mercado, si seguir el Top
+              le gana al S&amp;P 500 antes de poner plata de verdad.
+            </p>
+          )}
           <p className="text-xs font-medium text-zinc-500 dark:text-[#71717a] mt-3 uppercase">
             Última actualización: {new Date(estado.actualizado).toLocaleString('es-CL')} ·{' '}
             {pendiente ? 'rebalanceo pendiente (en la próxima corrida con la bolsa abierta)' : `próximo rebalanceo: ${fechaCorta(estado.proximo_rebalanceo)}`}
@@ -158,7 +198,7 @@ export default function SimulacionTab() {
           ))}
         </div>
 
-        <Curva curva={estado.curva ?? []} />
+        <Curva curva={estado.curva ?? []} real={real} />
       </div>
 
       <section className={`${tarjeta} p-4 space-y-3`}>
@@ -227,15 +267,28 @@ export default function SimulacionTab() {
           <li>Si el patrimonio cae {pct(limites.perdida_diaria_maxima, 0)} en un día, ese día no se compra nada.</li>
           <li>Una acción que cae {pct(limites.stop_loss, 0)} bajo su costo se vende. Es un freno ante una catástrofe: el método medido mantiene las acciones el mes completo.</li>
           <li>Sin margen ni ventas en corto: solo se gasta el efectivo que hay.</li>
-          <li>Solo cuenta de práctica: el código no tiene modo de dinero real.</li>
+          {real ? (
+            <li>Invierte como máximo {estado.tope ? usd(estado.tope) : 'el tope que fijaste'}: si la cuenta tiene más, el resto queda en efectivo. Trata toda la cuenta como suya: no compres a mano en ella.</li>
+          ) : (
+            <li>Usa solo el servidor de práctica de Alpaca. La cuenta real es aparte, con otras claves, y se activa a mano.</li>
+          )}
         </ul>
       </section>
 
       <details className="text-[11px] text-zinc-500 dark:text-[#71717a]">
-        <summary className="cursor-pointer flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Límites de la simulación</summary>
+        <summary className="cursor-pointer flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> {real ? 'Antes de confiar en estos números' : 'Límites de la simulación'}</summary>
         <ul className="mt-2 space-y-1 list-disc pl-4">
-          <li>Los precios son los del mercado, pero la cuenta de práctica llena cada orden al precio cotizado, sin el impacto que tendría una orden real.</li>
-          <li>La cuenta de práctica no paga dividendos: por eso se compara con el S&amp;P 500 sin dividendos.</li>
+          {real ? (
+            <>
+              <li>Alpaca no cobra comisión por comprar o vender acciones; solo descuenta cargos regulatorios ínfimos en las ventas.</li>
+              <li>Las ganancias de acciones de EE.UU. se declaran en Chile; los dividendos llegan con la retención de EE.UU. ya descontada.</li>
+            </>
+          ) : (
+            <>
+              <li>Los precios son los del mercado, pero la cuenta de práctica llena cada orden al precio cotizado, sin el impacto que tendría una orden real.</li>
+              <li>La cuenta de práctica no paga dividendos: por eso se compara con el S&amp;P 500 sin dividendos.</li>
+            </>
+          )}
           <li>Unas semanas o meses no prueban nada: el método se midió en 10 años, aquí se ve si se sostiene en vivo.</li>
           <li>Es una herramienta de apoyo y no constituye asesoría financiera personalizada.</li>
         </ul>
