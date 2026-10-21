@@ -13,13 +13,13 @@ import NotificationBell from './components/NotificationBell';
 import BacktestTab from './components/BacktestTab';
 import DataWarehouseTab from './components/DataWarehouseTab';
 import SimulacionTab from './components/SimulacionTab';
+import Portada from './components/Portada';
 import { useBienvenida } from './components/Bienvenida';
 import { LogoMarca, LogoNombre } from './components/Logo';
 import { ThemeToggle } from './components/ThemeToggle';
 import { RESORTE, SUAVE } from './components/Movimiento';
 import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History, LogOut, Database, FlaskConical, type LucideIcon } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { useRouter } from 'next/navigation';
 import { usePortfolio } from './context/PortfolioContext';
 
 type Pestana = 'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA' | 'TOP5' | 'DIVIDENDOS' | 'BACKTEST' | 'SIMULACION' | 'DATA_WAREHOUSE';
@@ -63,8 +63,9 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<Pestana>('DATA_WAREHOUSE');
   const [direccion, setDireccion] = useState(0);
   const [session, setSession] = useState<{ user: { id: string; email?: string } } | null>(null);
-  const router = useRouter();
-  const { isDemo } = usePortfolio();
+  // Sin sesión se muestra la portada (components/Portada.tsx), que lleva al demo o al login
+  const [sinSesion, setSinSesion] = useState(false);
+  const { isDemo, refreshPortfolio, resetPortfolio } = usePortfolio();
   const { terminada } = useBienvenida();
   const ancla = useRef<HTMLDivElement>(null);
   const botones = useRef<Partial<Record<Pestana, HTMLButtonElement | null>>>({});
@@ -86,7 +87,7 @@ export default function Home() {
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) {
-        router.push('/login');
+        setSinSesion(true);
       } else {
         setSession(session);
       }
@@ -95,15 +96,12 @@ export default function Home() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (typeof window !== 'undefined' && (localStorage.getItem('isDemo') === 'true' || localStorage.getItem('isCartolaMode') === 'true')) return;
 
-      if (!session) {
-        router.push('/login');
-      } else {
-        setSession(session);
-      }
+      setSession(session);
+      setSinSesion(!session);
     });
 
     return () => subscription.unsubscribe();
-  }, [router]);
+  }, []);
 
   // En el celular el menú se desliza: la pestaña elegida queda centrada y a la vista
   useEffect(() => {
@@ -119,17 +117,36 @@ export default function Home() {
     if (window.scrollY > tope) window.scrollTo({ top: tope, behavior: 'smooth' });
   };
 
+  // Desde la portada: el demo se abre aquí mismo, sin pasar por el login
+  const entrarDemo = async () => {
+    localStorage.removeItem('isCartolaMode');
+    localStorage.setItem('isDemo', 'true');
+    resetPortfolio();
+    await refreshPortfolio();
+    window.scrollTo({ top: 0 });
+    setSession({ user: { id: 'demo' } });
+    setSinSesion(false);
+  };
+
+  // Al salir se vuelve a la portada, y la próxima entrada parte desde la primera pestaña
+  const volverAPortada = () => {
+    resetPortfolio();
+    setSession(null);
+    setSinSesion(true);
+    setDireccion(0);
+    setActiveTab('DATA_WAREHOUSE');
+    window.scrollTo({ top: 0 });
+  };
+
   const handleSignOut = async () => {
-    if (typeof window !== 'undefined') {
-      if (localStorage.getItem('isDemo') === 'true' || localStorage.getItem('isCartolaMode') === 'true') {
-        localStorage.removeItem('isDemo');
-        localStorage.removeItem('isCartolaMode');
-        router.push('/login');
-        return;
-      }
+    if (localStorage.getItem('isDemo') === 'true' || localStorage.getItem('isCartolaMode') === 'true') {
+      localStorage.removeItem('isDemo');
+      localStorage.removeItem('isCartolaMode');
+      volverAPortada();
+      return;
     }
     await supabase.auth.signOut();
-    router.push('/login');
+    volverAPortada();
   };
 
   const actual = PESTANAS[posicion(activeTab)];
@@ -137,12 +154,14 @@ export default function Home() {
 
   return (
     <>
-      {/* Si la sesión tarda más que la bienvenida, el logo late mientras llega (o mientras se va al login) */}
-      {terminada && !session && (
+      {/* Si la sesión tarda más que la bienvenida, el logo late mientras se sabe si hay una */}
+      {terminada && !session && !sinSesion && (
         <div className="min-h-screen flex items-center justify-center">
           <LogoMarca className="w-14 h-14 text-zinc-900 dark:text-white animate-pulse" />
         </div>
       )}
+
+      {sinSesion && <Portada onDemo={entrarDemo} />}
 
       {/* El panel se arma debajo de la bienvenida (así sus datos ya vienen cargando) y aparece cuando ella se va */}
       {session && (

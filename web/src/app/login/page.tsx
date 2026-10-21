@@ -4,7 +4,8 @@ import React, { useState, useEffect } from 'react';
 import { AnimatePresence, motion, type Variants } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
-import { Lock, Mail, ChevronRight, Loader2 } from 'lucide-react';
+import Link from 'next/link';
+import { ArrowLeft, Lock, Mail, ChevronRight, Loader2 } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 import { useLanguage } from '../context/LanguageContext';
 import { RESORTE, SUAVE } from '../components/Movimiento';
@@ -38,6 +39,9 @@ export default function LoginPage() {
         router.push('/');
         return;
       }
+      // "Crear cuenta" en la portada llega con ?registro: el formulario abre en modo registro
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- la URL solo se lee en el cliente, tras hidratar
+      if (new URLSearchParams(window.location.search).has('registro')) setIsSignUp(true);
     }
 
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -95,6 +99,22 @@ export default function LoginPage() {
       {/* Manchas de color que flotan despacio en el fondo */}
       <div className="flotar absolute top-[-10%] left-[-10%] w-72 h-72 md:w-96 md:h-96 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
       <div className="flotar-lento absolute bottom-[-10%] right-[-10%] w-72 h-72 md:w-96 md:h-96 bg-teal-500/15 rounded-full blur-3xl pointer-events-none" />
+
+      {/* Vuelta a la portada */}
+      <motion.div
+        initial={{ opacity: 0, x: -8 }}
+        animate={terminada ? { opacity: 1, x: 0 } : { opacity: 0, x: -8 }}
+        transition={{ delay: 0.6 }}
+        className="absolute top-4 left-4 md:top-6 md:left-6 z-20"
+      >
+        <Link
+          href="/"
+          className="group flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-500 hover:text-emerald-500 transition-colors rounded bg-white/50 dark:bg-black/50 backdrop-blur-sm"
+        >
+          <ArrowLeft className="w-3.5 h-3.5 transition-transform group-hover:-translate-x-0.5" />
+          {language === 'es' ? 'Volver al inicio' : 'Back to home'}
+        </Link>
+      </motion.div>
 
       {/* Language Toggle in Login */}
       <motion.button

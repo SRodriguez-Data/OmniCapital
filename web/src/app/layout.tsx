@@ -20,7 +20,7 @@ import { PortfolioProvider } from "./context/PortfolioContext";
 
 export const metadata: Metadata = {
   title: "OmniCapital | Wealth Management",
-  description: "Institutional Wealth Management Platform",
+  description: "Tus inversiones en un solo panel: lee tus cartolas, mide tu rentabilidad real y propone ideas respaldadas por 10 años de datos de EE.UU. y Chile.",
   // En el iPhone, "Agregar a inicio" la abre como app, con su nombre y sin la barra de Safari
   appleWebApp: { capable: true, title: "OmniCapital", statusBarStyle: "black-translucent" },
 };
