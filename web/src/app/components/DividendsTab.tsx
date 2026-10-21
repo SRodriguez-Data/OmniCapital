@@ -98,7 +98,7 @@ export default function DividendsTab() {
       </div>
 
       {/* CHART */}
-      <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-sm dark:shadow-none p-6 h-96 flex flex-col">
+      <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-sm dark:shadow-none p-4 md:p-6 h-80 md:h-96 flex flex-col">
         <h2 className="text-xs font-sans font-medium font-bold text-zinc-900 dark:text-[#e4e4e7] uppercase border-b border-zinc-200 dark:border-[#27272a] pb-4 mb-6 flex items-center gap-2">
           <TrendingUp className="w-4 h-4 text-[#60a5fa]" />
           Proyección de Pagos por Activo
@@ -133,8 +133,8 @@ export default function DividendsTab() {
       </div>
 
       {/* TABLE */}
-      <div className="bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-[#27272a] rounded overflow-hidden mt-6">
-        <table className="w-full text-left text-sm font-mono border-collapse">
+      <div className="bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-[#27272a] rounded overflow-x-auto mt-6">
+        <table className="w-full text-left text-sm font-mono border-collapse whitespace-nowrap">
           <thead className="bg-white dark:bg-[#18181b] text-zinc-600 dark:text-[#a1a1aa] text-[11px] uppercase border-b border-zinc-300 dark:border-[#3f3f46]">
             <tr>
               <th className="py-3 px-4 font-semibold">Ticker</th>

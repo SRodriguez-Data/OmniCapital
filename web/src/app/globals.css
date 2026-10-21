@@ -44,3 +44,110 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-brand-dark);
 }
+
+/* Tiras que se deslizan con el dedo (pestañas, indicadores): sin barra de desplazamiento */
+.scrollbar-hide,
+.hide-scrollbar {
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar,
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* --- Animaciones --------------------------------------------------------------------------------
+   Todas terminan en transform: none, no en translate(0): un transform que queda puesto haría que los
+   modales con position: fixed de adentro se ubiquen respecto de la tarjeta y no de la pantalla. */
+
+@keyframes aparecer-arriba {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Cada bloque de una pestaña entra subiendo, uno tras otro */
+.entrada-escalonada > * > * {
+  animation: aparecer-arriba 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.entrada-escalonada > * > *:nth-child(2) { animation-delay: 70ms; }
+.entrada-escalonada > * > *:nth-child(3) { animation-delay: 140ms; }
+.entrada-escalonada > * > *:nth-child(4) { animation-delay: 210ms; }
+.entrada-escalonada > * > *:nth-child(5) { animation-delay: 280ms; }
+.entrada-escalonada > * > *:nth-child(n + 6) { animation-delay: 340ms; }
+
+/* Cinta de indicadores que corre sola (el contenido va duplicado: al llegar a -50% vuelve a empezar igual) */
+@keyframes marquesina {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.marquesina {
+  animation: marquesina 50s linear infinite;
+}
+.marquesina:hover {
+  animation-play-state: paused;
+}
+
+/* Manchas de color del fondo del login */
+@keyframes flotar {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(40px, -30px) scale(1.15); }
+}
+.flotar {
+  animation: flotar 14s ease-in-out infinite;
+}
+.flotar-lento {
+  animation: flotar 18s ease-in-out infinite reverse;
+}
+
+/* Brillo que cruza los botones principales */
+@keyframes brillo {
+  from { transform: translateX(-120%) skewX(-20deg); }
+  to { transform: translateX(220%) skewX(-20deg); }
+}
+.brillo {
+  position: relative;
+  overflow: hidden;
+}
+.brillo::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.25), transparent);
+  transform: translateX(-120%) skewX(-20deg);
+  pointer-events: none;
+}
+.brillo:hover::after {
+  animation: brillo 0.8s ease-out;
+}
+
+/* Un botón se hunde un poco al apretarlo */
+button:not(:disabled):active {
+  scale: 0.97;
+}
+
+/* --- Celular ----------------------------------------------------------------------------------- */
+
+/* En una fila angosta los íconos no se encogen: el texto es el que se acomoda */
+svg.lucide {
+  flex-shrink: 0;
+}
+
+@media (max-width: 767px) {
+  /* Con letra menor a 16px, el iPhone hace zoom al escribir en un campo */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Quien pidió menos movimiento en su sistema no ve animaciones */
+@media (prefers-reduced-motion: reduce) {
+  .entrada-escalonada > * > *,
+  .marquesina,
+  .flotar,
+  .flotar-lento,
+  .brillo:hover::after {
+    animation: none !important;
+  }
+}

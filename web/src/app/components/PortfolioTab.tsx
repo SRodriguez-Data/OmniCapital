@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, Legend, AreaChart, Area, XAxis, YAxis, CartesianGrid } from 'recharts';
 import SymbolSearchModal from './SymbolSearchModal';
-import { Search, ChevronDown, ChevronUp } from 'lucide-react';
+import { Search, ChevronDown, ChevronUp, Plus } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { usePortfolio } from '../context/PortfolioContext';
 import AssetSparkline from './AssetSparkline';
@@ -27,6 +27,8 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
     const [purchaseDate, setPurchaseDate] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    // En el celular el formulario para añadir parte cerrado: lo primero que se ve son los totales
+    const [formAbierto, setFormAbierto] = useState(false);
     const [observedUsdClp, setObservedUsdClp] = useState<number | null>(null);
 
     const [period, setPeriod] = useState<TimePeriod>('TOTAL');
@@ -313,7 +315,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
   if (loading) return <div className="text-center p-12 font-mono text-zinc-600 dark:text-[#a1a1aa]">Cargando portafolio...</div>;
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
 
       {actionError && (
         <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 p-3 rounded-lg text-sm font-mono border border-red-200 dark:border-red-900/50 flex justify-between items-center gap-4">
@@ -323,7 +325,13 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
       )}
 
       {/* ADD NEW ITEM FORM */}
-      <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 rounded flex flex-col md:flex-row gap-4 items-end">
+      <button
+        onClick={() => setFormAbierto(!formAbierto)}
+        className="md:hidden flex items-center justify-center gap-2 w-full py-2.5 rounded border border-dashed border-blue-400 dark:border-[#3b82f6]/60 text-blue-600 dark:text-[#60a5fa] text-xs font-mono font-bold uppercase"
+      >
+        <Plus className={`w-4 h-4 transition-transform duration-300 ${formAbierto ? 'rotate-45' : ''}`} /> {formAbierto ? 'Cerrar' : 'Añadir activo'}
+      </button>
+      <div className={`${formAbierto ? 'flex' : 'hidden'} md:flex bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] p-4 rounded flex-col md:flex-row gap-4 items-end`}>
         <div className="flex-1 w-full">
           <label className="block text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] mb-1">Ticker / Activo</label>
           <button
@@ -394,7 +402,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
 
       {/* HISTORICAL P&L CHART */}
       {items.length > 0 && (
-        <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-sm dark:shadow-none p-6 h-96 flex flex-col">
+        <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-sm dark:shadow-none p-4 md:p-6 h-[28rem] md:h-96 flex flex-col">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-zinc-200 dark:border-[#27272a] pb-4 mb-6 gap-4">
             <div className="flex flex-col gap-2">
               <h2 className="text-xs font-sans font-medium font-bold text-zinc-900 dark:text-[#e4e4e7] uppercase">Evolución P&L Global (Real)</h2>
@@ -496,22 +504,22 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+      {/* KPI Cards: en el celular van primero, de a dos por fila */}
+      <div className="order-first md:order-none grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-6">
         {/* USD Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4 [&>div:last-child]:col-span-2 md:[&>div:last-child]:col-span-1">
           <div className="bg-zinc-50 dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-4 flex flex-col justify-center">
             <span className="text-[10px] font-mono text-[#60a5fa] uppercase tracking-wider mb-1">Valor Total (USD)</span>
-            <span className="text-xl font-bold font-sans text-zinc-900 dark:text-[#fafafa]">${totalCurrentUSD.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+            <span className="text-lg md:text-xl font-bold font-sans text-zinc-900 dark:text-[#fafafa]">${totalCurrentUSD.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
           </div>
           <div className="bg-zinc-50 dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-4 flex flex-col justify-center">
             <span className="text-[10px] font-mono text-zinc-500 dark:text-[#a1a1aa] uppercase tracking-wider mb-1">Invertido (USD)</span>
-            <span className="text-xl font-bold font-sans text-zinc-900 dark:text-[#fafafa]">${totalInvestedUSD.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+            <span className="text-lg md:text-xl font-bold font-sans text-zinc-900 dark:text-[#fafafa]">${totalInvestedUSD.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
           </div>
           <div className="bg-zinc-50 dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-4 flex flex-col justify-center">
             <span className="text-[10px] font-mono text-zinc-500 dark:text-[#a1a1aa] uppercase tracking-wider mb-1">P&L (USD)</span>
             <div className="flex items-baseline gap-2">
-              <span className={`text-xl font-bold font-sans ${pnlColorUSD}`}>
+              <span className={`text-lg md:text-xl font-bold font-sans ${pnlColorUSD}`}>
                 {totalPnL_USD >= 0 ? '+' : ''}{totalPnL_USD.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
               </span>
               <span className={`text-xs font-bold font-mono ${pnlColorUSD} bg-opacity-10 px-1 py-0.5 rounded`}>
@@ -522,19 +530,19 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
         </div>
 
         {/* CLP Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4 [&>div:last-child]:col-span-2 md:[&>div:last-child]:col-span-1">
           <div className="bg-zinc-50 dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-4 flex flex-col justify-center">
             <span className="text-[10px] font-mono text-[#34d399] uppercase tracking-wider mb-1">Valor Total (CLP)</span>
-            <span className="text-xl font-bold font-sans text-zinc-900 dark:text-[#fafafa]">${totalCurrentCLP.toLocaleString('es-CL', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
+            <span className="text-lg md:text-xl font-bold font-sans text-zinc-900 dark:text-[#fafafa]">${totalCurrentCLP.toLocaleString('es-CL', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
           </div>
           <div className="bg-zinc-50 dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-4 flex flex-col justify-center">
             <span className="text-[10px] font-mono text-zinc-500 dark:text-[#a1a1aa] uppercase tracking-wider mb-1">Invertido (CLP)</span>
-            <span className="text-xl font-bold font-sans text-zinc-900 dark:text-[#fafafa]">${totalInvestedCLP.toLocaleString('es-CL', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
+            <span className="text-lg md:text-xl font-bold font-sans text-zinc-900 dark:text-[#fafafa]">${totalInvestedCLP.toLocaleString('es-CL', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
           </div>
           <div className="bg-zinc-50 dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-4 flex flex-col justify-center">
             <span className="text-[10px] font-mono text-zinc-500 dark:text-[#a1a1aa] uppercase tracking-wider mb-1">P&L (CLP)</span>
             <div className="flex items-baseline gap-2">
-              <span className={`text-xl font-bold font-sans ${pnlColorCLP}`}>
+              <span className={`text-lg md:text-xl font-bold font-sans ${pnlColorCLP}`}>
                 {totalPnL_CLP >= 0 ? '+' : ''}{totalPnL_CLP.toLocaleString('es-CL', {minimumFractionDigits: 0, maximumFractionDigits: 0})}
               </span>
               <span className={`text-xs font-bold font-mono ${pnlColorCLP} bg-opacity-10 px-1 py-0.5 rounded`}>
@@ -546,8 +554,8 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
       </div>
 
       {/* PORTFOLIO TABLE */}
-      <div className="bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-[#27272a] rounded overflow-hidden">
-        <table className="w-full text-left text-sm font-mono border-collapse">
+      <div className="bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-[#27272a] rounded overflow-x-auto">
+        <table className="w-full text-left text-sm font-mono border-collapse whitespace-nowrap">
           <thead className="bg-white dark:bg-[#18181b] text-zinc-600 dark:text-[#a1a1aa] text-[11px] uppercase border-b border-zinc-300 dark:border-[#3f3f46]">
             <tr>
               <th className="py-2 px-4 font-semibold w-10"></th>

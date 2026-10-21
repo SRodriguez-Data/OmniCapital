@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "./components/ThemeProvider";
+import { ProveedorMovimiento } from "./components/Movimiento";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -21,6 +22,17 @@ export const metadata: Metadata = {
   description: "Institutional Wealth Management Platform",
 };
 
+// En el celular, la barra del navegador toma el color del fondo de la app
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: dark)", color: "#09090b" },
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+  ],
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -37,7 +49,7 @@ export default function RootLayout({
         >
           <LanguageProvider>
             <PortfolioProvider>
-              {children}
+              <ProveedorMovimiento>{children}</ProveedorMovimiento>
             </PortfolioProvider>
           </LanguageProvider>
         </ThemeProvider>

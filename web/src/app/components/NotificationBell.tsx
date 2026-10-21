@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { Bell, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { SUAVE } from './Movimiento';
 
 interface Alert {
   id: string;
@@ -67,8 +69,17 @@ export default function NotificationBell() {
         onClick={() => setIsOpen(!isOpen)}
         className="relative p-2 text-zinc-600 dark:text-[#a1a1aa] hover:text-zinc-900 dark:hover:text-[#e4e4e7] transition-colors focus:outline-none"
         aria-label="Alertas de mercado"
+        aria-expanded={isOpen}
       >
-        <Bell className="w-5 h-5" />
+        {/* La campana se balancea cuando hay alertas sin leer */}
+        <motion.span
+          className="block"
+          style={{ originY: 0.1 }}
+          animate={unreadCount > 0 ? { rotate: [0, 16, -14, 10, -6, 0] } : { rotate: 0 }}
+          transition={unreadCount > 0 ? { duration: 1, repeat: Infinity, repeatDelay: 4 } : undefined}
+        >
+          <Bell className="w-5 h-5" />
+        </motion.span>
         {unreadCount > 0 && (
           <span className="absolute top-1 right-1 flex h-2.5 w-2.5">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#f87171] opacity-75"></span>
@@ -77,8 +88,21 @@ export default function NotificationBell() {
         )}
       </button>
 
+      {/* Tocar fuera del panel lo cierra */}
+      {isOpen && <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />}
+
+      <AnimatePresence>
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-2xl z-50">
+        // En el celular ocupa el ancho de la pantalla; en pantallas grandes cuelga de la campana
+        <motion.div
+          key="panel"
+          initial={{ opacity: 0, y: -8, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -8, scale: 0.96 }}
+          transition={{ duration: 0.2, ease: SUAVE }}
+          style={{ originX: 1, originY: 0 }}
+          className="fixed inset-x-3 top-16 sm:absolute sm:inset-x-auto sm:top-auto sm:right-0 sm:mt-2 sm:w-80 bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-2xl z-50 overflow-hidden"
+        >
           <div className="px-4 py-3 border-b border-zinc-200 dark:border-[#27272a] bg-zinc-50 dark:bg-[#09090b] flex justify-between items-center">
             <h3 className="text-xs font-sans font-medium font-bold uppercase tracking-wider text-zinc-900 dark:text-[#e4e4e7]">Alertas de Mercado</h3>
             {unreadCount > 0 && (
@@ -92,7 +116,7 @@ export default function NotificationBell() {
             )}
           </div>
 
-          <div className="max-h-96 overflow-y-auto">
+          <div className="max-h-[70vh] sm:max-h-96 overflow-y-auto">
             {alerts.length === 0 ? (
               <div className="p-6 text-center text-zinc-500 dark:text-[#71717a] text-xs font-sans font-medium">
                 No hay alertas activas en el mercado.
@@ -136,8 +160,9 @@ export default function NotificationBell() {
               </div>
             )}
           </div>
-        </div>
+        </motion.div>
       )}
+      </AnimatePresence>
     </div>
   );
 }

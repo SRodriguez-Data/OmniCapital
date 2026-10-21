@@ -35,14 +35,30 @@ export default function MacroPanel() {
 
   if (data.length === 0) {
     return (
-      <div className="bg-zinc-50 dark:bg-[#09090b] border-b border-zinc-200 dark:border-[#27272a] py-2 px-6 flex gap-6 overflow-x-auto text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a]">
+      <div className="bg-zinc-50 dark:bg-[#09090b] border-b border-zinc-200 dark:border-[#27272a] py-2 px-4 md:px-6 flex gap-6 overflow-x-auto text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] animate-pulse">
         Cargando indicadores macroeconómicos...
       </div>
     );
   }
 
+  // Cinta que corre sola, como en las pantallas de la bolsa: la lista va dos veces para que el giro no se note.
+  // Se detiene al pasar el mouse; con movimiento reducido queda quieta y se desliza con el dedo
   return (
-    <div className="bg-zinc-50 dark:bg-[#09090b] border-b border-zinc-200 dark:border-[#27272a] py-2 px-6 flex gap-6 overflow-x-auto hide-scrollbar whitespace-nowrap">
+    <div className="bg-zinc-50 dark:bg-[#09090b] border-b border-zinc-200 dark:border-[#27272a] py-2 overflow-x-auto hide-scrollbar whitespace-nowrap animate-[aparecer-arriba_0.6s_ease-out_both]">
+      <div className="marquesina flex w-max">
+        {[0, 1].map(copia => (
+          <div key={copia} className="flex gap-6 pl-4 md:pl-6" aria-hidden={copia === 1 || undefined}>
+            {indicadores(data)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function indicadores(data: MacroIndicator[]) {
+  return (
+    <>
       {data.map((item, i) => {
         const isVix = item.symbol === '^VIX';
         // Para el VIX subir es malo (miedo), así que los colores se invierten.
@@ -70,6 +86,6 @@ export default function MacroPanel() {
           </div>
         );
       })}
-    </div>
+    </>
   );
 }
