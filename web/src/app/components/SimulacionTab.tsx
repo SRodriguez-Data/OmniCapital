@@ -32,6 +32,12 @@ type Fuente = 'paper' | 'real';
 const tarjeta = 'bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-lg';
 const usd = (x: number, d = 0) => `US$ ${x.toLocaleString('es-CL', { minimumFractionDigits: d, maximumFractionDigits: d })}`;
 const pct = (x: number, d = 1) => `${(x * 100).toFixed(d)}%`;
+// Ganancia en dólares con signo. Con centavos si es chica, para que US$ 0,87 no se lea como cero
+const usdSigno = (x: number) => {
+  const v = Math.abs(x) < 0.005 ? 0 : x;
+  const d = Math.abs(v) < 1000 ? 2 : 0;
+  return `${v >= 0 ? '+' : '−'}US$ ${Math.abs(v).toLocaleString('es-CL', { minimumFractionDigits: d, maximumFractionDigits: d })}`;
+};
 const colorSigno = (x: number) => x >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400';
 
 const MOTIVO: Record<string, string> = { reb: 'rebalanceo', stop: 'stop loss' };
@@ -63,18 +69,26 @@ function CurvaTooltip({ active, payload, label }: TooltipProps) {
 
 function Curva({ curva, real }: { curva: Punto[]; real: boolean }) {
   if (curva.length < 2) {
-    return <p className="text-xs text-zinc-500 dark:text-[#71717a]">La curva frente al S&amp;P 500 aparece con el primer cierre después de la primera compra.</p>;
+    return (
+      <p className="text-xs text-zinc-500 dark:text-[#71717a]">
+        La curva frente al S&amp;P 500 aparece con el primer cierre después de la primera compra: el cierre de cada día se carga en la madrugada siguiente.
+      </p>
+    );
   }
   const [base, ultimo] = [curva[0], curva[curva.length - 1]];
   const datos = curva.map(p => ({ fecha: p.f, Cartera: (p.c / base.c) * 100, 'S&P 500': (p.s / base.s) * 100 }));
   const [rc, rs] = [ultimo.c / base.c - 1, ultimo.s / base.s - 1];
+  // En dólares solo la simulación: sin depósitos ni retiros, la curva es el patrimonio. En la cuenta real la curva
+  // descuenta los depósitos, así que su diferencia no es lo que se ganó
+  const monto = real ? null : ultimo.c - base.c;
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-3 gap-3 text-center">
-        {([[real ? 'Cartera' : 'Cartera simulada', rc], ['S&P 500', rs], ['Diferencia', rc - rs]] as const).map(([nombre, valor]) => (
+        {([[real ? 'Cartera' : 'Cartera simulada', rc, monto], ['S&P 500', rs, null], ['Diferencia', rc - rs, null]] as const).map(([nombre, valor, dolares]) => (
           <div key={nombre} className="bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-[#27272a] rounded p-3">
             <p className="text-[10px] font-mono text-zinc-500 dark:text-[#71717a] uppercase tracking-widest">{nombre}</p>
             <p className={`text-lg font-bold font-mono ${colorSigno(valor)}`}>{pctSigno(valor)}</p>
+            {dolares !== null && <p className={`text-xs font-mono ${colorSigno(dolares)}`}>{usdSigno(dolares)}</p>}
           </div>
         ))}
       </div>
@@ -156,7 +170,12 @@ export default function SimulacionTab() {
 
   const { cuenta, limites } = estado;
   const hoy = cuenta.patrimonio_ayer > 0 ? cuenta.patrimonio / cuenta.patrimonio_ayer - 1 : 0;
-  const invertido = cuenta.patrimonio - cuenta.efectivo;
+  const gananciaHoy = cuenta.patrimonio_ayer > 0 ? cuenta.patrimonio - cuenta.patrimonio_ayer : 0;
+  // Lo que ganan o pierden las acciones que hay ahora frente a lo que se pagó por ellas (la suma de la tabla de abajo)
+  const gananciaDe = (p: Posicion) => p.valor - p.costo * p.cantidad;
+  const valorAcciones = estado.posiciones.reduce((s, p) => s + p.valor, 0);
+  const costoAcciones = estado.posiciones.reduce((s, p) => s + p.costo * p.cantidad, 0);
+  const gananciaCartera = valorAcciones - costoAcciones;
   const pendiente = !estado.rebalanceo || estado.proximo_rebalanceo <= estado.actualizado.slice(0, 10);
 
   return (
@@ -186,14 +205,17 @@ export default function SimulacionTab() {
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
           {[
-            ['Patrimonio', usd(cuenta.patrimonio), ''],
-            ['Hoy', pctSigno(hoy, 2), colorSigno(hoy)],
-            ['Invertido', usd(invertido), ''],
-            ['Efectivo', `${usd(cuenta.efectivo)} (${pct(cuenta.efectivo / (cuenta.patrimonio || 1))})`, ''],
-          ].map(([nombre, valor, color]) => (
-            <div key={nombre} className="bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-[#27272a] rounded p-3">
+            ['Patrimonio', usd(cuenta.patrimonio), '', 'acciones + efectivo', ''],
+            ['Hoy', usdSigno(gananciaHoy), colorSigno(gananciaHoy), `${pctSigno(hoy, 2)} frente al cierre anterior`, ''],
+            ['Ganancia en cartera', usdSigno(gananciaCartera), colorSigno(gananciaCartera),
+              costoAcciones > 0 ? `${pctSigno(gananciaCartera / costoAcciones, 2)} sobre ${usd(costoAcciones)} invertidos` : 'sin acciones todavía',
+              'Lo que ganan o pierden las acciones que tiene la cartera ahora, frente a lo que se pagó por ellas'],
+            ['Efectivo', usd(cuenta.efectivo), '', `${pct(cuenta.efectivo / (cuenta.patrimonio || 1))} del patrimonio`, ''],
+          ].map(([nombre, valor, color, detalle, ayuda]) => (
+            <div key={nombre} title={ayuda || undefined} className="bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-[#27272a] rounded p-3">
               <p className="text-[10px] font-mono text-zinc-500 dark:text-[#71717a] uppercase tracking-widest">{nombre}</p>
-              <p className={`text-sm font-bold font-mono ${color || 'text-zinc-900 dark:text-[#e4e4e7]'}`}>{valor}</p>
+              <p className={`text-base font-bold font-mono ${color || 'text-zinc-900 dark:text-[#e4e4e7]'}`}>{valor}</p>
+              <p className="text-[11px] text-zinc-500 dark:text-[#71717a] mt-0.5">{detalle}</p>
             </div>
           ))}
         </div>
@@ -212,7 +234,7 @@ export default function SimulacionTab() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-[10px] font-mono text-zinc-500 dark:text-[#71717a] uppercase tracking-widest text-right">
-                  <th className="text-left py-2">Acción</th><th>Peso</th><th>Valor</th><th>Desde la compra</th>
+                  <th className="text-left py-2">Acción</th><th>Peso</th><th>Valor</th><th className="pl-3">Ganancia</th><th className="pl-3">Desde la compra</th>
                 </tr>
               </thead>
               <tbody className="font-mono">
@@ -221,10 +243,20 @@ export default function SimulacionTab() {
                     <td className="text-left py-1.5 font-bold text-zinc-900 dark:text-[#e4e4e7]">{p.ticker}</td>
                     <td className="text-zinc-700 dark:text-[#d4d4d8]">{pct(p.peso)}</td>
                     <td className="text-zinc-700 dark:text-[#d4d4d8]">{usd(p.valor)}</td>
-                    <td className={colorSigno(p.ganancia_pct)}>{pctSigno(p.ganancia_pct)}</td>
+                    <td className={`pl-3 whitespace-nowrap ${colorSigno(gananciaDe(p))}`}>{usdSigno(gananciaDe(p))}</td>
+                    <td className={`pl-3 ${colorSigno(p.ganancia_pct)}`}>{pctSigno(p.ganancia_pct, 2)}</td>
                   </tr>
                 ))}
               </tbody>
+              <tfoot className="font-mono font-bold">
+                <tr className="border-t-2 border-zinc-200 dark:border-[#3f3f46] text-right">
+                  <td className="text-left py-2 text-zinc-900 dark:text-[#e4e4e7]">Total</td>
+                  <td className="text-zinc-700 dark:text-[#d4d4d8]">{pct(valorAcciones / (cuenta.patrimonio || 1))}</td>
+                  <td className="text-zinc-700 dark:text-[#d4d4d8]">{usd(valorAcciones)}</td>
+                  <td className={`pl-3 whitespace-nowrap ${colorSigno(gananciaCartera)}`}>{usdSigno(gananciaCartera)}</td>
+                  <td className={`pl-3 ${colorSigno(gananciaCartera)}`}>{costoAcciones > 0 ? pctSigno(gananciaCartera / costoAcciones, 2) : '—'}</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         )}
