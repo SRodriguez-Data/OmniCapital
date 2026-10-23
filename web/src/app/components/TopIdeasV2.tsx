@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { AlertTriangle, ChevronDown, ChevronUp, Loader2, Sparkles } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
-import { evidenciaMetodo, sesgosEvidencia, type ClaveMetodo, type Nivel } from '@/lib/evidenciaMetodos';
+import { NOMBRE_PONDERACION, evidenciaMetodo, sesgosEvidencia, type ClaveMetodo, type Nivel, type Ponderacion } from '@/lib/evidenciaMetodos';
 import {
   type Candidato, type Historiales, SECTOR, fechaCorta, lineaHistorial, normalizeYield, pctSigno, textoDeuda, textoPE, textoResultados,
 } from './topFormato';
@@ -38,19 +38,72 @@ const sectorDe = (c: Candidato) => {
   return s ? [SECTOR[s] ?? s, c.industria].filter(Boolean).join(' · ') : null;
 };
 
+const pctCorto = (x: number) => `${(x * 100).toFixed(1)}%`;
+
 function CajaMetodo({ clave }: { clave: ClaveMetodo }) {
   const e = evidenciaMetodo(clave);
   if (!e) return null;
+  const c = e.cartera;
+  const el = c ? c.ponderaciones[c.elegida] : null;
+  // Las mitades de la cartera usan el mismo corte que las de la medición a 3 meses, que traen sus fechas
+  const periodos = e.mitades3m.map(m => `${m.desde.slice(0, 4)}–${m.hasta.slice(0, 4)}`);
   return (
-    <div className={`${tarjeta} p-4 text-left`}>
+    <div className={`${tarjeta} p-4 text-left space-y-2`}>
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm font-semibold text-zinc-900 dark:text-[#e4e4e7]">{e.nombre}</p>
         <span className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded ${NIVEL_ESTILO[e.nivel]}`}>evidencia {e.nivel}</span>
       </div>
-      <p className="text-xs text-zinc-600 dark:text-[#a1a1aa] mt-1.5 leading-relaxed">
-        En {e.anios}, las {e.n} elegidas de cada mes rindieron {pctSigno(e.exceso)} frente a su mercado en los 3 meses siguientes y le ganaron en {(e.mesesPositivos * 100).toFixed(0)}% de los meses.
-        {e.mitades.length === 2 && ` Por mitades de la historia: ${e.mitades.map(m => `${m.desde.slice(0, 4)}–${m.hasta.slice(0, 4)} ${pctSigno(m.exceso_promedio)}`).join(', ')}.`}
-        {` Fuerza estadística t = ${e.t.toFixed(1)} (sobre 2 se considera sólida).`}
+      {c && el ? (
+        <>
+          <p className="text-xs text-zinc-600 dark:text-[#a1a1aa] leading-relaxed">
+            En {e.anios}, la cartera de las {e.n} elegidas, rebalanceada cada mes y repartida por {NOMBRE_PONDERACION[c.elegida].toLowerCase()},
+            rindió {pctSigno(el.exceso_anual)} al año sobre el promedio de su mercado
+            {Object.values(el.mitades).length === 2 && ` (${Object.values(el.mitades).map((m, i) => `${periodos[i] ?? (i ? 'después' : 'antes')}: ${pctSigno(m.exceso_anual)}`).join('; ')})`}.
+            {` Fuerza estadística t = ${e.t.toFixed(1)}: sobre 2, y ganando en ambas mitades, se considera sólida.`}
+          </p>
+          <TablaPonderaciones elegida={c.elegida} ponderaciones={c.ponderaciones} />
+          {e.variantes.length > 1 && (
+            <p className="text-[11px] text-zinc-500 dark:text-[#71717a]">
+              Se midieron también {e.variantes.length - 1} variantes del criterio (con filtro de tendencia y ajustadas por riesgo): ninguna le ganó al original, así que se mantiene.
+            </p>
+          )}
+        </>
+      ) : (
+        <p className="text-xs text-zinc-600 dark:text-[#a1a1aa] leading-relaxed">
+          En {e.anios}, las {e.n} elegidas de cada mes rindieron {pctSigno(e.exceso3m)} frente a su mercado en los 3 meses siguientes. Fuerza estadística t = {e.t.toFixed(1)}.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Teoría de portafolio medida: cada forma de repartir la misma lista, rebalanceada cada mes durante 10 años
+function TablaPonderaciones({ elegida, ponderaciones }: { elegida: Ponderacion; ponderaciones: Record<Ponderacion, { retorno_anual: number; volatilidad_anual: number; sharpe: number | null; peor_caida: number }> }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-[11px] font-mono">
+        <thead>
+          <tr className="text-zinc-500 dark:text-[#71717a] text-right">
+            <th className="text-left font-normal py-1">Pesos</th><th className="font-normal">Retorno</th><th className="font-normal">Volatilidad</th>
+            <th className="font-normal" title="Retorno por unidad de riesgo (Sharpe sin tasa libre de riesgo)">Ret./riesgo</th><th className="font-normal">Peor caída</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(Object.keys(ponderaciones) as Ponderacion[]).map(p => {
+            const x = ponderaciones[p];
+            return (
+              <tr key={p} className={`text-right border-t border-zinc-100 dark:border-[#27272a] ${p === elegida ? 'font-bold text-zinc-900 dark:text-[#e4e4e7]' : 'text-zinc-600 dark:text-[#a1a1aa]'}`}>
+                <td className="text-left py-1">{NOMBRE_PONDERACION[p]}{p === elegida ? ' ✓' : ''}</td>
+                <td>{pctCorto(x.retorno_anual)}</td><td>{pctCorto(x.volatilidad_anual)}</td>
+                <td>{x.sharpe?.toFixed(2) ?? '—'}</td><td>{pctCorto(x.peor_caida)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <p className="text-[11px] text-zinc-500 dark:text-[#71717a] mt-1">
+        ✓ la que se usa: la de mejor retorno por unidad de riesgo que además no fue peor que partes iguales en ninguna mitad de la historia.
+        Mínima varianza es la cartera eficiente de Markowitz cuando todas las elegidas tienen el mismo retorno esperado (covarianza de Ledoit-Wolf, un año de datos).
       </p>
     </div>
   );
@@ -73,6 +126,16 @@ function Historial({ h }: { h: Historiales | null }) {
   );
 }
 
+// Qué peso lleva cada idea de la lista y cuánto llegó a caer esa cartera en la historia medida
+function avisoPesos(clave: ClaveMetodo): string {
+  const c = evidenciaMetodo(clave)?.cartera;
+  if (!c) return '';
+  const caida = c.ponderaciones[c.elegida].peor_caida;
+  const como = c.elegida === 'igual' ? 'todas pesan lo mismo' : c.elegida === 'inversa_volatilidad'
+    ? 'la más volátil pesa menos' : 'pesan más las que bajan el riesgo del conjunto';
+  return ` Peso de cada una (a la derecha): ${NOMBRE_PONDERACION[c.elegida].toLowerCase()}, ${como}. En la historia medida esta cartera llegó a caer ${pctCorto(caida)} en algún momento.`;
+}
+
 interface Tesis { loading: boolean; content: string; error?: string }
 
 function Idea({ c, i, abierta, onToggle, tesis, onTesis }: {
@@ -89,6 +152,9 @@ function Idea({ c, i, abierta, onToggle, tesis, onTesis }: {
           <span className="block text-xs text-zinc-700 dark:text-[#d4d4d8]">{resumenCorto(c)}</span>
         </span>
         {res?.pronto && <span className="hidden sm:inline text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">resultados {res.texto}</span>}
+        {typeof c.peso === 'number' && (
+          <span title="Peso dentro de esta lista" className="font-mono text-xs font-bold text-zinc-900 dark:text-[#e4e4e7] shrink-0">{(c.peso * 100).toFixed(1)}%</span>
+        )}
         {abierta ? <ChevronUp className="w-4 h-4 text-zinc-400" /> : <ChevronDown className="w-4 h-4 text-zinc-400" />}
       </button>
       {abierta && (
@@ -204,9 +270,9 @@ export default function TopIdeasV2({ us, cl, historial, fecha }: { us: Candidato
       </div>
 
       {lista('EE.UU.: utilidad respaldada por caja (una o dos por sector, sin bancos)', us,
-        'Se evalúa cada empresa del S&P 500 frente a las de su sector con sus estados financieros en la SEC; quedan fuera las que reparten en dividendos más de lo que ganan.')}
+        `Se evalúa cada empresa del S&P 500 frente a las de su sector con sus estados financieros en la SEC; quedan fuera las que reparten en dividendos más de lo que ganan.${avisoPesos('calidad_eeuu')}`)}
       {lista('Chile: las de mayor alza de los últimos 12 meses', cl,
-        'Evidencia débil y precios de Yahoo con semanas sin actualizar en varias acciones chilenas: tómalas con más cautela que las de EE.UU.')}
+        `Precios oficiales de la Bolsa de Santiago.${avisoPesos('momentum_chile')}`)}
 
       <details className="text-[11px] text-zinc-500 dark:text-[#71717a]">
         <summary className="cursor-pointer">Límites de la medición</summary>

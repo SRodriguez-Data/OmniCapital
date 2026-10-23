@@ -22,6 +22,7 @@ export interface Candidato {
   sector_gics?: string;
   cierre_fiscal?: string;
   momentum?: number;          // retorno con dividendos de hace 12 meses a hace 1 mes
+  peso?: number;              // fracción de la cartera de su lista (cartera.py: la ponderación medida para el método)
 }
 
 export function normalizeYield(divStr?: string): string {

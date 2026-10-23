@@ -206,7 +206,7 @@ export default function SimulacionTab() {
           <h2 className="text-xl font-bold text-[#d946ef] uppercase tracking-widest">{real ? 'Cuenta real' : chile ? 'Simulación Chile' : 'Simulación EE.UU.'}</h2>
           {real ? (
             <p className="text-zinc-600 dark:text-[#a1a1aa] text-sm max-w-2xl mx-auto mt-2">
-              Tu cuenta de Alpaca con dinero de verdad. Cada mes el sistema compra las acciones del Top de EE.UU. a partes iguales
+              Tu cuenta de Alpaca con dinero de verdad. Cada mes el sistema compra las acciones del Top de EE.UU. con el peso que el Top le da a cada una
               {estado.tope ? `, con hasta ${dinero(estado.tope)},` : ''} y las mantiene hasta el mes siguiente, con las mismas reglas de riesgo que la simulación.
               Solo tú ves esta página.
             </p>
@@ -214,12 +214,12 @@ export default function SimulacionTab() {
             <p className="text-zinc-600 dark:text-[#a1a1aa] text-sm max-w-2xl mx-auto mt-2">
               Las acciones chilenas del Top (las de mayor alza de 12 meses) en una cuenta simulada con {dinero(estado.libro?.capital_inicial ?? 10_000_000)} ficticios.
               Alpaca no opera en Chile, así que OmniCapital lleva la cuenta y llena cada orden con los precios de la Bolsa de Santiago, a la punta de compra
-              o venta y con comisión. El bot revisa la lista en cada corrida y compra o vende cuando quiere; una vez al mes deja todas a partes iguales.
+              o venta y con comisión. El bot revisa la lista en cada corrida y compra o vende cuando quiere; una vez al mes vuelve a los pesos del Top (inversos a la volatilidad: la más riesgosa pesa menos).
             </p>
           ) : (
             <p className="text-zinc-600 dark:text-[#a1a1aa] text-sm max-w-2xl mx-auto mt-2">
               El sistema opera con dinero ficticio, en una cuenta de práctica de Alpaca, las acciones del Top de EE.UU. El bot revisa la lista en cada
-              corrida y compra o vende cuando quiere: vende la que sale del Top, compra la que entra y una vez al mes deja todas a partes iguales. Sirve
+              corrida y compra o vende cuando quiere: vende la que sale del Top, compra la que entra y una vez al mes vuelve a los pesos del Top. Sirve
               para ver, con órdenes reales en el mercado, si seguir el Top le gana al S&amp;P 500 antes de poner plata de verdad.
             </p>
           )}
