@@ -7,7 +7,8 @@ qué tan seguro está, en vez de opinar.
 
 Cómo se mide: el último día hábil de cada mes se calcula cada señal para cada acción con los precios disponibles
 ese día (nada del futuro) y se compara con su retorno a 1, 3 y 6 meses, descontado el promedio de su mercado
-(EE.UU. o Chile) en el mismo período. Precios ajustados por dividendos y splits.
+(EE.UU. o Chile) en el mismo período. Precios ajustados por dividendos y splits; los de Chile, de la Bolsa de Santiago
+(bolsa_chile.py), porque Yahoo congela semanas y deja días a medio cerrar en las acciones chilenas.
 
 Sesgos que no se pueden quitar con datos gratis, y que el informe declara:
 - Supervivencia: en EE.UU. cada fecha usa solo las empresas del S&P 500 de hoy que ya estaban en el índice ese día
@@ -34,6 +35,7 @@ from io import StringIO
 import requests
 from scipy.stats import spearmanr
 
+import bolsa_chile
 import fundamentales_sec
 
 load_dotenv()
@@ -72,6 +74,11 @@ def descargar(tickers: list[str]) -> pd.DataFrame:
             if t in df.columns.get_level_values(0):
                 columnas.append(df[t]["Close"].rename(t))
         logging.info(f"Descargados {min(i + LOTE, len(tickers))}/{len(tickers)}")
+    # 10 años de sesiones de la Bolsa de Santiago, ajustadas por dividendos como el cierre de Yahoo
+    bolsa = bolsa_chile.diarias([t for t in tickers if t.endswith(".SN")], barras=2600, ajuste="dividends")
+    columnas = [c for c in columnas if c.name not in bolsa]
+    columnas += [df.set_index(pd.to_datetime(df["date"]))["close"].rename(t) for t, df in bolsa.items()]
+    logging.info(f"Chile: {len(bolsa)} acciones con precios de la Bolsa de Santiago.")
     precios = pd.concat(columnas, axis=1)
     precios.index = pd.to_datetime(precios.index).tz_localize(None)
     return precios.sort_index()

@@ -10,6 +10,7 @@ import requests
 from io import StringIO
 from dotenv import load_dotenv
 from supabase import create_client, Client
+import bolsa_chile
 try:
     from yfinance.data import YfData  # sesión de yfinance (cookie y crumb de Yahoo) para pedir quoteSummary
 except ImportError:
@@ -189,6 +190,8 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
 # ADX, ATR y Bollinger; las EMA, la señal MACD y el OBV siguen desde la última fila guardada.
 PERIODO_RECIENTE = "1y"
 PERIODO_COMPLETO = "5y"   # solo activos nuevos, sin datos recientes o con el historial desalineado
+# Las acciones chilenas toman sus precios de la Bolsa de Santiago (bolsa_chile.py): sesiones de cada período
+BARRAS_BOLSA = {PERIODO_RECIENTE: 300, PERIODO_COMPLETO: 1300}
 # Lo que se lee de la base para seguir cada serie y revisarla. Una corrida manual con 370 repasa el último año
 # (por ejemplo, para corregir días que quedaron guardados con la bolsa abierta)
 DIAS_GUARDADOS = int(os.environ.get("DIAS_REVISION") or 30)
@@ -254,6 +257,24 @@ def descargar(tickers: list[str], periodo: str) -> dict[str, pd.DataFrame]:
         time.sleep(1)
     return datos
 
+# Acciones chilenas cuyos precios de esta corrida vienen de la Bolsa de Santiago y no de Yahoo
+DE_LA_BOLSA: set[str] = set()
+
+def usar_bolsa(descargas: dict[str, pd.DataFrame], tickers: list[str], periodo: str) -> None:
+    """Reemplaza los precios de Yahoo de las acciones chilenas por los de la Bolsa de Santiago. Yahoo congela semanas
+    y guarda días a medio cerrar; la bolsa trae el cierre y el volumen completos. Las que la bolsa no entrega (o si
+    su feed falla) se quedan con Yahoo y sus reparaciones. Los dividendos siguen saliendo de Yahoo: se guardan antes."""
+    chilenos = [t for t in tickers if t.endswith(".SN")]
+    if not chilenos:
+        return
+    bolsa = bolsa_chile.diarias(chilenos, barras=BARRAS_BOLSA.get(periodo, 1300))
+    for t, df in bolsa.items():
+        descargas[t] = df
+        DE_LA_BOLSA.add(t)
+    faltan = sorted(set(chilenos) - set(bolsa))
+    logging.info(f"🇨🇱 {len(bolsa)} acciones chilenas con precios de la Bolsa de Santiago"
+                 + (f"; con Yahoo: {', '.join(faltan)}" if faltan else "."))
+
 DIAS_BARRAS_HORA = 725   # Yahoo guarda barras por hora de los últimos 730 días
 
 def reparar_con_horas(descargas: dict[str, pd.DataFrame]) -> int:
@@ -264,7 +285,7 @@ def reparar_con_horas(descargas: dict[str, pd.DataFrame]) -> int:
     limite = (pd.Timestamp.now() - pd.Timedelta(days=DIAS_BARRAS_HORA)).strftime("%Y-%m-%d")
     malos = {}
     for t, df in descargas.items():
-        if t.endswith(".SN"):
+        if t.endswith(".SN") and t not in DE_LA_BOLSA:
             m = df["volume"].fillna(0).eq(0) & (df["date"] >= limite)
             if m.any():
                 malos[t] = df.loc[m, "date"].tolist()
@@ -431,14 +452,17 @@ def reescribir_historial(ticker: str, filas: list[dict], hasta: str | None = Non
 def cargar_completo(ticker: str) -> bool:
     """Activo nuevo, sin datos recientes o cuyo historial guardado ya no calza: se baja completo y se reescribe."""
     bajado = descargar([ticker], PERIODO_COMPLETO)
+    if ticker in bajado:
+        guardar_dividendos(bajado)
+    usar_bolsa(bajado, [ticker], PERIODO_COMPLETO)
     reparar_con_horas(bajado)
     df = bajado.get(ticker)
     if df is None:
         return False
-    guardar_dividendos({ticker: df})
     df = df[df["date"] <= ultimo_dia_cerrado(ticker)].reset_index(drop=True)
     indicadores = compute_indicators(df[["date"] + COLUMNAS_PRECIO])
-    if not historial_congelado(df):
+    # Una acción poco transada puede repetir el precio varios días en la bolsa: eso no es un historial congelado
+    if ticker in DE_LA_BOLSA or not historial_congelado(df):
         reescribir_historial(ticker, registros(ticker, indicadores))
         return True
     # Lo congelado no se guarda: solo la historia anterior y, encima, el día de la cotización
@@ -518,13 +542,14 @@ def run_miner():
     if faltan:
         logging.info(f"Reintentando {len(faltan)} activos que Yahoo no entregó en su lote.")
         descargas.update(descargar(faltan, PERIODO_RECIENTE))
-    reparados = reparar_con_horas(descargas)
-    if reparados:
-        logging.info(f"🔧 {reparados} días chilenos congelados en el historial diario de Yahoo se rearmaron con sus barras por hora.")
     try:
         guardar_dividendos(descargas)
     except Exception as e:
         logging.warning(f"No se guardaron los dividendos: {str(e)[:160]}")
+    usar_bolsa(descargas, seguidos, PERIODO_RECIENTE)
+    reparados = reparar_con_horas(descargas)
+    if reparados:
+        logging.info(f"🔧 {reparados} días chilenos congelados en el historial diario de Yahoo se rearmaron con sus barras por hora.")
 
     filas = []
     borrar = {}  # fechas guardadas que se reemplazan -> activos
@@ -543,7 +568,7 @@ def run_miner():
                 logging.warning(f"{ticker}: Yahoo no entregó datos.")
             elif g.empty:
                 completos.append(ticker)
-            elif historial_congelado(df):
+            elif ticker not in DE_LA_BOLSA and historial_congelado(df):
                 fila = fila_desde_cotizacion(ticker, df, g)
                 if fila:
                     filas.append(fila)
@@ -554,7 +579,8 @@ def run_miner():
             else:
                 reescribir, fechas = revisar(df, g)
                 if reescribir:
-                    logging.info(f"{ticker}: lo guardado ya no calza con el cierre de Yahoo (split o corrección); se baja completo.")
+                    fuente = "la Bolsa de Santiago" if ticker in DE_LA_BOLSA else "Yahoo"
+                    logging.info(f"{ticker}: lo guardado ya no calza con el cierre de {fuente} (split o corrección); se baja completo.")
                     completos.append(ticker)
                     continue
                 nuevas = calcular_filas(ticker, df, g, df[df["date"].isin(fechas)]) if fechas else []
@@ -605,5 +631,20 @@ def run_miner():
         logging.error("❌ Fallaron demasiados activos: Yahoo podría estar bloqueando las descargas.")
         sys.exit(1)
 
+def recargar_chile():
+    """Reescribe el historial completo de cada acción chilena con los precios de la Bolsa de Santiago. Se usa una vez
+    al cambiar de fuente: la corrida diaria solo revisa los últimos días."""
+    chilenos = [t for t in obtener_universo_masivo()[0] if t.endswith(".SN")]
+    logging.info(f"Recargando {len(chilenos)} acciones chilenas desde la Bolsa de Santiago.")
+    for t in chilenos:
+        try:
+            ok = cargar_completo(t)
+            logging.info(f"{t}: {'reescrito' if ok else 'sin datos'} ({'Bolsa de Santiago' if t in DE_LA_BOLSA else 'Yahoo'}).")
+        except Exception as e:
+            logging.error(f"{t}: {str(e)[:160]}")
+
 if __name__ == "__main__":
-    run_miner()
+    if "--recargar-chile" in sys.argv:
+        recargar_chile()
+    else:
+        run_miner()
