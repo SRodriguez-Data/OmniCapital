@@ -1,9 +1,9 @@
 """Control de riesgo. Se aplica a toda orden antes de enviarla, sea cual sea la estrategia.
 
-- Ninguna acción pasa de `peso_maximo` del patrimonio.
+- Ninguna acción pasa de `peso_maximo` del patrimonio (en Chile la lista es de 5 acciones: cada una pesa 20%).
 - Freno diario: si el patrimonio cae `perdida_diaria_maxima` frente al cierre anterior, ese día no se compra nada.
 - Stop loss: una acción que cae `stop_loss` bajo su costo promedio se vende. Es un freno para catástrofes, no parte
-  del método medido (que mantiene las acciones el mes completo), por eso está lejos.
+  del método medido, por eso está lejos.
 - Sin margen ni ventas en corto: las compras no gastan más que el efectivo disponible y las ventas no superan las
   acciones que hay.
 """
@@ -21,6 +21,10 @@ class Limites:
     orden_minima: float = 1.0        # Alpaca no acepta órdenes de menos de US$1
     reserva_efectivo: float = 0.005  # queda en caja para que una compra a mercado no falle por centavos
     max_ordenes: int = 60            # más que eso en una corrida es señal de un error, no de un rebalanceo
+
+
+# La cuenta simulada de la Bolsa de Santiago: 5 acciones de 20% y montos en pesos
+LIMITES_CHILE = Limites(peso_maximo=0.21, orden_minima=10_000)
 
 
 def bloqueo(cuenta: Cuenta) -> str | None:

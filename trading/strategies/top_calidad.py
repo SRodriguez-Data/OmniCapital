@@ -6,9 +6,7 @@ analisis_ia; aquí solo se lee, para que la simulación opere exactamente lo que
 """
 from datetime import date
 
-from .base import Estrategia, Objetivo
-
-METODO = 'v2'
+from .base import MARGEN, Estrategia, Objetivo, ultimo_escaneo
 
 
 def simbolo_alpaca(ticker: str) -> str:
@@ -26,25 +24,20 @@ class TopCalidad(Estrategia):
         self.dias_maximos = dias_maximos
 
     def objetivo(self, hoy: date) -> Objetivo:
-        filas = (self.supabase.table('analisis_ia')
-                 .select('fecha, metodo:candidatos_json->metodo, fp:candidatos_json->fecha_precios, us:candidatos_json->us')
-                 .order('fecha', desc=True).limit(1).execute().data or [])
-        if not filas:
-            return Objetivo({}, '', problema='No hay ningún escaneo del Top guardado.')
-        f = filas[0]
-        if f.get('metodo') != METODO:
-            return Objetivo({}, '', problema=f'El último escaneo es del método {f.get("metodo")!r}, no del {METODO}.')
-        precios_del = (f.get('fp') or f['fecha'])[:10]
-        antiguedad = (hoy - date.fromisoformat(precios_del)).days
-        if antiguedad > self.dias_maximos:
-            return Objetivo({}, '', problema=f'El último escaneo usa precios del {precios_del} ({antiguedad} días): '
-                                               'se espera uno al día antes de rebalancear.')
+        f, problema = ultimo_escaneo(self.supabase, 'us:candidatos_json->us, calidad:candidatos_json->calidad_us',
+                                     hoy, self.dias_maximos)
+        if problema:
+            return Objetivo({}, '', problema=problema)
         ideas = f.get('us') or []
         if len(ideas) < self.minimo_ideas:
             return Objetivo({}, '', problema=f'El escaneo trae {len(ideas)} ideas de EE.UU. (mínimo {self.minimo_ideas}).')
         simbolos = [simbolo_alpaca(c['ticker']) for c in ideas]
+        # El ranking completo es el de la calidad de todas las evaluadas, con el mismo orden con que el bot elige
+        tabla = f.get('calidad') or {}
+        ranking = sorted((t for t, x in tabla.items() if not x.get('pa')), key=lambda t: (-tabla[t]['p'], -tabla[t]['c']))
         return Objetivo(
             pesos={s: 1 / len(simbolos) for s in simbolos},
-            descripcion=f'{len(simbolos)} ideas del escaneo con precios del {precios_del}',
+            descripcion=f'{len(simbolos)} ideas del escaneo con precios del {f["precios_del"]}',
             precios={simbolo_alpaca(c['ticker']): float(c['price']) for c in ideas if c.get('price')},
+            mantener=set(simbolos) | {simbolo_alpaca(t) for t in ranking[:int(len(simbolos) * MARGEN)]},
         )

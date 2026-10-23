@@ -1,8 +1,9 @@
 """Estado de la cartera en Supabase (una fila por día) para la pestaña Simulación de la web.
 
-La web nunca ve las claves de Alpaca: lee solo estas tablas. La de paper (dinero ficticio) es de lectura pública; la
-de la cuenta real solo la ve su dueño (RLS por user_id). Las escribe el job con la clave secreta de Supabase. Si la
-tabla no existe (falta ejecutar su .sql de supabase/) se avisa y se sigue: operar no depende de poder registrar.
+La web nunca ve las claves de Alpaca: lee solo estas tablas. Las simulaciones (dinero ficticio) son de lectura
+pública; la cuenta real solo la ve su dueño (RLS por user_id). Las escribe el job con la clave secreta de Supabase. Si
+la tabla no existe (falta ejecutar su .sql de supabase/) se avisa y se sigue: operar en Alpaca no depende de poder
+registrar. La cuenta simulada de Chile sí: su libro (efectivo, acciones y órdenes) vive en esta misma fila.
 """
 import logging
 from dataclasses import asdict
@@ -12,7 +13,9 @@ from .broker import Broker, Cuenta, Posicion, estado
 from .risk import Limites
 
 TABLAS = {False: 'paper_trading', True: 'real_trading'}   # según si la cuenta es de dinero real
-INDICE = '^GSPC'   # sin dividendos, igual que la cuenta de paper, que no los paga
+TABLA_CHILE = 'paper_trading_cl'
+# Índices de comparación, sin dividendos, igual que las simulaciones, que no los cobran. En Chile, el ETF del IPSA
+INDICES = {'eeuu': ('^GSPC', 'S&P 500'), 'chile': ('CFMITNIPSA.SN', 'IPSA')}
 MAX_EVENTOS = 30
 
 
@@ -31,8 +34,8 @@ def _clave(e: dict) -> tuple:
     return (e.get('fecha'), e.get('tipo')) if e.get('tipo') in ('freno', 'espera') else (e.get('fecha'), e.get('tipo'), e.get('texto'))
 
 
-def _sp500(supabase, desde: str) -> dict[str, float]:
-    filas = (supabase.table('precios_historicos').select('date, close').eq('ticker', INDICE)
+def _indice(supabase, ticker: str, desde: str) -> dict[str, float]:
+    filas = (supabase.table('precios_historicos').select('date, close').eq('ticker', ticker)
              .gte('date', desde).order('date').limit(5000).execute().data or [])
     return {r['date'][:10]: float(r['close']) for r in filas if r.get('close')}
 
@@ -45,25 +48,31 @@ def _orden(o) -> dict:
         'motivo': partes[1] if len(partes) > 1 else '', 'estado': estado(o),
         'cantidad': float(o.filled_qty or 0), 'precio': float(o.filled_avg_price) if o.filled_avg_price else None,
         'monto_pedido': float(o.notional) if o.notional else None,
+        'comision': getattr(o, 'comision', None),
     }
 
 
-def _curva(supabase, broker: Broker, inicio: str) -> list[dict]:
-    """Valor de la cartera (sin depósitos ni retiros) y S&P 500 al cierre de cada día, desde el último cierre antes de
-    la primera compra (ahí la cartera era solo efectivo). Solo días con cierre de ambos: el de hoy espera el del índice."""
+def _curva(supabase, broker: Broker, inicio: str, indice: str) -> list[dict]:
+    """Valor de la cartera (sin depósitos ni retiros) y del índice al cierre de cada día, desde el último cierre antes
+    de la primera compra (ahí la cartera era solo efectivo). Solo días con cierre de ambos: el de hoy espera el del
+    índice."""
     previo = date.fromisoformat(inicio) - timedelta(days=7)
     cartera = broker.historial(previo)
-    sp = _sp500(supabase, previo.isoformat())
+    sp = _indice(supabase, indice, previo.isoformat())
     base = max((d for d, _ in cartera if d < inicio), default=inicio)
     return [{'f': d, 'c': round(e, 2), 's': sp[d]} for d, e in cartera if d >= base and d in sp]
 
 
 def guardar(supabase, tabla: str, broker: Broker, prefijo: str, titulo: str, hoy: date, cuenta: Cuenta,
             posiciones: dict[str, Posicion], eventos: list[dict], limites: Limites, rebalanceo: dict | None,
-            proximo_rebalanceo: str, tope: float | None = None, dueno: str | None = None) -> None:
+            proximo_rebalanceo: str, tope: float | None = None, dueno: str | None = None, mercado: str = 'eeuu',
+            continuo: bool = False) -> bool:
     """`rebalanceo`: el que se completó en esta corrida ({'mes', 'fecha', 'descripcion'}); si es None se conserva el
-    anterior. `dueno`: user_id de Supabase que puede ver la fila en la web (cuenta real)."""
+    anterior. `dueno`: user_id de Supabase que puede ver la fila en la web (cuenta real). `continuo`: la cartera
+    también cambia entre rebalanceos. Devuelve si se guardó."""
     try:
+        # El libro de la cuenta simulada anota primero el patrimonio de hoy: la curva lo incluye
+        libro = broker.libro() if hasattr(broker, 'libro') else None
         previo = ultimo_estado(supabase, tabla) or {}
         # Las órdenes salen de Alpaca, no de esta corrida: con varias corridas al día ninguna borra lo de otra
         propias = broker.ordenes(cuenta.creada or datetime.now(timezone.utc) - timedelta(days=400), prefijo)
@@ -78,8 +87,10 @@ def guardar(supabase, tabla: str, broker: Broker, prefijo: str, titulo: str, hoy
                 bitacora.append(e)
 
         total = cuenta.patrimonio or 1
+        indice, nombre_indice = INDICES[mercado]
         datos = {
-            'estrategia': prefijo, 'titulo': titulo,
+            'estrategia': prefijo, 'titulo': titulo, 'mercado': mercado, 'moneda': getattr(broker, 'moneda', 'USD'), 'continuo': continuo,
+            'indice': nombre_indice,
             'actualizado': datetime.now(timezone.utc).isoformat(timespec='seconds'),
             'cuenta': {'patrimonio': cuenta.patrimonio, 'patrimonio_ayer': cuenta.patrimonio_ayer, 'efectivo': cuenta.efectivo},
             'inicio': inicio,
@@ -91,14 +102,18 @@ def guardar(supabase, tabla: str, broker: Broker, prefijo: str, titulo: str, hoy
                                  key=lambda x: -x['valor']),
             'ordenes': [_orden(o) for o in propias[-80:]][::-1],
             'eventos': bitacora[-MAX_EVENTOS:],
-            'curva': _curva(supabase, broker, inicio) if inicio else [],
+            'curva': _curva(supabase, broker, inicio, indice) if inicio else [],
             'limites': asdict(limites),
             'tope': tope,
         }
+        if libro is not None:
+            datos['libro'] = libro
         fila = {'fecha': hoy.isoformat(), 'datos': datos, 'actualizado': datetime.now(timezone.utc).isoformat()}
         if dueno:
             fila['user_id'] = dueno
         supabase.table(tabla).upsert(fila).execute()
         logging.info(f'Estado guardado en Supabase ({tabla}, {hoy}).')
+        return True
     except Exception as e:
         logging.warning(f'No se guardó el estado en Supabase: {str(e)[:200]}. ¿Falta ejecutar supabase/{tabla}.sql?')
+        return False

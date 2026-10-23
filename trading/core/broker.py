@@ -71,6 +71,8 @@ def _num(x) -> float:
 
 
 class Broker:
+    moneda = 'USD'
+
     def __init__(self, real: bool = False, clave: str | None = None, secreto: str | None = None):
         self.real = real
         var_clave, var_secreto = CLAVES[real]

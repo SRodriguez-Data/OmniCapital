@@ -2,17 +2,15 @@ name: Paper Trading (simulación del Top v2)
 
 on:
   schedule:
-    # Lunes a viernes con la bolsa de Nueva York abierta, en horario de verano (13:30-20:00 UTC) y de invierno
-    # (14:30-21:00 UTC). Son cuatro porque GitHub atrasa los cron a veces horas: cada corrida es idempotente y solo
-    # la primera con la bolsa abierta rebalancea; las otras revisan los stops y guardan el estado del día.
-    - cron: '47 14 * * 1-5'
-    - cron: '17 16 * * 1-5'
-    - cron: '47 17 * * 1-5'
-    - cron: '17 19 * * 1-5'
+    # Lunes a viernes, cada hora de 12:23 a 21:23 UTC: cubre la bolsa de Santiago (09:30-16:00, que en UTC es
+    # 12:30-19:00 en verano y 13:30-20:00 en invierno) y la de Nueva York (13:30-20:00 o 14:30-21:00 UTC). En cada
+    # corrida el bot decide si compra o vende; GitHub atrasa los cron a veces horas y la corrida es idempotente, así
+    # que una que llega tarde o repetida no duplica órdenes. Las que caen con una bolsa cerrada anotan su cierre.
+    - cron: '23 12-21 * * 1-5'
   workflow_dispatch:
     inputs:
       enviar:
-        description: 'Enviar órdenes a la cuenta de paper (si no, solo muestra el plan)'
+        description: 'Enviar órdenes (si no, solo muestra el plan)'
         type: boolean
         default: true
 
@@ -46,12 +44,22 @@ jobs:
           pip install -r trading/requirements.txt
 
       - name: Test the order plan and risk rules
+        id: pruebas
         run: python -m unittest discover -s trading/tests -t .
 
-      - name: Run the paper trading strategy
+      - name: Run the US simulation (Alpaca paper)
         env:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: python -m trading.main ${{ (github.event_name == 'schedule' || inputs.enviar) && '--enviar' || '' }}
+
+      # Alpaca no opera acciones chilenas: la cuenta es simulada con los precios de la Bolsa de Santiago. Corre
+      # aunque la de EE.UU. falle: son cuentas independientes
+      - name: Run the Chilean simulation (Bolsa de Santiago)
+        if: ${{ !cancelled() && steps.pruebas.outcome == 'success' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python -m trading.main --mercado chile ${{ (github.event_name == 'schedule' || inputs.enviar) && '--enviar' || '' }}

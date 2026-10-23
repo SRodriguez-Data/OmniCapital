@@ -159,6 +159,41 @@ class CorridaCompleta(unittest.TestCase):
         self.assertEqual(sorted((o.symbol, o.side.value) for o in b.enviadas), [('AAA', 'sell'), ('ZZZ', 'buy')])
 
 
+class EntreRebalanceos(unittest.TestCase):
+    """La simulación opera cuando el bot quiere: no espera al mes siguiente para seguir la lista."""
+    @staticmethod
+    def cartera_completa(efectivo=500.0):
+        return BrokerFalso(efectivo=efectivo, posiciones={
+            t['ticker'].replace('-', '.'): Posicion(t['ticker'].replace('-', '.'), 49.75, 4975.0, 100.0, 100.0, 0.0) for t in IDEAS})
+
+    def test_vende_la_que_sale_y_compra_la_que_entra_el_mismo_dia(self):
+        b = self.cartera_completa()
+        sb = SupabaseFalso(ideas=IDEAS[1:] + [{'ticker': 'ZZZ', 'price': 100.0}], estado={'rebalanceo': {'mes': '2026-10'}})
+        correr(b, sb)
+        self.assertEqual(sorted((o.symbol, o.side.value) for o in b.enviadas), [('AAA', 'sell'), ('ZZZ', 'buy')])
+        self.assertTrue(all(o.client_order_id.startswith('topv2-cam-') for o in b.enviadas))
+        self.assertEqual(sb.guardadas[-1]['datos']['eventos'][-1]['tipo'], 'cambio')
+        self.assertEqual(sb.guardadas[-1]['datos']['rebalanceo'], {'mes': '2026-10'})  # no cuenta como rebalanceo
+
+    def test_mantiene_la_que_sigue_dentro_del_margen_del_ranking(self):
+        b = self.cartera_completa()
+        nuevas = IDEAS[1:] + [{'ticker': 'ZZZ', 'price': 100.0}]
+        sb = SupabaseFalso(ideas=nuevas, estado={'rebalanceo': {'mes': '2026-10'}})
+        # AAA quedó en el puesto 21 de la calidad: sigue entre las primeras 30
+        orden = [c['ticker'] for c in nuevas] + ['AAA']
+        sb.tablas['analisis_ia'][0]['calidad'] = {t: {'p': 1 - i / 100, 'c': 0.1, 'pa': False} for i, t in enumerate(orden)}
+        correr(b, sb)
+        self.assertEqual(b.enviadas, [])
+
+    def test_la_cuenta_real_espera_el_rebalanceo_del_mes(self):
+        b = self.cartera_completa()
+        b.real = True
+        sb = SupabaseFalso(ideas=IDEAS[1:] + [{'ticker': 'ZZZ', 'price': 100.0}])
+        sb.tablas['real_trading'] = [{'datos': {'rebalanceo': {'mes': '2026-10'}}}]
+        correr(b, sb, tope=100_000)
+        self.assertEqual(b.enviadas, [])
+
+
 class CuentaReal(unittest.TestCase):
     def test_invierte_solo_hasta_el_tope_y_guarda_en_la_tabla_privada(self):
         b, sb = BrokerFalso(real=True), SupabaseFalso()
