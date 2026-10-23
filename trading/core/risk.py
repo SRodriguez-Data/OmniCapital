@@ -1,6 +1,7 @@
 """Control de riesgo. Se aplica a toda orden antes de enviarla, sea cual sea la estrategia.
 
-- Ninguna acción pasa de `peso_maximo` del patrimonio (en Chile la lista es de 5 acciones: cada una pesa 20%).
+- Ninguna acción pasa de `peso_maximo` del patrimonio. Los pesos del Top van entre 0,5 y 1,5 veces la parte igual
+  (cartera.py): 7,5% con 20 acciones en EE.UU. y 30% con 5 en Chile.
 - Freno diario: si el patrimonio cae `perdida_diaria_maxima` frente al cierre anterior, ese día no se compra nada.
 - Stop loss: una acción que cae `stop_loss` bajo su costo promedio se vende. Es un freno para catástrofes, no parte
   del método medido, por eso está lejos.
@@ -15,7 +16,7 @@ from .plan import Orden
 
 @dataclass(frozen=True)
 class Limites:
-    peso_maximo: float = 0.06
+    peso_maximo: float = 0.08
     perdida_diaria_maxima: float = 0.03
     stop_loss: float = 0.30
     orden_minima: float = 1.0        # Alpaca no acepta órdenes de menos de US$1
@@ -23,8 +24,8 @@ class Limites:
     max_ordenes: int = 60            # más que eso en una corrida es señal de un error, no de un rebalanceo
 
 
-# La cuenta simulada de la Bolsa de Santiago: 5 acciones de 20% y montos en pesos
-LIMITES_CHILE = Limites(peso_maximo=0.21, orden_minima=10_000)
+# La cuenta simulada de la Bolsa de Santiago: 5 acciones de entre 10% y 30%, y montos en pesos
+LIMITES_CHILE = Limites(peso_maximo=0.31, orden_minima=10_000)
 
 
 def bloqueo(cuenta: Cuenta) -> str | None:

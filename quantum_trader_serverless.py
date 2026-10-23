@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import time
 import logging
 import pandas as pd
@@ -7,6 +8,8 @@ import yfinance as yf
 from datetime import datetime
 from supabase import create_client, Client
 from dotenv import load_dotenv
+
+import cartera
 
 load_dotenv()
 
@@ -210,7 +213,7 @@ def dividendos_desde(tickers, desde):
 
 def ideas_momentum_chile(filas):
     """Las acciones chilenas con mayor retorno (con dividendos) entre hace 12 meses y hace 1 mes: el método
-    momentum_chile de evidencia.py (evidencia débil). `filas`: ticker -> última fila con volumen (precio de hoy
+    momentum_chile de evidencia.py. `filas`: ticker -> última fila con volumen (precio de hoy
     real). Devuelve (ideas, ranking de todas las evaluadas): la simulación mantiene una acción mientras siga cerca
     de la cabeza del ranking, aunque salga de las 5."""
     tickers = sorted(filas)
@@ -268,6 +271,35 @@ def cierres(tickers, desde):
     df = pd.DataFrame(filas)
     df['date'] = df['date'].str[:10]
     return {t: g.set_index('date')['close'].sort_index() for t, g in df.groupby('ticker')}
+
+# Lo que midió el laboratorio (evidencia.py --web): qué ponderación tuvo mejor razón retorno/riesgo en cada método
+EVIDENCIA_METODOS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "src", "data", "evidencia_metodos.json")
+
+def ponderacion_medida(metodo):
+    try:
+        with open(EVIDENCIA_METODOS, encoding="utf-8") as f:
+            elegida = json.load(f)["metodos"][metodo]["cartera"]["elegida"]
+        return elegida if elegida in cartera.PONDERACIONES else "igual"
+    except Exception as e:
+        logging.warning(f"Sin la ponderación medida de {metodo} ({str(e)[:80]}): partes iguales.")
+        return "igual"
+
+def asignar_pesos(ideas, metodo):
+    """El peso de cada idea según la ponderación que el laboratorio eligió para su método (cartera.py), con un año
+    de retornos diarios guardados. Devuelve la ponderación usada."""
+    if not ideas:
+        return None
+    ponderacion = ponderacion_medida(metodo)
+    tickers = [i["ticker"] for i in ideas]
+    desde = (pd.Timestamp.now() - pd.Timedelta(days=400)).strftime("%Y-%m-%d")
+    precios = pd.DataFrame(cierres(tickers, desde)).sort_index().ffill(limit=5)
+    retornos = precios.reindex(columns=tickers).pct_change(fill_method=None).tail(252)
+    pesos = cartera.pesos(retornos, ponderacion)
+    for i in ideas:
+        i["peso"] = round(float(pesos[i["ticker"]]), 4)
+    logging.info(f"Pesos {metodo} ({cartera.PONDERACIONES[ponderacion]}): "
+                 + ", ".join(f"{i['ticker']} {i['peso']:.1%}" for i in ideas))
+    return ponderacion
 
 def resumen_excesos(excesos):
     if not excesos:
@@ -427,6 +459,13 @@ def run_serverless_screener():
         logging.error("❌ Ningún método entregó ideas.")
         sys.exit(1)
 
+    ponderacion = {}
+    for clave, ideas, metodo in (("us", top_us, "calidad_eeuu"), ("cl", top_cl, "momentum_chile")):
+        try:
+            ponderacion[clave] = asignar_pesos(ideas, metodo)
+        except Exception as e:
+            logging.warning(f"No se calcularon los pesos de {metodo}: {str(e)[:160]}")
+
     try:
         avisar_cambios(top_us, top_cl, liquidos)
     except Exception as e:
@@ -439,6 +478,8 @@ def run_serverless_screener():
         "cl": top_cl,
         "calidad_us": calidad_us,
         "ranking_cl": ranking_cl,
+        # Ponderación de cada lista (cartera.py); cada idea trae su "peso"
+        "ponderacion": ponderacion,
         # Con qué precios se hizo: la corrida de respaldo no repite el análisis si no hay precios nuevos
         "fecha_precios": max_date,
         "activos_al_dia": al_dia

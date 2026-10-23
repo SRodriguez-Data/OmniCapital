@@ -10,6 +10,14 @@ METODO = 'v2'
 MARGEN = 1.5
 
 
+def pesos_de(ideas: list[dict], simbolo=lambda t: t) -> dict[str, float]:
+    """El peso de cada idea según el escaneo (cartera.py, la ponderación medida para su método), en el orden del
+    ranking y sumando 1. Un escaneo anterior a los pesos no los trae: partes iguales."""
+    crudos = {simbolo(c['ticker']): float(c['peso']) if c.get('peso') else 1 / len(ideas) for c in ideas}
+    total = sum(crudos.values()) or 1
+    return {s: w / total for s, w in crudos.items()}
+
+
 @dataclass
 class Objetivo:
     pesos: dict[str, float]                  # fracción del patrimonio por símbolo, en el orden del ranking

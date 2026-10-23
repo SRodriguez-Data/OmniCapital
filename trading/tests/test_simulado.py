@@ -162,6 +162,15 @@ class CorridaChile(unittest.TestCase):
         self.correr(sb2, Feed(), libro=libro)
         self.assertEqual(len(sb2.guardadas[-1]['datos']['libro']['ordenes']), 5)
 
+    def test_compra_con_los_pesos_del_escaneo(self):
+        pesos = [0.30, 0.25, 0.20, 0.15, 0.10]
+        sb = supabase_chile(cl=[{**c, 'peso': w} for c, w in zip(CL, pesos)])
+        self.correr(sb, Feed())
+        valor = {t: p['cantidad'] * 1000 for t, p in sb.guardadas[-1]['datos']['libro']['posiciones'].items()}
+        total = sum(valor.values())
+        for c, w in zip(CL, pesos):
+            self.assertAlmostEqual(valor[c['ticker']] / total, w, delta=0.002)
+
     def test_bolsa_cerrada_no_opera_pero_guarda_el_libro(self):
         sb = supabase_chile()
         ayer = datetime(2026, 10, 22, 16, 0, tzinfo=SANTIAGO)

@@ -2,7 +2,7 @@
 y el de Chile en una cuenta simulada con los precios de la Bolsa de Santiago (Alpaca no opera acciones chilenas).
 
 Cada corrida revisa los stops y aplica el freno diario. Una vez al mes lleva la cartera a las ideas del último
-escaneo del Top, a partes iguales. En las simulaciones el bot además opera cuando quiere, en cualquier corrida: vende
+escaneo del Top, con el peso que el escaneo le da a cada una (cartera.py). En las simulaciones el bot además opera cuando quiere, en cualquier corrida: vende
 la acción que sale de la lista (y de su margen en el ranking), compra la que entra y corrige un peso muy desviado. La
 cuenta real solo opera en el rebalanceo mensual. Correrla varias veces el mismo día no duplica órdenes: si una corrida
 se corta a la mitad, la siguiente termina lo pendiente.
@@ -64,17 +64,20 @@ def mostrar(ordenes: list[Orden], privado: bool, moneda: str = 'USD') -> None:
         logging.info(f'  {o.lado:6} {o.simbolo:6} {MONEDA[moneda]} {o.monto:>12,.2f}{cantidad} · {o.detalle}')
 
 
-def cartera(lista: list[str], mantener: set[str], posiciones, mensual: bool) -> dict[str, float]:
-    """Las acciones objetivo, a partes iguales. El rebalanceo mensual lleva la cartera exactamente a `lista` (en el
-    orden del ranking). Entre rebalanceos, una acción que salió de la lista se mantiene mientras siga en `mantener`
-    (cerca de la cabeza del ranking) y ocupa el cupo de la última de la lista que aún no se tiene."""
+def cartera(lista: dict[str, float], mantener: set[str], posiciones, mensual: bool) -> dict[str, float]:
+    """Los pesos objetivo. `lista`: las ideas del escaneo con su peso, en el orden del ranking. El rebalanceo mensual
+    lleva la cartera exactamente a la lista. Entre rebalanceos, una acción que salió de la lista se mantiene mientras
+    siga en `mantener` (cerca de la cabeza del ranking), con una parte igual, y ocupa el cupo de la última de la lista
+    que aún no se tiene."""
     if mensual:
-        elegidas = list(lista)
+        pesos = dict(lista)
     else:
         quedan = [s for s in posiciones if s in mantener and s not in lista]
         cupos = max(len(lista) - len(quedan), 0)
-        elegidas = quedan + ([s for s in lista if s in posiciones] + [s for s in lista if s not in posiciones])[:cupos]
-    return {s: 1 / len(elegidas) for s in elegidas} if elegidas else {}
+        elegidas = ([s for s in lista if s in posiciones] + [s for s in lista if s not in posiciones])[:cupos]
+        pesos = {**{s: 1 / len(lista) for s in quedan}, **{s: lista[s] for s in elegidas}}
+    total = sum(pesos.values())
+    return {s: w / total for s, w in pesos.items()} if total > 0 else {}
 
 
 def tope_real() -> int:
@@ -187,7 +190,7 @@ class Corrida:
                 fuera = sorted(s for s in objetivo.pesos if s in detenidas or not self.broker.activo(s)[0])
                 if fuera:
                     logging.warning(f'Quedan fuera (stop este mes o no se pueden operar): {", ".join(fuera)}')
-                lista = [s for s in objetivo.pesos if s not in fuera]
+                lista = {s: w for s, w in objetivo.pesos.items() if s not in fuera}
                 mantener = (objetivo.mantener | set(lista)) - set(fuera)
                 pesos = risk.limitar_pesos(cartera(lista, mantener, posiciones, mensual), self.limites)
                 banda = BANDA_MENSUAL if mensual else BANDA_ENTRE_REBALANCEOS * min(pesos.values(), default=0)
@@ -203,7 +206,8 @@ class Corrida:
                 compras = [o for o in plan if o.lado == 'compra']
                 precios = objetivo.precios
                 if mensual:
-                    logging.info(f'Rebalanceo hacia {objetivo.descripcion}: {len(pesos)} acciones de {max(pesos.values(), default=0):.1%} cada una.')
+                    logging.info(f'Rebalanceo hacia {objetivo.descripcion}: {len(pesos)} acciones, de '
+                                 f'{min(pesos.values(), default=0):.1%} a {max(pesos.values(), default=0):.1%} cada una.')
                 else:
                     logging.info(f'Revisión de la cartera con {objetivo.descripcion}: {len(pesos)} acciones objetivo '
                                  f'(se mantienen las que sigan entre las primeras {len(mantener)} del ranking).')

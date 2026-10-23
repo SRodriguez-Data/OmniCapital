@@ -185,6 +185,16 @@ class EntreRebalanceos(unittest.TestCase):
         correr(b, sb)
         self.assertEqual(b.enviadas, [])
 
+    def test_la_que_se_mantiene_por_el_margen_tiene_una_parte_igual(self):
+        from trading.main import cartera
+        lista = {'A': 0.4, 'B': 0.35, 'C': 0.25}
+        pesos = cartera(lista, mantener={'A', 'B', 'C', 'X'}, posiciones={'X': None, 'A': None, 'B': None}, mensual=False)
+        # X sigue en el margen: ocupa el cupo de C (la última de la lista que no se tiene) con 1/3
+        self.assertEqual(set(pesos), {'X', 'A', 'B'})
+        self.assertAlmostEqual(sum(pesos.values()), 1)
+        self.assertAlmostEqual(pesos['A'] / pesos['B'], 0.4 / 0.35)
+        self.assertEqual(cartera(lista, set(), {}, mensual=True), lista)
+
     def test_la_cuenta_real_espera_el_rebalanceo_del_mes(self):
         b = self.cartera_completa()
         b.real = True

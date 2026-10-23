@@ -56,12 +56,12 @@ class Riesgo(unittest.TestCase):
         self.assertEqual([o.simbolo for o in stops], ['A'])
 
     def test_peso_maximo(self):
-        self.assertEqual(risk.limitar_pesos({'A': 0.1, 'B': 0.05}, self.limites), {'A': 0.06, 'B': 0.05})
+        self.assertEqual(risk.limitar_pesos({'A': 0.1, 'B': 0.05}, self.limites), {'A': 0.08, 'B': 0.05})
 
     def test_compras_no_superan_el_efectivo_ni_el_peso_maximo(self):
         compras = planificar({'A': 0.5, 'B': 0.5}, {}, 1000)
         ajustadas = risk.ajustar_compras(compras, efectivo=1000, patrimonio=1000, posiciones={}, limites=self.limites)
-        self.assertTrue(all(o.monto <= 60 for o in ajustadas))
+        self.assertTrue(all(o.monto <= 80 for o in ajustadas))
         ajustadas = risk.ajustar_compras(compras, efectivo=50, patrimonio=1000, posiciones={}, limites=self.limites)
         self.assertLessEqual(sum(o.monto for o in ajustadas), 50 - 0.005 * 1000 + 1e-9)
         self.assertEqual([o.monto for o in compras], [500, 500])  # no modifica las originales

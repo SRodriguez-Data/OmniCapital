@@ -1,4 +1,5 @@
-"""Top v2 de EE.UU.: las acciones del S&P 500 con la utilidad más respaldada por caja de su sector, a partes iguales.
+"""Top v2 de EE.UU.: las acciones del S&P 500 con la utilidad más respaldada por caja de su sector, con el peso que
+el escaneo le da a cada una (la ponderación que mejor midió el laboratorio, cartera.py).
 
 Es el único método que, medido en 10 años sin mirar el futuro, le ganó al mercado con evidencia sólida
 (evidencia.py, METODOS['calidad_eeuu']). La lista la elige cada día el bot (quantum_trader_serverless.py) y queda en
@@ -6,7 +7,7 @@ analisis_ia; aquí solo se lee, para que la simulación opere exactamente lo que
 """
 from datetime import date
 
-from .base import MARGEN, Estrategia, Objetivo, ultimo_escaneo
+from .base import MARGEN, Estrategia, Objetivo, pesos_de, ultimo_escaneo
 
 
 def simbolo_alpaca(ticker: str) -> str:
@@ -16,7 +17,7 @@ def simbolo_alpaca(ticker: str) -> str:
 
 class TopCalidad(Estrategia):
     nombre = 'topv2'
-    titulo = 'Top v2 EE.UU.: utilidad respaldada por caja, a partes iguales'
+    titulo = 'Top v2 EE.UU.: utilidad respaldada por caja'
 
     def __init__(self, supabase, minimo_ideas: int = 15, dias_maximos: int = 5):
         self.supabase = supabase
@@ -36,7 +37,7 @@ class TopCalidad(Estrategia):
         tabla = f.get('calidad') or {}
         ranking = sorted((t for t, x in tabla.items() if not x.get('pa')), key=lambda t: (-tabla[t]['p'], -tabla[t]['c']))
         return Objetivo(
-            pesos={s: 1 / len(simbolos) for s in simbolos},
+            pesos=pesos_de(ideas, simbolo_alpaca),
             descripcion=f'{len(simbolos)} ideas del escaneo con precios del {f["precios_del"]}',
             precios={simbolo_alpaca(c['ticker']): float(c['price']) for c in ideas if c.get('price')},
             mantener=set(simbolos) | {simbolo_alpaca(t) for t in ranking[:int(len(simbolos) * MARGEN)]},
