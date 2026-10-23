@@ -211,10 +211,11 @@ def dividendos_desde(tickers, desde):
 def ideas_momentum_chile(filas):
     """Las acciones chilenas con mayor retorno (con dividendos) entre hace 12 meses y hace 1 mes: el método
     momentum_chile de evidencia.py (evidencia débil). `filas`: ticker -> última fila con volumen (precio de hoy
-    real). Yahoo deja semanas sin actualizar en Chile: se aceptan esos huecos si no son más de la mitad del año."""
+    real). Devuelve (ideas, ranking de todas las evaluadas): la simulación mantiene una acción mientras siga cerca
+    de la cabeza del ranking, aunque salga de las 5."""
     tickers = sorted(filas)
     if not tickers:
-        return []
+        return [], []
     desde = (pd.Timestamp.now() - pd.Timedelta(days=420)).strftime("%Y-%m-%d")
     precios = cierres(tickers, desde)
     divs = dividendos_desde(tickers, desde)
@@ -232,7 +233,7 @@ def ideas_momentum_chile(filas):
         ideas.append({"ticker": t, "price": fila["close"], "fecha_precio": fila["date"][:10], "score": round(float(mom), 4),
                       "momentum": round(float(mom), 4), **get_fundamentals(t)})
     logging.info(f"Momentum Chile: {len(candidatos)} acciones evaluadas, elegidas {', '.join(i['ticker'] for i in ideas)}")
-    return ideas
+    return ideas, [{"ticker": t, "momentum": round(float(m), 4)} for t, m in candidatos]
 
 # Índice con el que se compara cada idea (precio sin dividendos, igual que los cierres guardados de las acciones)
 INDICE_DE = {'EE.UU.': '^GSPC', 'Chile': 'CFMITNIPSA.SN'}
@@ -407,7 +408,7 @@ def run_serverless_screener():
             continue
         liquidos[ticker] = row
 
-    # Yahoo congela el historial de varias acciones chilenas: sin precios reales no hay momentum que medir
+    # Un precio que no cambia en semanas no sirve para medir (hoy las chilenas vienen de la Bolsa de Santiago)
     frescos = tickers_con_datos_frescos(list(liquidos), max_date)
     congelados = [t for t in liquidos if t not in frescos]
     if congelados:
@@ -421,7 +422,7 @@ def run_serverless_screener():
         logging.error(f"No se calcularon las ideas de EE.UU.: {str(e)[:200]}")
         top_us = []
     # El monto transado mínimo ya exige volumen hoy: el último precio chileno es real aunque haya huecos antes
-    top_cl = ideas_momentum_chile({t: r for t, r in liquidos.items() if t.endswith('.SN')})
+    top_cl, ranking_cl = ideas_momentum_chile({t: r for t, r in liquidos.items() if t.endswith('.SN')})
     if not top_us and not top_cl:
         logging.error("❌ Ningún método entregó ideas.")
         sys.exit(1)
@@ -437,6 +438,7 @@ def run_serverless_screener():
         "us": top_us,
         "cl": top_cl,
         "calidad_us": calidad_us,
+        "ranking_cl": ranking_cl,
         # Con qué precios se hizo: la corrida de respaldo no repite el análisis si no hay precios nuevos
         "fecha_precios": max_date,
         "activos_al_dia": al_dia
