@@ -36,6 +36,7 @@ import requests
 from scipy.stats import spearmanr
 
 import bolsa_chile
+import cartera
 import fundamentales_sec
 
 load_dotenv()
@@ -118,6 +119,7 @@ def senales(p: pd.DataFrame) -> dict[str, pd.DataFrame]:
         "rsi14": rsi,
         "retorno_1m": p / p.shift(21) - 1,
         "volatilidad_3m": ret.rolling(63).std() * np.sqrt(252),
+        "volatilidad_12m": ret.rolling(252, min_periods=200).std() * np.sqrt(252),
         "distancia_maximo_52s": p / p.rolling(252).max() - 1,
         "bajo_bollinger": p < sma20 - 2 * std20,
         # Yahoo repite el mismo cierre por semanas en varias acciones chilenas: esos tramos no sirven
@@ -277,6 +279,67 @@ METODOS = {
 }
 CORTE_MITADES = pd.Timestamp("2021-10-01")
 
+# Variantes del método chileno, todas de la literatura de momentum. Se miden juntas con los mismos datos y el informe
+# dice cuántas se probaron: elegir la mejor de varias infla su t, por eso se exige que gane en ambas mitades.
+VARIANTES_CHILE = {
+    "momentum_chile": ("Mayor alza de 12 meses sin el último (Jegadeesh y Titman, 1993)",
+                       lambda s: s["momentum_12_1"]),
+    "momentum_tendencia_chile": ("La misma, solo entre las que están sobre su media de 200 días (momentum de "
+                                 "serie de tiempo, Moskowitz, Ooi y Pedersen, 2012)",
+                                 lambda s: s["momentum_12_1"].where(s["tendencia_sma200"] > 0)),
+    "momentum_riesgo_chile": ("Alza de 12 meses sin el último dividida por su volatilidad (momentum ajustado por "
+                              "riesgo, Barroso y Santa-Clara, 2015)",
+                              lambda s: s["momentum_12_1"] / s["volatilidad_12m"]),
+    "momentum_riesgo_tendencia_chile": ("Ajustado por riesgo y solo sobre su media de 200 días",
+                                        lambda s: (s["momentum_12_1"] / s["volatilidad_12m"]).where(s["tendencia_sma200"] > 0)),
+}
+
+
+def medir_ponderaciones(puntaje: pd.DataFrame, n: int, fechas, precios: pd.DataFrame, valido: pd.DataFrame) -> dict:
+    """Cada mes, las N elegidas del método con cada ponderación de cartera.py (pesos con el año anterior, nada del
+    futuro) y su retorno del mes siguiente. Mide la razón retorno/riesgo de la cartera (Sharpe sin tasa libre, anual),
+    su volatilidad, su peor caída y su exceso frente al promedio del mercado, en total y en cada mitad."""
+    diarios = precios.pct_change(fill_method=None)
+    adelante = precios.shift(-21) / precios - 1
+    series = {m: {} for m in cartera.PONDERACIONES}
+    mercado = {}
+    for d in fechas:
+        el = puntaje.loc[d].dropna().sort_values(ascending=False).index[:n]
+        futuro = adelante.loc[d, el]
+        el = [t for t in el if pd.notna(futuro[t])]
+        if len(el) < 2:
+            continue
+        historia = diarios.loc[:d, el].tail(252)
+        todos = adelante.loc[d].where(valido.loc[d]).dropna()
+        mercado[d] = todos.mean()
+        for m in cartera.PONDERACIONES:
+            w = cartera.pesos(historia, m)
+            series[m][d] = float((w * futuro[el]).sum())
+    if len(mercado) < 24:
+        return {}
+    base = pd.Series(mercado)
+
+    def resumen(x: pd.Series) -> dict:
+        acumulado = (1 + x).cumprod()
+        exceso = x - base.reindex(x.index)
+        return {"retorno_anual": r(x.mean() * 12), "volatilidad_anual": r(x.std() * np.sqrt(12)),
+                "sharpe": r(x.mean() / x.std() * np.sqrt(12), 2) if x.std() > 0 else None,
+                "peor_caida": r((acumulado / acumulado.cummax() - 1).min()),
+                "exceso_anual": r(exceso.mean() * 12), "exceso_t": r(t_ajustado(exceso, 21), 2)}
+
+    res = {}
+    for m, v in series.items():
+        x = pd.Series(v)
+        res[m] = {**resumen(x), "mitades": {k: resumen(parte) for k, parte in
+                                           (("antes", x[x.index < CORTE_MITADES]), ("despues", x[x.index >= CORTE_MITADES]))
+                                           if len(parte) >= 12}}
+    # La que tuvo mejor razón retorno/riesgo, si además no fue peor que partes iguales en ninguna mitad
+    igual = res["igual"]
+    candidatas = [m for m in res if all((res[m]["mitades"].get(k) or {}).get("sharpe", -9) >= (igual["mitades"].get(k) or {}).get("sharpe", 9) - 1e-9
+                                        for k in igual["mitades"])]
+    elegida = max(candidatas or ["igual"], key=lambda m: res[m]["sharpe"] if res[m]["sharpe"] is not None else -9)
+    return {"meses": len(base), "ponderaciones": res, "elegida": elegida}
+
 
 def medir_metodo(puntaje: pd.DataFrame, n: int, fechas, exceso: dict[str, pd.DataFrame]) -> dict:
     """Exceso promedio de las N mejores de cada mes, con su t, su tasa de acierto, por año y por mitad de la
@@ -335,7 +398,7 @@ def calendario(precios: pd.DataFrame) -> pd.DataFrame:
 def evaluar(crudos: pd.DataFrame, sec: "fundamentales_sec.Sec | None" = None) -> dict:
     mercados = {"EE.UU.": [t for t in crudos.columns if not t.endswith(".SN")],
                 "Chile": [t for t in crudos.columns if t.endswith(".SN")]}
-    salida = {"base": {}, "factores": {}, "reglas": {}, "top5": {}, "metodos": {}, "muestra": {}}
+    salida = {"base": {}, "factores": {}, "reglas": {}, "top5": {}, "metodos": {}, "variantes_chile": {}, "muestra": {}}
 
     sp500 = tabla_sp500()
     for mercado, cols in mercados.items():
@@ -451,7 +514,13 @@ def evaluar(crudos: pd.DataFrame, sec: "fundamentales_sec.Sec | None" = None) ->
             except KeyError:
                 continue
             salida["metodos"][clave] = {"nombre": m["nombre"], "mercado": mercado, "n": m["n"],
-                                        **medir_metodo(puntaje, m["n"], fechas, exceso)}
+                                        **medir_metodo(puntaje, m["n"], fechas, exceso),
+                                        "cartera": medir_ponderaciones(puntaje, m["n"], fechas, precios[cols], valido)}
+        if mercado == "Chile":
+            for clave, (nombre, fn) in VARIANTES_CHILE.items():
+                puntaje = fn(s)[cols].where(valido)
+                salida["variantes_chile"][clave] = {"nombre": nombre, **medir_metodo(puntaje, 5, fechas, exceso),
+                                                    "cartera": medir_ponderaciones(puntaje, 5, fechas, precios[cols], valido)}
         salida["muestra"][mercado] = {
             "desde": precios.index[0].strftime("%Y-%m-%d"), "hasta": precios.index[-1].strftime("%Y-%m-%d"),
             "fechas_evaluadas": len(fechas), "acciones": len(cols),
@@ -465,6 +534,9 @@ def evaluar(crudos: pd.DataFrame, sec: "fundamentales_sec.Sec | None" = None) ->
         "mercado se estima con el valor en manos del público, así que las empresas con controlador grande salen algo "
         "más baratas. Para Chile no hay fundamentales históricos gratuitos.",
         "Exceso frente al promedio simple de cada mercado, antes de comisiones e impuestos.",
+        f"Se probaron {len(VARIANTES_CHILE)} variantes del método chileno y {len(cartera.PONDERACIONES)} formas de "
+        "ponderar cada cartera: elegir la mejor de varias infla su fuerza estadística, por eso la elegida debe ganar "
+        "también en cada mitad de la historia.",
     ]
     salida["calculado"] = datetime.now(timezone.utc).isoformat()
     return salida
@@ -480,12 +552,21 @@ def para_web(res: dict) -> tuple[dict, dict]:
         "reglas": {k: {"nombre": v["nombre"], **{mk: {h: corto(x) for h, x in v[mk].items() if h in ("3m", "6m")}
                                                 for mk in v if mk != "nombre"}} for k, v in res["reglas"].items()},
     }
+    resumen = lambda x: {k: x[k] for k in ("retorno_anual", "volatilidad_anual", "sharpe", "peor_caida", "exceso_anual", "exceso_t")}
+    cartera_web = lambda c: {"elegida": c["elegida"], "meses": c["meses"],
+                             "ponderaciones": {w: {**resumen(x), "mitades": {k: resumen(v) for k, v in x["mitades"].items()}}
+                                               for w, x in c["ponderaciones"].items()}} if c else None
     metodos = {
         "calculado": res["calculado"], "muestra": res["muestra"], "sesgos": res["sesgos"],
         "base": reglas["base"],
         "metodos": {k: {"nombre": m["nombre"], "mercado": m["mercado"], "n": m["n"],
-                        "3m": {**corto(m["3m"]), "meses_positivos": m["3m"]["meses_positivos"], "mitades": m["3m"]["mitades"]}}
+                        "3m": {**corto(m["3m"]), "meses_positivos": m["3m"]["meses_positivos"], "mitades": m["3m"]["mitades"]},
+                        "cartera": cartera_web(m.get("cartera"))}
                     for k, m in res["metodos"].items() if "3m" in m},
+        # Las variantes del método chileno que se midieron junto a él (cuántas se probaron importa para leer el t)
+        "variantes_chile": {k: {"nombre": v["nombre"], "t": (v.get("3m") or {}).get("t"),
+                                "exceso_promedio": (v.get("3m") or {}).get("exceso_promedio")}
+                            for k, v in res.get("variantes_chile", {}).items()},
     }
     return reglas, metodos
 
