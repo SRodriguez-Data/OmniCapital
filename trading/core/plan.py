@@ -34,7 +34,7 @@ def planificar(pesos: dict[str, float], posiciones: dict[str, Posicion], patrimo
             cantidad = math.floor(cantidad * 1e6) / 1e6 if fraccionable(s) else math.floor(cantidad)
             if cantidad > 0:
                 ventas.append(Orden(s, 'venta', cantidad * p.precio, 'reb', cantidad=min(cantidad, p.cantidad),
-                                    detalle='subió sobre su peso objetivo'))
+                                    detalle='sobre su peso objetivo'))
     for s, w in pesos.items():
         actual = posiciones[s].valor if s in posiciones else 0.0
         falta = w * patrimonio - actual
