@@ -3,7 +3,8 @@ import { anioEvidencia as anios, type Mercado, type Nivel } from './evidenciaMet
 
 // Lo que midió el laboratorio de evidencia (evidencia.py en la raíz del repo): cuánto rindieron frente a su
 // mercado, en los 3 meses siguientes, las acciones en que se cumplía cada regla del asesor durante 10 años.
-// Una regla solo decide si su evidencia va en la dirección que la regla supone; si no, se muestra como dato.
+// Una regla solo decide si su evidencia es significativa (t de 2 o más) y va en la dirección que la regla supone;
+// si no, se muestra como dato.
 // Solo lo usa el servidor (el asesor); el navegador descarga nada más evidenciaMetodos.ts.
 
 export type { Mercado, Nivel };
@@ -62,12 +63,13 @@ export function evidencia(regla: ClaveRegla, mercado: Mercado, signo: 1 | -1, de
   const nivel: Nivel = medida !== 'sin evidencia' && dir !== signo ? 'en contra' : medida;
   const cierre = {
     'sólida': 'Evidencia sólida.',
-    'débil': 'Evidencia débil: pesa poco en la decisión.',
+    'débil': 'Evidencia débil (no significativa): se informa, pero no decide.',
     'sin evidencia': 'No anticipó nada de forma confiable: no se usa para decidir.',
     'en contra': 'La evidencia va en contra de lo que supone la regla: no se usa para decidir.',
   }[nivel];
   return {
-    regla, nivel, decide: nivel === 'sólida' || nivel === 'débil', signo, etiqueta: describe,
+    // Solo lo significativo decide: con evidencia débil es mejor no recomendar
+    regla, nivel, decide: nivel === 'sólida', signo, etiqueta: describe,
     texto: `${describe}: en ${anioEvidencia()}, las ${DE_MERCADO[mercado]} en esa situación rindieron ${signed(m3.exceso_promedio)} frente a su mercado en los 3 meses siguientes y le ganaron ${pct(m3.acierto, 0)} de las veces (una cualquiera: ${pct(base, 0)}; ${miles(m3.casos)} casos). ${cierre}`,
   };
 }

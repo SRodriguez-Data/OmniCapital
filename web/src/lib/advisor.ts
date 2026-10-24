@@ -376,23 +376,21 @@ function decidir(a: {
       motivos.push('Costo anual alto: para tus próximos aportes conviene un fondo equivalente más barato.');
     }
   } else {
-    // Cada señal con evidencia en este mercado suma (o resta) 1 si es débil y 2 si es sólida; las demás se informan
+    // Solo las señales con evidencia significativa (sólida) en este mercado deciden, 2 puntos cada una; las demás se informan
     const senales = [a.evTecnica, ...a.evFundamentales].filter((e): e is Evidencia => e !== null && e.decide);
-    const fuerza = (e: Evidencia) => (e.nivel === 'sólida' ? 2 : 1) * e.signo;
+    const fuerza = (e: Evidencia) => 2 * e.signo;
     const total = senales.reduce((acc, e) => acc + fuerza(e), 0);
     const aFavor = senales.filter(e => e.signo > 0).map(e => `${e.etiqueta.toLowerCase()} (${e.nivel})`);
     const enContra = senales.filter(e => e.signo < 0).map(e => `${e.etiqueta.toLowerCase()} (${e.nivel})`);
     puntaje = total;
     if (!senales.length) {
-      motivos.push('Ninguna de sus señales ha anticipado retornos en 10 años en este mercado: no hay base con evidencia para aumentar ni para vender. Para aportes nuevos, un fondo diversificado tiene mejor respaldo.');
+      motivos.push('Ninguna de sus señales tiene evidencia significativa en 10 años en este mercado: no hay base para aumentar ni para vender. Para aportes nuevos, un fondo diversificado tiene mejor respaldo.');
     } else {
       if (aFavor.length) motivos.push(`Con evidencia a favor: ${aFavor.join('; ')}.`);
       if (enContra.length) motivos.push(`Con evidencia en contra: ${enContra.join('; ')}.`);
     }
     if (total >= 2) { accion = 'AUMENTAR'; conviccion = total >= 3 && r === 'holgado' ? 'alta' : 'media'; }
-    else if (total === 1) { accion = 'AUMENTAR'; conviccion = 'baja'; }
     else if (total <= -2) { accion = 'REDUCIR'; conviccion = total <= -3 ? 'alta' : 'media'; }
-    else if (total === -1) motivos.push('La evidencia en contra es débil: no alcanza para vender, pero no aumentes.');
 
     if (accion === 'AUMENTAR' && tMedido === 'quiebre') {
       accion = 'MANTENER'; conviccion = 'media';
