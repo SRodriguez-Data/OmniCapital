@@ -17,10 +17,12 @@ class MomentumChile(Estrategia):
         self.dias_maximos = dias_maximos
 
     def objetivo(self, hoy: date) -> Objetivo:
-        f, problema = ultimo_escaneo(self.supabase, 'cl:candidatos_json->cl, ranking:candidatos_json->ranking_cl',
-                                     hoy, self.dias_maximos)
+        f, problema = ultimo_escaneo(self.supabase, 'cl:candidatos_json->cl, ranking:candidatos_json->ranking_cl, '
+                                     'sin:candidatos_json->sin_evidencia', hoy, self.dias_maximos)
         if problema:
             return Objetivo({}, '', problema=problema)
+        if motivo := (f.get('sin') or {}).get('cl'):
+            return Objetivo({}, f'el método perdió su evidencia significativa ({motivo})')
         ideas = f.get('cl') or []
         if len(ideas) < self.minimo_ideas:
             return Objetivo({}, '', problema=f'El escaneo trae {len(ideas)} ideas de Chile (mínimo {self.minimo_ideas}).')

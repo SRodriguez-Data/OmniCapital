@@ -25,10 +25,12 @@ class TopCalidad(Estrategia):
         self.dias_maximos = dias_maximos
 
     def objetivo(self, hoy: date) -> Objetivo:
-        f, problema = ultimo_escaneo(self.supabase, 'us:candidatos_json->us, calidad:candidatos_json->calidad_us',
-                                     hoy, self.dias_maximos)
+        f, problema = ultimo_escaneo(self.supabase, 'us:candidatos_json->us, calidad:candidatos_json->calidad_us, '
+                                     'sin:candidatos_json->sin_evidencia', hoy, self.dias_maximos)
         if problema:
             return Objetivo({}, '', problema=problema)
+        if motivo := (f.get('sin') or {}).get('us'):
+            return Objetivo({}, f'el método perdió su evidencia significativa ({motivo})')
         ideas = f.get('us') or []
         if len(ideas) < self.minimo_ideas:
             return Objetivo({}, '', problema=f'El escaneo trae {len(ideas)} ideas de EE.UU. (mínimo {self.minimo_ideas}).')

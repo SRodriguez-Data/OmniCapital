@@ -171,6 +171,19 @@ class CorridaChile(unittest.TestCase):
         for c, w in zip(CL, pesos):
             self.assertAlmostEqual(valor[c['ticker']] / total, w, delta=0.002)
 
+    def test_sin_evidencia_significativa_vende_todo_y_queda_en_efectivo(self):
+        sb = supabase_chile()
+        self.correr(sb, Feed())
+        libro = sb.guardadas[-1]['datos']['libro']
+        sb2 = supabase_chile(cl=[], ranking=[], estado=sb.guardadas[-1]['datos'])
+        sb2.tablas['analisis_ia'][0]['sin'] = {'cl': 'su cartera rindió +1.0% al año con t = 1.2'}
+        codigo, _ = self.correr(sb2, Feed(), libro=libro)
+        self.assertEqual(codigo, 0)
+        datos = sb2.guardadas[-1]['datos']
+        self.assertEqual(datos['libro']['posiciones'], {})
+        self.assertGreater(datos['libro']['efectivo'], 9_900_000)
+        self.assertIn('perdió su evidencia significativa', datos['eventos'][-1]['texto'])
+
     def test_bolsa_cerrada_no_opera_pero_guarda_el_libro(self):
         sb = supabase_chile()
         ayer = datetime(2026, 10, 22, 16, 0, tzinfo=SANTIAGO)

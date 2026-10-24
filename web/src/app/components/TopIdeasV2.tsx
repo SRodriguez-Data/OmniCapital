@@ -241,15 +241,25 @@ export default function TopIdeasV2({ us, cl, historial, fecha }: { us: Candidato
     if (nueva) generar(c);
   };
 
-  const lista = (titulo: string, ideas: Candidato[], aviso?: string) => (
-    <section className="space-y-2">
-      <h3 className="text-sm font-bold text-zinc-900 dark:text-[#e4e4e7]">{titulo}</h3>
-      {aviso && <p className="text-[11px] text-zinc-500 dark:text-[#71717a]">{aviso}</p>}
-      {ideas.length === 0
-        ? <p className="text-xs text-zinc-500">Hoy no hay acciones que cumplan el criterio con datos confiables.</p>
-        : ideas.map((c, i) => <Idea key={c.ticker} c={c} i={i} abierta={abierta === c.ticker} onToggle={() => toggle(c)} tesis={tesis[c.ticker]} onTesis={() => generar(c)} />)}
-    </section>
-  );
+  // Donde la evidencia no es significativa es mejor no recomendar: la lista no se muestra (el bot tampoco la publica)
+  const lista = (clave: ClaveMetodo, titulo: string, ideas: Candidato[], aviso?: string) => {
+    const significativa = evidenciaMetodo(clave)?.nivel === 'sólida';
+    return (
+      <section className="space-y-2">
+        <h3 className="text-sm font-bold text-zinc-900 dark:text-[#e4e4e7]">{titulo}</h3>
+        {!significativa ? (
+          <p className="text-xs text-zinc-600 dark:text-[#a1a1aa]">Este método no tiene hoy evidencia significativa (t de 2 o más y ganando en ambas mitades de la historia): no se recomienda ninguna acción de esta lista.</p>
+        ) : (
+          <>
+            {aviso && <p className="text-[11px] text-zinc-500 dark:text-[#71717a]">{aviso}</p>}
+            {ideas.length === 0
+              ? <p className="text-xs text-zinc-500">Hoy no hay acciones que cumplan el criterio con datos confiables.</p>
+              : ideas.map((c, i) => <Idea key={c.ticker} c={c} i={i} abierta={abierta === c.ticker} onToggle={() => toggle(c)} tesis={tesis[c.ticker]} onTesis={() => generar(c)} />)}
+          </>
+        )}
+      </section>
+    );
+  };
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -269,9 +279,9 @@ export default function TopIdeasV2({ us, cl, historial, fecha }: { us: Candidato
         <Historial h={historial} />
       </div>
 
-      {lista('EE.UU.: utilidad respaldada por caja (una o dos por sector, sin bancos)', us,
+      {lista('calidad_eeuu', 'EE.UU.: utilidad respaldada por caja (una o dos por sector, sin bancos)', us,
         `Se evalúa cada empresa del S&P 500 frente a las de su sector con sus estados financieros en la SEC; quedan fuera las que reparten en dividendos más de lo que ganan.${avisoPesos('calidad_eeuu')}`)}
-      {lista('Chile: las de mayor alza de los últimos 12 meses', cl,
+      {lista('momentum_chile', 'Chile: las de mayor alza de los últimos 12 meses', cl,
         `Precios oficiales de la Bolsa de Santiago.${avisoPesos('momentum_chile')}`)}
 
       <details className="text-[11px] text-zinc-500 dark:text-[#71717a]">

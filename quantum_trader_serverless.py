@@ -284,6 +284,22 @@ def ponderacion_medida(metodo):
         logging.warning(f"Sin la ponderación medida de {metodo} ({str(e)[:80]}): partes iguales.")
         return "igual"
 
+def evidencia_significativa(metodo):
+    """(sí o no, motivo): el método publica ideas solo si el laboratorio midió que su cartera, tal como se opera
+    (rebalanceada cada mes con su ponderación), le ganó a su mercado con t de 2 o más y en ambas mitades de la
+    historia. La misma regla que muestra la web (lib/evidenciaMetodos.ts)."""
+    try:
+        with open(EVIDENCIA_METODOS, encoding="utf-8") as f:
+            c = json.load(f)["metodos"][metodo]["cartera"]
+        x = c["ponderaciones"][c["elegida"]]
+        mitades = [m["exceso_anual"] for m in x["mitades"].values()]
+    except Exception as e:
+        return False, f"no hay medición del laboratorio para {metodo} ({str(e)[:60]})"
+    if x["exceso_t"] is None or x["exceso_t"] < 2 or not mitades or min(mitades) <= 0:
+        return False, (f"su cartera rindió {x['exceso_anual']:+.1%} al año sobre su mercado con t = {x['exceso_t']}, "
+                       "sin evidencia significativa en ambas mitades de la historia")
+    return True, ""
+
 def asignar_pesos(ideas, metodo):
     """El peso de cada idea según la ponderación que el laboratorio eligió para su método (cartera.py), con un año
     de retornos diarios guardados. Devuelve la ponderación usada."""
@@ -459,6 +475,16 @@ def run_serverless_screener():
         logging.error("❌ Ningún método entregó ideas.")
         sys.exit(1)
 
+    # Donde la evidencia no es significativa es mejor no recomendar: esa lista queda vacía, con su motivo
+    sin_evidencia = {}
+    for clave, metodo in (("us", "calidad_eeuu"), ("cl", "momentum_chile")):
+        ok, motivo = evidencia_significativa(metodo)
+        if not ok:
+            sin_evidencia[clave] = motivo
+            logging.warning(f"{metodo} sin evidencia significativa: {motivo}. No se publican sus ideas.")
+    top_us = [] if "us" in sin_evidencia else top_us
+    top_cl = [] if "cl" in sin_evidencia else top_cl
+
     ponderacion = {}
     for clave, ideas, metodo in (("us", top_us, "calidad_eeuu"), ("cl", top_cl, "momentum_chile")):
         try:
@@ -480,6 +506,8 @@ def run_serverless_screener():
         "ranking_cl": ranking_cl,
         # Ponderación de cada lista (cartera.py); cada idea trae su "peso"
         "ponderacion": ponderacion,
+        # Mercados cuyo método no tiene evidencia significativa: su lista va vacía y la simulación sale a efectivo
+        "sin_evidencia": sin_evidencia,
         # Con qué precios se hizo: la corrida de respaldo no repite el análisis si no hay precios nuevos
         "fecha_precios": max_date,
         "activos_al_dia": al_dia

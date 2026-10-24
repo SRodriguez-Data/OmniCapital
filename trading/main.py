@@ -196,7 +196,11 @@ class Corrida:
                 banda = BANDA_MENSUAL if mensual else BANDA_ENTRE_REBALANCEOS * min(pesos.values(), default=0)
                 plan = planificar(pesos, posiciones, self.base(cuenta.patrimonio), banda=banda,
                                   fraccionable=lambda s: self.broker.activo(s)[1])
-                if not mensual:
+                if not lista:
+                    logging.warning(f'Se vende todo: {objetivo.descripcion}.')
+                    for o in plan:
+                        o.motivo, o.detalle = ('reb' if mensual else 'cam'), objetivo.descripcion
+                elif not mensual:
                     # Entre rebalanceos las órdenes son cambios de la lista (motivo 'cam'), no el rebalanceo del mes
                     for o in plan:
                         o.motivo = 'cam'

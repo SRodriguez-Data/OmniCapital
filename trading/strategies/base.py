@@ -23,6 +23,7 @@ class Objetivo:
     pesos: dict[str, float]                  # fracción del patrimonio por símbolo, en el orden del ranking
     descripcion: str                         # de dónde sale la lista, para el registro
     problema: str | None = None              # si hay uno, no se compra ni se vende por la lista (los stops siguen)
+    # Sin pesos y sin problema: el método no tiene evidencia significativa y la cartera sale a efectivo
     precios: dict[str, float] = field(default_factory=dict)  # precio de referencia (acciones sin fracciones)
     mantener: set[str] = field(default_factory=set)          # las que se pueden mantener entre rebalanceos
 
