@@ -103,6 +103,14 @@ export default function Home() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Enlace directo desde el aviso de Telegram: /?vista=rebalancear abre el Optimizador (que parte en el rebalanceo)
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('vista') === 'rebalancear') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- la URL solo existe en el cliente, tras hidratar
+      setActiveTab('CALCULADORA');
+    }
+  }, []);
+
   // En el celular el menú se desliza: la pestaña elegida queda centrada y a la vista
   useEffect(() => {
     botones.current[activeTab]?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });

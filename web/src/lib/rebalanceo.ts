@@ -340,7 +340,7 @@ export function planRebalanceo(
     notas.push('Lo que vendes en Chile queda en pesos: para comprar lo de EE.UU. hay que pasarlo a dólares en tu corredora, lo que tiene un costo de cambio. Primero vende y después compra.');
   }
   if (ventas.length) notas.push('Vender con ganancia puede pagar impuesto a la renta y cada orden puede cobrar comisión: revisa tu caso antes de ejecutar.');
-  if (ventas.length || compras.length) notas.push('Cuando ejecutes, actualiza las cantidades en tu cartera (pestaña Portafolio o subiendo la cartola): el agente revisa lo que está guardado ahí.');
+  if (ventas.length || compras.length) notas.push('Cuando una orden se ejecute, regístrala con su botón Registrar (lo que de verdad se hizo): tu cartera guardada se actualiza y el agente la revisa así.');
   const chicas = pos.filter(a => a.peso < 0.01 && !vendidas.has(a.ticker));
   if (chicas.length >= 3) notas.push(`Opcional: ${chicas.map(a => a.ticker).join(', ')} pesan menos de 1% cada una. Venderlas simplifica la cartera, pero no cambia su riesgo; por eso no están en el plan.`);
   if (!ventas.length && !compras.length) notas.push('Tu cartera está dentro de sus límites y ninguna posición tiene una señal de venta con evidencia: no hay nada que rebalancear hoy.');

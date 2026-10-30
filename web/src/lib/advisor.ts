@@ -932,7 +932,7 @@ function planEstrategico(
   const chile = ex.regiones.find(x => x.nombre === 'Chile')?.peso ?? 0;
   const meta = metaChileDe(perfil);
   if (chile > meta) {
-    plan.push(`${pct(chile, 0)} de tu patrimonio está en Chile${perfil?.metaChile ? `, sobre tu meta de ${pct(meta, 0)}` : ''}: para que tu cartera dependa menos de una sola economía, dirige los próximos aportes a fondos globales${perfil?.metaChile ? '' : ' hasta acercarte a la mitad fuera de Chile'}. El rebalanceo de la Calculadora te dice qué vender para volver a ${pct(meta, 0)}.`);
+    plan.push(`${pct(chile, 0)} de tu patrimonio está en Chile${perfil?.metaChile ? `, sobre tu meta de ${pct(meta, 0)}` : ''}: para que tu cartera dependa menos de una sola economía, dirige los próximos aportes a fondos globales${perfil?.metaChile ? '' : ' hasta acercarte a la mitad fuera de Chile'}. El rebalanceo del Optimizador te dice qué vender para volver a ${pct(meta, 0)}.`);
   } else if (chile < 0.2 && chile > 0) {
     plan.push(`Solo ${pct(chile, 0)} está en Chile: si tus gastos son en pesos, tener algo más en activos locales reduce el riesgo cambiario.`);
   }
