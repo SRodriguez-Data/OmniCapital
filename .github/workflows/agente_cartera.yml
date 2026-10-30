@@ -3,13 +3,15 @@ name: Agente de cartera (avisos por Telegram)
 # Revisa tu cartera real guardada en la app, calcula el rebalanceo (qué vender, qué comprar y a qué precio) y los
 # precios que cambian la decisión, y te avisa por Telegram solo si cambió algo, si un precio se acerca a uno de esos
 # niveles o, una vez por semana, con el resumen (web/scripts/agente-cartera.ts). No opera: tú ejecutas en tu corredora.
-# El registro de las corridas es público, así que el agente no imprime nada de tu cartera.
+# El registro de las corridas es público, así que el agente no imprime nada de tu cartera. Si una corrida falla (pruebas,
+# instalación o datos), te avisa por Telegram con el link a la corrida.
 
 on:
   schedule:
     # 9:23 en Chile con horario de verano (8:23 en invierno), antes de la apertura. GitHub suele atrasar estos cron
-    # una o varias horas: igual llega con la bolsa abierta
+    # una o varias horas, y a veces se salta uno: el segundo es de respaldo y no hace nada si el primero ya revisó
     - cron: '23 12 * * 1-5'
+    - cron: '43 15 * * 1-5'
   workflow_dispatch:
     inputs:
       forzar:
@@ -46,6 +48,9 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Test the rebalance and order-registration rules
+        run: npx tsx --test tests/*.test.ts
+
       - name: Review the portfolio and notify
         run: npx tsx scripts/agente-cartera.ts ${{ inputs.forzar && '--forzar' || '' }}
         env:
@@ -54,3 +59,15 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           AGENTE_USUARIO: ${{ secrets.TRADING_REAL_USUARIO }}
+
+      - name: Alert by Telegram if the run failed
+        if: failure()
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CORRIDA: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          TEXTO="⚠️ El agente de cartera no pudo revisar tu cartera hoy. El plan sigue en la app (Optimizador → Rebalancear). Detalle: ${CORRIDA}"
+          curl -s -o /dev/null --max-time 30 "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${TEXTO}"

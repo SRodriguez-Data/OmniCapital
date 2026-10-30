@@ -6,7 +6,9 @@
  *   - un precio quedó a menos de 3% de un nivel que cambia la decisión,
  *   - el primer día hábil de la semana (o si pasó una semana sin avisos), con el resumen,
  *   - con --forzar, siempre.
- * Lo avisado se recuerda en la tabla agente_cartera (supabase/agente_cartera.sql), que solo ve su dueño.
+ * Revisa una vez por día: si GitHub dispara también el horario de respaldo, esa corrida no hace nada. Lo avisado se
+ * recuerda en la tabla agente_cartera (supabase/agente_cartera.sql), que solo ve su dueño. Si una corrida falla, el
+ * workflow avisa por Telegram.
  *
  * El repositorio es público y los registros de GitHub Actions también: el agente no imprime nada de la cartera,
  * solo cuántas órdenes hay y si avisó.
@@ -33,6 +35,9 @@ const forzar = args.has('--forzar');
 // Solo lo que imprime el agente llega al registro: las librerías avisan con el ticker cuando falla un dato
 const decir = console.log.bind(console);
 for (const k of ['log', 'info', 'warn', 'error', 'debug'] as const) console[k] = () => {};
+// Si algo falla, el error se imprime sin los tickers de la cartera
+let privados: string[] = [];
+const sinPrivados = (texto: string) => privados.reduce((t, x) => t.split(x).join('***'), texto);
 
 function cargarEnv() {
   const archivo = resolve(__dirname, '../../.env');
@@ -91,7 +96,7 @@ const pct1 = (x: number) => `${(x * 100).toFixed(1)}%`;
 const pesos = (n: number) => `$${Math.round(n).toLocaleString('es-CL')}`;
 const corto = (s: string, max = 150) => (s.length <= max ? s : `${s.slice(0, s.lastIndexOf(' ', max))}…`);
 
-function mensaje(plan: PlanRebalanceo, motivos: string[], hoy: string, fmtPrecio: (n: number, m: 'USD' | 'CLP') => string): string {
+function mensaje(plan: PlanRebalanceo, motivos: string[], avisos: string[], hoy: string, fmtPrecio: (n: number, m: 'USD' | 'CLP') => string): string {
   const cantidad = (n: number) => n.toLocaleString('es-CL', { maximumFractionDigits: 4 });
   const [a, m, d] = hoy.split('-');
   const l: string[] = [`<b>🧭 Tu cartera · ${d}-${m}-${a}</b>`];
@@ -124,7 +129,13 @@ function mensaje(plan: PlanRebalanceo, motivos: string[], hoy: string, fmtPrecio
     l.push('', '<b>🎯 Precios que vigilo</b>');
     for (const n of plan.niveles.slice(0, 6)) l.push(`• <b>${sinSufijo(n.ticker)}</b>: ${esc(corto(n.texto, 200))}`);
   }
-  l.push('', `<i>Te aviso porque: ${motivos.join(', ')}.</i>`, `Detalle: ${APP} → Calculadora → Rebalancear`);
+  // Lo que no se pudo verificar hoy (cotizaciones, dólar): para no ejecutar a ciegas
+  if (avisos.length) {
+    l.push('', '<b>⚠️ Datos de hoy</b>');
+    for (const a of avisos.slice(0, 3)) l.push(`• ${esc(corto(a, 200))}`);
+  }
+  l.push('', `<i>Te aviso porque: ${motivos.join(', ')}.</i>`,
+    `Plan completo y botón para registrar lo que ejecutes: ${APP}/?vista=rebalancear`);
 
   let texto = l.join('\n');
   if (texto.length > MAX_MENSAJE) texto = `${texto.slice(0, texto.lastIndexOf('\n', MAX_MENSAJE - 60))}\n…\nDetalle completo: ${APP}`;
@@ -165,6 +176,13 @@ async function main() {
     leerEstado(db, usuario),
   ]);
   if (cartera.error) throw new Error(`No se pudo leer la cartera: ${cartera.error.message}`);
+  privados = [...new Set((cartera.data ?? []).flatMap(r => [String(r.ticker), String(r.ticker).replace(/\.SN$/, '')]))]
+    .filter(t => t.length >= 2).sort((a, b) => b.length - a.length);
+  const hoy = hoyEnChile();
+  if (estado?.fecha === hoy && !forzar && !prueba) {
+    decir('Agente de cartera: ya revisó la cartera hoy; esta corrida (horario de respaldo) no hace nada.');
+    return;
+  }
   const parsed = parsePortfolioItems(cartera.data);
   if ('error' in parsed) throw new Error(`La cartera guardada no es válida (${parsed.error.split(':')[0]}).`);
   const perfil = parsePerfil(perfilFila.data?.datos);
@@ -174,7 +192,6 @@ async function main() {
   const plan = planRebalanceo(report, modelo, { metaChile: metaChileDe(perfil), fraccionar: true });
 
   // ¿Hay algo que avisar?
-  const hoy = hoyEnChile();
   const firma = [...plan.ventas, ...plan.compras].map(o => `${o.lado} ${o.ticker}`).sort();
   const cerca = plan.niveles.filter(n => Math.abs(n.distancia) <= CERCA).map(n => `${n.tipo} ${n.ticker}`).sort();
   const motivos: string[] = [];
@@ -188,7 +205,9 @@ async function main() {
     if (primeraDeLaSemana) motivos.push('es el resumen de la semana');
   }
   const avisar = motivos.length > 0;
-  const texto = mensaje(plan, motivos.length ? motivos : ['sin novedades'], hoy, fmtPrecio);
+  // Sin el dólar observado se usa el del mercado (Yahoo), que basta para pesar la cartera: no vale un aviso diario
+  const avisos = report.avisosDatos.filter(a => !/dólar observado/i.test(a));
+  const texto = mensaje(plan, motivos.length ? motivos : ['sin novedades'], avisos, hoy, fmtPrecio);
 
   if (prueba) {
     decir(texto.replace(/<\/?[bi]>/g, ''));
@@ -213,6 +232,6 @@ async function main() {
 }
 
 main().catch(e => {
-  decir(`El agente falló: ${e instanceof Error ? e.message : String(e)}`);
+  decir(`El agente falló: ${sinPrivados(e instanceof Error ? e.message : String(e))}`);
   process.exit(1);
 });
