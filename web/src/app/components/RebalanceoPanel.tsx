@@ -47,7 +47,7 @@ const PERFIL_LOCAL = 'omnicapital_perfil_v1';
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 const pesos = (n: number) => `$${Math.round(n).toLocaleString('es-CL')}`;
 const precio = (n: number, moneda: 'USD' | 'CLP') => moneda === 'CLP'
-  ? `$${n.toLocaleString('es-CL', { maximumFractionDigits: n >= 1000 ? 0 : 2 })}`
+  ? `$${n.toLocaleString('es-CL', n >= 1000 ? { maximumFractionDigits: 0 } : { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   : `US$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const cantidad = (o: Orden) => o.cantidad.toLocaleString('es-CL', { maximumFractionDigits: 4 });
 const sinSufijo = (t: string) => t.replace(/\.SN$/, '');
@@ -133,7 +133,6 @@ function TablaOrdenes({ titulo, ordenes, icono, registrar, registradas, marcar }
               <th className="px-4 py-3 font-medium text-right">Monto</th>
               <th className="px-4 py-3 font-medium text-right">Peso</th>
               <th className="px-4 py-3 font-medium">Por qué</th>
-              {registrar && <th className="px-4 py-3 font-medium">¿La hiciste?</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-200 dark:divide-[#27272a]">
@@ -147,6 +146,17 @@ function TablaOrdenes({ titulo, ordenes, icono, registrar, registradas, marcar }
                   {o.todo && <span className="ml-2 text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">Todo</span>}
                   {o.origen === 'OPORTUNIDAD' && <span className="ml-2 text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-fuchsia-100 dark:bg-fuchsia-900/30 text-fuchsia-700 dark:text-fuchsia-300">Nueva</span>}
                   {o.nombre && <p className="text-[11px] font-normal text-zinc-500 dark:text-[#71717a] max-w-[160px] truncate">{o.nombre}</p>}
+                  {registrar && (registradas.has(clave)
+                    ? <span className="mt-2 inline-flex items-center gap-1 text-[11px] font-mono font-normal text-[#34d399]"><CheckCircle2 className="w-3.5 h-3.5" /> Registrada</span>
+                    : (
+                      <button
+                        onClick={() => setAbierta(abierta === clave ? null : clave)}
+                        aria-expanded={abierta === clave}
+                        className="mt-2 block text-[11px] font-mono font-bold uppercase px-2 py-1 rounded border border-[#60a5fa] text-[#60a5fa] hover:bg-[#60a5fa]/10"
+                      >
+                        {abierta === clave ? 'Cerrar' : 'Ya la hice: registrar'}
+                      </button>
+                    ))}
                 </td>
                 <td className={`px-4 py-3 font-mono text-right ${venta ? 'text-[#f87171]' : 'text-[#34d399]'}`}>{venta ? '−' : '+'}{cantidad(o)}</td>
                 <td className="px-4 py-3 font-mono text-right text-zinc-600 dark:text-[#a1a1aa]">{precio(o.precio, o.moneda)}</td>
@@ -157,21 +167,10 @@ function TablaOrdenes({ titulo, ordenes, icono, registrar, registradas, marcar }
                 <td className="px-4 py-3 font-mono text-right text-zinc-600 dark:text-[#a1a1aa]">{pesos(o.montoCLP)}</td>
                 <td className="px-4 py-3 font-mono text-right text-zinc-600 dark:text-[#a1a1aa] whitespace-nowrap">{pct(o.pesoAntes)} → {pct(o.pesoDespues)}</td>
                 <td className="px-4 py-3 text-xs text-zinc-600 dark:text-[#a1a1aa] min-w-[220px]">{o.motivo}</td>
-                {registrar && (
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    {registradas.has(clave)
-                      ? <span className="inline-flex items-center gap-1 text-xs font-mono text-[#34d399]"><CheckCircle2 className="w-4 h-4" /> Registrada</span>
-                      : (
-                        <button onClick={() => setAbierta(abierta === clave ? null : clave)} className="text-xs font-mono font-bold uppercase px-2.5 py-1.5 rounded border border-[#60a5fa] text-[#60a5fa] hover:bg-[#60a5fa]/10">
-                          Registrar
-                        </button>
-                      )}
-                  </td>
-                )}
               </tr>
               {registrar && abierta === clave && !registradas.has(clave) && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-3 bg-white dark:bg-[#18181b]">
+                  <td colSpan={7} className="px-4 py-3 bg-white dark:bg-[#18181b]">
                     <FormRegistro o={o} registrar={registrar} onListo={() => { marcar(clave); setAbierta(null); }} />
                   </td>
                 </tr>
@@ -329,7 +328,7 @@ export default function RebalanceoPanel() {
             <p className="text-xs text-zinc-600 dark:text-[#a1a1aa] bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded p-3">
               {isDemo
                 ? 'En el modo demo las operaciones no se guardan.'
-                : 'Primero vende y después compra. Cuando una orden se ejecute en tu corredora, tócala en "Registrar" con lo que de verdad se hizo: tu cartera se actualiza sola y el agente la ve en su próxima revisión.'}
+                : 'Primero vende y después compra. Cuando una orden se ejecute en tu corredora, toca "Ya la hice: registrar" bajo su nombre y anota lo que de verdad se hizo: tu cartera se actualiza sola y el agente la ve en su próxima revisión.'}
             </p>
           )}
           {registradas.size > 0 && (

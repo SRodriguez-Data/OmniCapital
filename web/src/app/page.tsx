@@ -59,6 +59,8 @@ const BOTON: Variants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: SUAVE } },
 };
 
+const VISTA_PENDIENTE = 'omnicapital_vista_pendiente';
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Pestana>('DATA_WAREHOUSE');
   const [direccion, setDireccion] = useState(0);
@@ -103,13 +105,19 @@ export default function Home() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Enlace directo desde el aviso de Telegram: /?vista=rebalancear abre el Optimizador (que parte en el rebalanceo)
+  // Enlace directo desde el aviso de Telegram: /?vista=rebalancear abre el Optimizador (que parte en el rebalanceo).
+  // Sin sesión, el login vuelve a "/" sin la URL: la vista pedida espera en esta pestaña hasta que haya sesión
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('vista') === 'rebalancear') {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- la URL solo existe en el cliente, tras hidratar
-      setActiveTab('CALCULADORA');
-    }
+    let pendiente = false;
+    try { pendiente = sessionStorage.getItem(VISTA_PENDIENTE) === 'rebalancear'; } catch { /* sin almacenamiento */ }
+    if (new URLSearchParams(window.location.search).get('vista') !== 'rebalancear' && !pendiente) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- la URL solo existe en el cliente, tras hidratar
+    setActiveTab('CALCULADORA');
+    try { sessionStorage.setItem(VISTA_PENDIENTE, 'rebalancear'); } catch { /* sin almacenamiento */ }
   }, []);
+  useEffect(() => {
+    if (session) try { sessionStorage.removeItem(VISTA_PENDIENTE); } catch { /* sin almacenamiento */ }
+  }, [session]);
 
   // En el celular el menú se desliza: la pestaña elegida queda centrada y a la vista
   useEffect(() => {
