@@ -142,8 +142,9 @@ def chile_real() -> int:
         tg = Telegram()
         bot = tg._llamar('getMe')
         revisar('bot', True, f'@{bot.get("username")}')
-        revisar('webhook apagado', not tg._llamar('getWebhookInfo').get('url'),
-                'el bot lee tus respuestas con getUpdates: con un webhook puesto, Telegram no se las entrega')
+        sin_webhook = not tg._llamar('getWebhookInfo').get('url')
+        revisar('webhook apagado', sin_webhook, '' if sin_webhook else
+                'el bot lee tus respuestas con getUpdates y con un webhook puesto Telegram no se las entrega: bórralo con deleteWebhook')
         tg.enviar('🇨🇱 OmniCapital: prueba de conexión. Aquí te llegarán las órdenes de tu cuenta de Chile.')
         revisar('mensaje de prueba enviado a tu chat', True, 'revisa Telegram')
     except ErrorConfiguracion as e:
