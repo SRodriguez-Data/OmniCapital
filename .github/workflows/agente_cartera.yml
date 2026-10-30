@@ -1,0 +1,56 @@
+name: Agente de cartera (avisos por Telegram)
+
+# Revisa tu cartera real guardada en la app, calcula el rebalanceo (qué vender, qué comprar y a qué precio) y los
+# precios que cambian la decisión, y te avisa por Telegram solo si cambió algo, si un precio se acerca a uno de esos
+# niveles o, una vez por semana, con el resumen (web/scripts/agente-cartera.ts). No opera: tú ejecutas en tu corredora.
+# El registro de las corridas es público, así que el agente no imprime nada de tu cartera.
+
+on:
+  schedule:
+    # 9:23 en Chile con horario de verano (8:23 en invierno), antes de la apertura. GitHub suele atrasar estos cron
+    # una o varias horas: igual llega con la bolsa abierta
+    - cron: '23 12 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      forzar:
+        description: 'Enviar el aviso aunque nada haya cambiado'
+        type: boolean
+        default: false
+
+concurrency:
+  group: agente-cartera
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  agente:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Review the portfolio and notify
+        run: npx tsx scripts/agente-cartera.ts ${{ inputs.forzar && '--forzar' || '' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          AGENTE_USUARIO: ${{ secrets.TRADING_REAL_USUARIO }}
