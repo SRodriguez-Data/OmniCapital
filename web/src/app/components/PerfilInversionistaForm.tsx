@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { UserCheck } from 'lucide-react';
 import {
-  PREGUNTAS, adecuacion, textoDe, type PerfilInversionista,
+  METAS_CHILE, PREGUNTAS, adecuacion, textoDe, type PerfilInversionista,
 } from '@/lib/perfil';
 
 // Cuestionario corto de perfil del inversionista. Las preguntas son las que la cartera no responde por sí sola:
@@ -40,6 +40,7 @@ export function PerfilInversionistaForm({ inicial, guardando, error, onGuardar, 
     horizonte: b.horizonte!, objetivo: b.objetivo!, reaccionCaida: b.reaccionCaida!, fondoEmergencia: b.fondoEmergencia!,
     experiencia: b.experiencia!, deudaCara: b.deudaCara!,
     aporteMensual: Number(b.aporteMensual.replace(/\D/g, '')) || null,
+    metaChile: b.metaChile ?? null,
   } : null;
   const nivel = perfil ? adecuacion(perfil).nivel : null;
 
@@ -87,6 +88,12 @@ export function PerfilInversionistaForm({ inicial, guardando, error, onGuardar, 
             value={b.aporteMensual ? Number(b.aporteMensual.replace(/\D/g, '')).toLocaleString('es-CL') : ''}
             onChange={e => set('aporteMensual', e.target.value.replace(/\D/g, '').slice(0, 10))}
           />
+        </Pregunta>
+        <Pregunta titulo="Opcional: ¿cuánto de tu cartera quieres como máximo en Chile?" ayuda="Sobre eso, el rebalanceo vende acciones chilenas e invierte fuera de Chile.">
+          <select className={campo} value={b.metaChile ?? ''} onChange={e => set('metaChile', e.target.value ? Number(e.target.value) : null)}>
+            <option value="">Lo que sugiere el asesor (hasta 60%)</option>
+            {METAS_CHILE.filter(m => m < 0.6).map(m => <option key={m} value={m}>Hasta {Math.round(m * 100)}%</option>)}
+          </select>
         </Pregunta>
       </div>
 

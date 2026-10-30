@@ -16,7 +16,14 @@ export interface PerfilInversionista {
   deudaCara: boolean;
   experiencia: Experiencia;
   aporteMensual: number | null; // en pesos
+  metaChile?: number | null; // máximo de la cartera en Chile para el rebalanceo (null: el del asesor)
 }
+
+// Cuánto de la cartera puede estar en Chile antes de que el rebalanceo venda. Sin respuesta, el 60% en que el asesor
+// ya avisa que la cartera depende demasiado de una sola economía
+export const META_CHILE_DEFECTO = 0.6;
+export const METAS_CHILE = [0.6, 0.5, 0.4, 0.3] as const;
+export const metaChileDe = (p: PerfilInversionista | null | undefined) => p?.metaChile ?? META_CHILE_DEFECTO;
 
 type Opciones<T extends string> = { valor: T; texto: string }[];
 
@@ -67,10 +74,12 @@ export function parsePerfil(x: unknown): PerfilInversionista | null {
     || !valido(PREGUNTAS.reaccionCaida, p.reaccionCaida) || !valido(PREGUNTAS.fondoEmergencia, p.fondoEmergencia)
     || !valido(PREGUNTAS.experiencia, p.experiencia) || typeof p.deudaCara !== 'boolean') return null;
   const aporte = Number(p.aporteMensual);
+  const meta = Number(p.metaChile);
   return {
     horizonte: p.horizonte, objetivo: p.objetivo, reaccionCaida: p.reaccionCaida, fondoEmergencia: p.fondoEmergencia,
     experiencia: p.experiencia, deudaCara: p.deudaCara,
     aporteMensual: p.aporteMensual !== null && p.aporteMensual !== '' && Number.isFinite(aporte) && aporte > 0 && aporte < 1e10 ? Math.round(aporte) : null,
+    metaChile: (METAS_CHILE as readonly number[]).includes(meta) ? meta : null,
   };
 }
 

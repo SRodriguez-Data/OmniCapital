@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Calculator, Sparkles, Loader2, TrendingUp } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
+import RebalanceoPanel from './RebalanceoPanel';
 
 interface RebalanceRecommendation {
   ticker: string;
@@ -31,7 +32,34 @@ interface RebalanceResult {
 
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 
+const MODOS = [
+  { id: 'rebalancear', texto: 'Rebalancear (vender y comprar)' },
+  { id: 'comprar', texto: 'Comprar con capital nuevo' },
+] as const;
+
 export default function SizingTab() {
+  const [modo, setModo] = useState<(typeof MODOS)[number]['id']>('rebalancear');
+  return (
+    <div className="max-w-4xl mx-auto space-y-6">
+      <div role="tablist" className="flex border border-zinc-200 dark:border-[#27272a] rounded-lg overflow-hidden text-xs font-mono font-bold uppercase">
+        {MODOS.map(m => (
+          <button
+            key={m.id}
+            role="tab"
+            aria-selected={modo === m.id}
+            onClick={() => setModo(m.id)}
+            className={`flex-1 px-4 py-3 transition-colors ${modo === m.id ? 'bg-[#60a5fa] text-[#09090b]' : 'bg-white dark:bg-[#18181b] text-zinc-500 dark:text-[#71717a] hover:text-zinc-900 dark:hover:text-[#e4e4e7]'}`}
+          >
+            {m.texto}
+          </button>
+        ))}
+      </div>
+      {modo === 'rebalancear' ? <RebalanceoPanel /> : <PlanCompra />}
+    </div>
+  );
+}
+
+function PlanCompra() {
   const { items } = usePortfolio();
   const [budget, setBudget] = useState('');
   const [currency, setCurrency] = useState<'USD' | 'CLP'>('USD');
@@ -75,8 +103,7 @@ export default function SizingTab() {
   const recommendations = result?.recommendations;
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      
+    <div className="space-y-6">
       <div className="bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-xl shadow-sm dark:shadow-none p-6">
         <div className="flex items-center gap-3 mb-6 border-b border-zinc-200 dark:border-[#27272a] pb-4">
           <Calculator className="w-6 h-6 text-[#60a5fa]" />

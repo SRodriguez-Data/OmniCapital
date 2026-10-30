@@ -2,16 +2,14 @@ import { NextResponse } from 'next/server';
 import { aiConfigured, generateText } from '@/lib/ai';
 import { parsePortfolioItems } from '@/lib/validation';
 import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
-import { supabase } from '@/lib/supabase';
 import { buildAdvisorReport, fmtMoney } from '@/lib/advisor';
 import { planPurchases } from '@/lib/optimizer';
+import { oportunidadesDelBot } from '@/lib/rebalanceo';
 
 export const maxDuration = 60;
 
 const AI_TIMEOUT_MS = 20000;
 const MAX_BUDGET = 1e12;
-
-interface Candidate { ticker?: unknown; score?: unknown }
 
 export async function POST(request: Request) {
   try {
@@ -31,21 +29,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
 
-    // Las mejores ideas del último escaneo del bot, evaluadas con las mismas reglas: 3 de EE.UU. y 2 de Chile. Cada
-    // lista viene ordenada por su propio criterio (percentil en su sector, alza de 12 meses): mezclar los puntajes
-    // de las dos dejaría siempre fuera a las chilenas
-    const { data: iaData } = await supabase
-      .from('analisis_ia')
-      .select('us:candidatos_json->us, cl:candidatos_json->cl')
-      .order('fecha', { ascending: false })
-      .limit(1);
-    const mejores = (lista: unknown, n: number) => ((Array.isArray(lista) ? lista : []) as Candidate[])
-      .filter((c): c is { ticker: string; score: number } => typeof c?.ticker === 'string' && typeof c?.score === 'number')
-      .sort((a, b) => b.score - a.score)
-      .slice(0, n)
-      .map(c => c.ticker.toUpperCase());
-    const fila = iaData?.[0] as { us?: unknown; cl?: unknown } | undefined;
-    const oportunidades = [...mejores(fila?.us, 3), ...mejores(fila?.cl, 2)];
+    // Las mejores ideas del último escaneo del bot, evaluadas con las mismas reglas: 3 de EE.UU. y 2 de Chile
+    const oportunidades = await oportunidadesDelBot();
 
     const { modelo: riesgo, ...report } = await buildAdvisorReport(parsed.items, oportunidades);
     const plan = planPurchases(report, riesgo, budget, currency, { fraccionar });

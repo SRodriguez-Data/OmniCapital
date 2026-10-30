@@ -37,7 +37,7 @@ const MAX_ORDENES = 8;
 
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 
-function motivoExclusion(a: AssetReport, esCandidato: boolean): string | null {
+function excluirSiempre(a: AssetReport, esCandidato: boolean): string | null {
   if (!a.conDatos || a.vol === null) return 'Sin precios confiables al día para medir su riesgo.';
   if (a.accion === 'REDUCIR') return 'Su recomendación es REDUCIR: no conviene comprar más.';
   if (a.stopActivado) return 'Cerró bajo su stop de volatilidad: espera a que se estabilice antes de comprar más.';
@@ -48,13 +48,15 @@ function motivoExclusion(a: AssetReport, esCandidato: boolean): string | null {
   return null;
 }
 
+// `excluir`: razón para no comprar un activo además de las de siempre (el rebalanceo no recompra lo que reduce)
 export function planPurchases(
   report: AdvisorReport,
   modelo: RiskModel,
   budget: number,
   currency: 'USD' | 'CLP',
-  { fraccionar }: { fraccionar: boolean },
+  { fraccionar, excluir }: { fraccionar: boolean; excluir?: (a: AssetReport) => string | null },
 ): Plan {
+  const motivoExclusion = (a: AssetReport, esCandidato: boolean) => excluirSiempre(a, esCandidato) ?? excluir?.(a) ?? null;
   const usdClp = report.usdClp;
   const toCLP = (n: number, moneda: 'USD' | 'CLP') => (moneda === 'USD' ? n * usdClp : n);
   const fromCLP = (n: number) => (currency === 'USD' ? n / usdClp : n);

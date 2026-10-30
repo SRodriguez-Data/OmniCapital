@@ -9,7 +9,7 @@ import {
 } from './marketData';
 import { ETF_CONOCIDOS, FONDOS_CHILE, fundamentales, type Fundamentales, type TipoActivo } from './fundamentals';
 import { contextoMercado, type ContextoMercado } from './mercado';
-import { adecuacion, type Adecuacion, type PerfilInversionista } from './perfil';
+import { adecuacion, metaChileDe, type Adecuacion, type PerfilInversionista } from './perfil';
 import { evidencia, mercadoDe, type Evidencia, type Mercado } from './evidencia';
 import { supabase } from './supabase';
 
@@ -930,8 +930,9 @@ function planEstrategico(
     plan.push(`${sector.nombre} pesa ${pct(sector.peso, 0)} de tu patrimonio contando lo que hay dentro de tus fondos: no sumes más de ese sector y dirige los próximos aportes a otros.`);
   }
   const chile = ex.regiones.find(x => x.nombre === 'Chile')?.peso ?? 0;
-  if (chile > 0.6) {
-    plan.push(`${pct(chile, 0)} de tu patrimonio está en Chile: para que tu cartera dependa menos de una sola economía, dirige los próximos aportes a fondos globales hasta acercarte a la mitad fuera de Chile.`);
+  const meta = metaChileDe(perfil);
+  if (chile > meta) {
+    plan.push(`${pct(chile, 0)} de tu patrimonio está en Chile${perfil?.metaChile ? `, sobre tu meta de ${pct(meta, 0)}` : ''}: para que tu cartera dependa menos de una sola economía, dirige los próximos aportes a fondos globales${perfil?.metaChile ? '' : ' hasta acercarte a la mitad fuera de Chile'}. El rebalanceo de la Calculadora te dice qué vender para volver a ${pct(meta, 0)}.`);
   } else if (chile < 0.2 && chile > 0) {
     plan.push(`Solo ${pct(chile, 0)} está en Chile: si tus gastos son en pesos, tener algo más en activos locales reduce el riesgo cambiario.`);
   }
@@ -1017,7 +1018,7 @@ function buildFindings(
     });
   }
   const chile = ex.regiones.find(x => x.nombre === 'Chile')?.peso ?? 0;
-  if (chile > 0.6) {
+  if (chile > metaChileDe(perfil)) {
     out.push({
       nivel: 'atencion',
       titulo: `${pct(chile, 0)} de tu patrimonio depende de Chile`,
