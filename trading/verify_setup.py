@@ -1,7 +1,8 @@
 """Comprueba que una cuenta está lista para operar. No envía órdenes.
 
-    python -m trading.verify_setup          # la simulación (cuenta de paper, dinero ficticio)
-    python -m trading.verify_setup --real   # la cuenta de dinero real
+    python -m trading.verify_setup           # la simulación (cuenta de paper, dinero ficticio)
+    python -m trading.verify_setup --real    # la cuenta de dinero real de EE.UU. (Alpaca)
+    python -m trading.verify_setup --chile   # la cuenta real de Chile (avisos por Telegram): manda un mensaje de prueba
 """
 import argparse
 import os
@@ -118,7 +119,69 @@ def main(real: bool) -> int:
     return 0 if listo else 1
 
 
+def chile_real() -> int:
+    """La cuenta real de Chile: capital, Telegram (manda un mensaje de prueba a tu chat) y Supabase."""
+    for flujo in (sys.stdout, sys.stderr):
+        flujo.reconfigure(encoding='utf-8', errors='replace')
+    print('Verificación de la cuenta real de Chile (avisos por Telegram)\n')
+    load_dotenv(RAIZ / '.env')
+    from trading.core.broker import ErrorConfiguracion
+    from trading.core.manual import pesos
+    from trading.core.registro import TABLA_CHILE_REAL
+    from trading.core.telegram import ErrorTelegram, Telegram
+    from trading.main import capital_chile
+
+    print('Capital')
+    try:
+        revisar('capital de la cuenta', True, f'{pesos(capital_chile())} (CHILE_REAL_TOPE_CLP)')
+    except ErrorConfiguracion as e:
+        revisar('capital de la cuenta', False, str(e))
+
+    print('\nTelegram')
+    try:
+        tg = Telegram()
+        bot = tg._llamar('getMe')
+        revisar('bot', True, f'@{bot.get("username")}')
+        revisar('webhook apagado', not tg._llamar('getWebhookInfo').get('url'),
+                'el bot lee tus respuestas con getUpdates: con un webhook puesto, Telegram no se las entrega')
+        tg.enviar('🇨🇱 OmniCapital: prueba de conexión. Aquí te llegarán las órdenes de tu cuenta de Chile.')
+        revisar('mensaje de prueba enviado a tu chat', True, 'revisa Telegram')
+    except ErrorConfiguracion as e:
+        revisar('configuración de Telegram', False, str(e))
+    except ErrorTelegram as e:
+        revisar('conexión con Telegram', False, f'{e}. Revisa TELEGRAM_TOKEN y TELEGRAM_CHAT_ID, y escríbele /start al bot.')
+
+    print('\nSupabase')
+    if os.getenv('SUPABASE_URL') and os.getenv('SUPABASE_SECRET_KEY'):
+        from datetime import date
+        from supabase import create_client
+        from trading.strategies.momentum_chile import MomentumChile
+        sb = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_SECRET_KEY'])
+        try:
+            obj = MomentumChile(sb).objetivo(date.today())
+            revisar('escaneo del Top de Chile', obj.problema is None, obj.problema or obj.descripcion)
+        except Exception as e:
+            revisar('lectura del Top de Chile', False, str(e)[:160])
+        try:
+            sb.table(TABLA_CHILE_REAL).select('fecha').limit(1).execute()
+            revisar(f'tabla {TABLA_CHILE_REAL}', True)
+        except Exception:
+            revisar(f'tabla {TABLA_CHILE_REAL}', False, f'ejecuta supabase/{TABLA_CHILE_REAL}.sql en el SQL Editor de Supabase')
+        dueno = (os.getenv('TRADING_REAL_USUARIO') or '').strip()
+        print(f'  {"OK   " if dueno else "AVISO"} dueño en la web: ' + ('TRADING_REAL_USUARIO definido' if dueno else
+              'falta TRADING_REAL_USUARIO (tu user_id de Supabase): los avisos llegan igual, pero la web no muestra la cuenta'))
+    else:
+        revisar('credenciales de Supabase', False, 'faltan SUPABASE_URL y SUPABASE_SECRET_KEY')
+
+    listo = all(resultados)
+    print('\n❌ Corrige lo marcado con FALLA antes de activarla.' if not listo else
+          '\n✅ Lista. En GitHub se activa con la variable TRADING_REAL_CL = activo.')
+    return 0 if listo else 1
+
+
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Verifica la configuración de Alpaca y Supabase sin enviar órdenes')
+    parser = argparse.ArgumentParser(description='Verifica la configuración de una cuenta sin enviar órdenes')
     parser.add_argument('--real', action='store_true', help='revisa la cuenta de dinero real en vez de la de paper')
-    sys.exit(main(parser.parse_args().real))
+    parser.add_argument('--chile', action='store_true', help='revisa la cuenta real de Chile (Telegram), no la de Alpaca')
+    args = parser.parse_args()
+    sys.exit(chile_real() if args.chile else main(args.real))

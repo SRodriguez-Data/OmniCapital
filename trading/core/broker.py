@@ -162,7 +162,7 @@ class Broker:
         # client_order_id: hasta 48 caracteres y único; con él se reconocen las órdenes propias
         return f'{prefijo}-{motivo}-{datetime.now(timezone.utc):%Y%m%d}-{simbolo}-{uuid.uuid4().hex[:6]}'[:48]
 
-    def comprar(self, simbolo: str, monto: float, prefijo: str, motivo: str, precio_ref: float | None = None):
+    def comprar(self, simbolo: str, monto: float, prefijo: str, motivo: str, precio_ref: float | None = None, detalle: str = ''):
         """Compra a mercado por un monto en US$. Sin fracciones, compra las acciones enteras que alcancen."""
         operable, fraccionable = self.activo(simbolo)
         if not operable:
@@ -178,7 +178,7 @@ class Broker:
                                         time_in_force=TimeInForce.DAY, client_order_id=self._id(prefijo, motivo, simbolo))
         return self.cliente.submit_order(pedido)
 
-    def vender(self, simbolo: str, cantidad: float, prefijo: str, motivo: str):
+    def vender(self, simbolo: str, cantidad: float, prefijo: str, motivo: str, detalle: str = ''):
         """Vende a mercado una cantidad de acciones (nunca más de las que hay: no se venden acciones prestadas)."""
         _, fraccionable = self.activo(simbolo)
         cantidad = round(cantidad, 9) if fraccionable else math.floor(cantidad)

@@ -78,14 +78,14 @@ class BrokerFalso:
         self.enviadas.append(o)
         return o
 
-    def comprar(self, simbolo, monto, prefijo, motivo, precio_ref=None):
+    def comprar(self, simbolo, monto, prefijo, motivo, precio_ref=None, detalle=""):
         self.efectivo -= monto
         p = self.pos.get(simbolo)
         valor = (p.valor if p else 0) + monto
         self.pos[simbolo] = Posicion(simbolo, valor / 100, valor, 100.0, 100.0, 0.0)
         return self._orden(simbolo, 'buy', monto / 100, motivo)
 
-    def vender(self, simbolo, cantidad, prefijo, motivo):
+    def vender(self, simbolo, cantidad, prefijo, motivo, detalle=""):
         p = self.pos[simbolo]
         self.efectivo += cantidad * p.precio
         if cantidad >= p.cantidad:
@@ -195,12 +195,18 @@ class EntreRebalanceos(unittest.TestCase):
         self.assertAlmostEqual(pesos['A'] / pesos['B'], 0.4 / 0.35)
         self.assertEqual(cartera(lista, set(), {}, mensual=True), lista)
 
-    def test_la_cuenta_real_espera_el_rebalanceo_del_mes(self):
+    def test_la_cuenta_real_tambien_compra_la_que_entra_el_mismo_dia(self):
         b = self.cartera_completa()
         b.real = True
         sb = SupabaseFalso(ideas=IDEAS[1:] + [{'ticker': 'ZZZ', 'price': 100.0}])
         sb.tablas['real_trading'] = [{'datos': {'rebalanceo': {'mes': '2026-10'}}}]
         correr(b, sb, tope=100_000)
+        self.assertEqual(sorted((o.symbol, o.side.value) for o in b.enviadas), [('AAA', 'sell'), ('ZZZ', 'buy')])
+
+    def test_solo_mensual_espera_el_rebalanceo_del_mes(self):
+        b = self.cartera_completa()
+        sb = SupabaseFalso(ideas=IDEAS[1:] + [{'ticker': 'ZZZ', 'price': 100.0}], estado={'rebalanceo': {'mes': '2026-10'}})
+        correr(b, sb, continuo=False)
         self.assertEqual(b.enviadas, [])
 
 

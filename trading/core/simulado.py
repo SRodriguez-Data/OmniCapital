@@ -23,9 +23,9 @@ APERTURA, CIERRE = time(9, 30), time(16, 0)
 SANTIAGO = ZoneInfo(bolsa_chile.ZONA)
 
 
-def libro_nuevo(ahora: datetime) -> dict:
-    return {'capital_inicial': CAPITAL_INICIAL, 'creada': ahora.astimezone(timezone.utc).isoformat(timespec='seconds'),
-            'efectivo': float(CAPITAL_INICIAL), 'posiciones': {}, 'ordenes': [], 'historial': []}
+def libro_nuevo(ahora: datetime, capital: float = CAPITAL_INICIAL) -> dict:
+    return {'capital_inicial': capital, 'creada': ahora.astimezone(timezone.utc).isoformat(timespec='seconds'),
+            'efectivo': float(capital), 'posiciones': {}, 'ordenes': [], 'historial': []}
 
 
 def orden(o: dict) -> SimpleNamespace:
@@ -49,9 +49,10 @@ class BrokerSimulado:
     real = False
     moneda = 'CLP'
 
-    def __init__(self, libro: dict | None, cotizar=bolsa_chile.cotizaciones, ahora: datetime | None = None):
+    def __init__(self, libro: dict | None, cotizar=bolsa_chile.cotizaciones, ahora: datetime | None = None,
+                 capital: float = CAPITAL_INICIAL):
         self.ahora = (ahora or datetime.now(timezone.utc)).astimezone(SANTIAGO)
-        self.datos = libro or libro_nuevo(self.ahora)
+        self.datos = libro or libro_nuevo(self.ahora, capital)
         self.cotizar = cotizar
         self.cot: dict[str, bolsa_chile.Cotizacion] = {}
         self.preparar([bolsa_chile.REFERENCIA, *self.datos['posiciones']])
@@ -133,15 +134,41 @@ class BrokerSimulado:
 
     # --- Órdenes -------------------------------------------------------------------------------------------
 
-    def _registrar(self, simbolo: str, lado: str, cantidad: int, precio: float, comision: float, prefijo: str, motivo: str):
-        hora = datetime.now(timezone.utc)
-        o = {'id': uuid.uuid4().hex, 'client_order_id': f'{prefijo}-{motivo}-{hora:%Y%m%d}-{simbolo}-{uuid.uuid4().hex[:6]}'[:48],
-             'ticker': simbolo, 'lado': 'buy' if lado == 'compra' else 'sell', 'cantidad': cantidad, 'precio': round(precio, 4),
-             'comision': round(comision, 2), 'hora': hora.isoformat(timespec='seconds')}
+    @staticmethod
+    def _id(prefijo: str, motivo: str, simbolo: str) -> str:
+        return f'{prefijo}-{motivo}-{datetime.now(timezone.utc):%Y%m%d}-{simbolo}-{uuid.uuid4().hex[:6]}'[:48]
+
+    def _registrar(self, simbolo: str, lado: str, cantidad: int, precio: float, comision: float, client_order_id: str):
+        o = {'id': uuid.uuid4().hex, 'client_order_id': client_order_id, 'ticker': simbolo, 'lado': 'buy' if lado == 'compra' else 'sell',
+             'cantidad': cantidad, 'precio': round(precio, 4), 'comision': round(comision, 2),
+             'hora': datetime.now(timezone.utc).isoformat(timespec='seconds')}
         self.datos['ordenes'].append(o)
         return orden(o)
 
-    def comprar(self, simbolo: str, monto: float, prefijo: str, motivo: str, precio_ref: float | None = None):
+    def _anotar_compra(self, simbolo: str, cantidad: int, precio: float) -> float:
+        """Suma al libro una compra hecha y devuelve su comisión."""
+        comision = cantidad * precio * COMISION
+        total = cantidad * precio + comision
+        p = self.datos['posiciones'].get(simbolo) or {'cantidad': 0, 'costo': 0.0}
+        c = self.cot.get(simbolo)
+        # El costo de cada acción incluye la comisión: es lo que de verdad se pagó
+        self.datos['posiciones'][simbolo] = {'cantidad': p['cantidad'] + cantidad, 'precio': c.precio if c else precio,
+                                             'costo': (p['cantidad'] * p['costo'] + total) / (p['cantidad'] + cantidad)}
+        self.datos['efectivo'] -= total
+        return comision
+
+    def _anotar_venta(self, simbolo: str, cantidad: int, precio: float) -> float:
+        """Resta del libro una venta hecha y devuelve su comisión. `cantidad` no pasa de las acciones que hay."""
+        p = self.datos['posiciones'][simbolo]
+        comision = cantidad * precio * COMISION
+        self.datos['efectivo'] += cantidad * precio - comision
+        if cantidad >= p['cantidad']:
+            del self.datos['posiciones'][simbolo]
+        else:
+            p['cantidad'] -= cantidad
+        return comision
+
+    def comprar(self, simbolo: str, monto: float, prefijo: str, motivo: str, precio_ref: float | None = None, detalle: str = ''):
         """Compra las acciones enteras que alcanzan con `monto` pesos, comisión incluida."""
         c = self._cotizacion(simbolo)
         if c is None:
@@ -150,17 +177,10 @@ class BrokerSimulado:
         cantidad = math.floor(min(monto, self.datos['efectivo']) / (precio * (1 + COMISION)))
         if cantidad < 1:
             raise ValueError(f'{simbolo}: el monto no alcanza para una acción')
-        comision = cantidad * precio * COMISION
-        total = cantidad * precio + comision
-        p = self.datos['posiciones'].get(simbolo) or {'cantidad': 0, 'costo': 0.0}
-        # El costo de cada acción incluye la comisión: es lo que de verdad se pagó
-        p = {'cantidad': p['cantidad'] + cantidad, 'costo': (p['cantidad'] * p['costo'] + total) / (p['cantidad'] + cantidad),
-             'precio': c.precio}
-        self.datos['posiciones'][simbolo] = p
-        self.datos['efectivo'] -= total
-        return self._registrar(simbolo, 'compra', cantidad, precio, comision, prefijo, motivo)
+        comision = self._anotar_compra(simbolo, cantidad, precio)
+        return self._registrar(simbolo, 'compra', cantidad, precio, comision, self._id(prefijo, motivo, simbolo))
 
-    def vender(self, simbolo: str, cantidad: float, prefijo: str, motivo: str):
+    def vender(self, simbolo: str, cantidad: float, prefijo: str, motivo: str, detalle: str = ''):
         p = self.datos['posiciones'].get(simbolo)
         cantidad = min(math.floor(cantidad), p['cantidad'] if p else 0)
         if cantidad <= 0:
@@ -169,13 +189,8 @@ class BrokerSimulado:
         if c is None:
             raise ValueError(f'{simbolo} no tiene cotización en la Bolsa de Santiago')
         precio = precio_de_ejecucion(c, 'venta')
-        comision = cantidad * precio * COMISION
-        self.datos['efectivo'] += cantidad * precio - comision
-        if cantidad >= p['cantidad']:
-            del self.datos['posiciones'][simbolo]
-        else:
-            p['cantidad'] -= cantidad
-        return self._registrar(simbolo, 'venta', cantidad, precio, comision, prefijo, motivo)
+        comision = self._anotar_venta(simbolo, cantidad, precio)
+        return self._registrar(simbolo, 'venta', cantidad, precio, comision, self._id(prefijo, motivo, simbolo))
 
     def cancelar(self, orden_id) -> None:
         pass

@@ -14,6 +14,7 @@ from .risk import Limites
 
 TABLAS = {False: 'paper_trading', True: 'real_trading'}   # según si la cuenta es de dinero real
 TABLA_CHILE = 'paper_trading_cl'
+TABLA_CHILE_REAL = 'real_trading_cl'   # la cuenta real de Chile, que el dueño opera a mano (core/manual.py)
 # Índices de comparación, sin dividendos, igual que las simulaciones, que no los cobran. En Chile, el ETF del IPSA
 INDICES = {'eeuu': ('^GSPC', 'S&P 500'), 'chile': ('CFMITNIPSA.SN', 'IPSA')}
 MAX_EVENTOS = 30

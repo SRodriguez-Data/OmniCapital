@@ -7,9 +7,10 @@ import { supabase } from '@/lib/supabase';
 import { fechaCorta, pctSigno } from './topFormato';
 
 // El Top v2 operado: la simulación de EE.UU. en Alpaca con dinero ficticio (tabla paper_trading, pública), la de
-// Chile en una cuenta simulada con los precios de la Bolsa de Santiago (paper_trading_cl, pública) y, si existe, la
-// cuenta de dinero real (real_trading, que por RLS solo ve su dueño). Las opera trading/main.py desde GitHub Actions;
-// la web solo lee esas tablas (nunca ve las claves de Alpaca).
+// Chile en una cuenta simulada con los precios de la Bolsa de Santiago (paper_trading_cl, pública) y, si existen, las
+// cuentas de dinero real: la de Alpaca (real_trading) y la de Chile que el dueño opera a mano con los avisos de
+// Telegram (real_trading_cl), que por RLS solo ve su dueño. Las opera trading/main.py desde GitHub Actions; la web
+// solo lee esas tablas (nunca ve las claves de Alpaca ni el token de Telegram).
 
 interface Posicion { ticker: string; cantidad: number; valor: number; peso: number; costo: number; ganancia_pct: number }
 interface Orden {
@@ -17,6 +18,8 @@ interface Orden {
   cantidad: number; precio: number | null; monto_pedido: number | null; comision?: number | null;
 }
 interface Evento { fecha: string; tipo: string; texto: string }
+// Orden de la cuenta real de Chile avisada por Telegram que espera la respuesta del dueño
+interface Pendiente { ticker: string; lado: 'compra' | 'venta'; cantidad: number; precio: number; detalle?: string; hora: string }
 interface Punto { f: string; c: number; s: number }
 interface Estado {
   titulo: string; actualizado: string;
@@ -29,9 +32,9 @@ interface Estado {
   tope?: number | null;
   // Desde la simulación de Chile; las filas anteriores no los traen (son de EE.UU., en dólares, frente al S&P 500)
   moneda?: 'USD' | 'CLP'; indice?: string;
-  libro?: { capital_inicial: number };
+  libro?: { capital_inicial: number; capital?: number; pendientes?: Pendiente[] };
 }
-type Fuente = 'paper' | 'chile' | 'real';
+type Fuente = 'paper' | 'chile' | 'real' | 'realcl';
 
 const tarjeta = 'bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded-lg';
 const pct = (x: number, d = 1) => `${(x * 100).toFixed(d)}%`;
@@ -60,6 +63,11 @@ const EVENTO_ESTILO: Record<string, string> = {
   freno: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
   error: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300',
   espera: 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300',
+  aviso: 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300',
+  hecha: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+  descartada: 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300',
+  aporte: 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300',
+  retiro: 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300',
 };
 
 interface TooltipProps { active?: boolean; payload?: { name: string; value: number; color: string }[]; label?: string }
@@ -80,7 +88,7 @@ function CurvaTooltip({ active, payload, label }: TooltipProps) {
   );
 }
 
-function Curva({ curva, real, indice, signo }: { curva: Punto[]; real: boolean; indice: string; signo: (x: number) => string }) {
+function Curva({ curva, real, indice, signo, nota }: { curva: Punto[]; real: boolean; indice: string; signo: (x: number) => string; nota?: string }) {
   if (curva.length < 2) {
     return (
       <p className="text-xs text-zinc-500 dark:text-[#71717a]">
@@ -107,7 +115,7 @@ function Curva({ curva, real, indice, signo }: { curva: Punto[]; real: boolean; 
       </div>
       <p className="text-[11px] text-zinc-500 dark:text-[#71717a]">
         Desde el cierre del {fechaCorta(base.f)} (antes de la primera compra) al del {fechaCorta(ultimo.f)}.{' '}
-        {real ? `Los depósitos y retiros no cuentan como ganancia. La cartera incluye los dividendos que cobra; el ${indice}, no.` : 'Ambos sin dividendos.'}
+        {nota ?? (real ? `Los depósitos y retiros no cuentan como ganancia. La cartera incluye los dividendos que cobra; el ${indice}, no.` : 'Ambos sin dividendos.')}
       </p>
       <div className="h-[300px]">
         <ResponsiveContainer width="100%" height="100%">
@@ -132,17 +140,18 @@ async function ultimo(tabla: string): Promise<Estado | null> {
 }
 
 export default function SimulacionTab() {
-  const [estados, setEstados] = useState<Record<Fuente, Estado | null>>({ paper: null, chile: null, real: null });
+  const [estados, setEstados] = useState<Record<Fuente, Estado | null>>({ paper: null, chile: null, real: null, realcl: null });
   const [fuente, setFuente] = useState<Fuente>('paper');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
       try {
-        // Las simulaciones son dinero ficticio y se muestran también en modo demo. La cuenta real solo le llega a su
-        // dueño con sesión iniciada: para cualquier otro la consulta vuelve vacía (RLS)
-        const [paper, chile, real] = await Promise.all([ultimo('paper_trading'), ultimo('paper_trading_cl'), ultimo('real_trading')]);
-        setEstados({ paper, chile, real });
+        // Las simulaciones son dinero ficticio y se muestran también en modo demo. Las cuentas reales solo le llegan a
+        // su dueño con sesión iniciada: para cualquier otro la consulta vuelve vacía (RLS)
+        const [paper, chile, real, realcl] = await Promise.all(
+          ['paper_trading', 'paper_trading_cl', 'real_trading', 'real_trading_cl'].map(ultimo));
+        setEstados({ paper, chile, real, realcl });
       } catch (e) {
         console.error(e);
       } finally {
@@ -153,11 +162,14 @@ export default function SimulacionTab() {
 
   if (loading) return <div className="text-center p-12 font-mono text-zinc-600 dark:text-[#a1a1aa]">Cargando la simulación...</div>;
 
-  const real = fuente === 'real';
-  const chile = fuente === 'chile';
+  const realcl = fuente === 'realcl';
+  const real = fuente === 'real' || realcl;   // dinero de verdad, en Alpaca o en la corredora del dueño
+  const chile = fuente === 'chile' || realcl;
   const estado = estados[fuente];
   const opciones: [Fuente, string][] = [['paper', 'Simulación EE.UU.'], ['chile', 'Simulación Chile']];
-  if (estados.real) opciones.push(['real', 'Cuenta real']);
+  if (estados.real) opciones.push(['real', 'Cuenta real EE.UU.']);
+  if (estados.realcl) opciones.push(['realcl', 'Cuenta real Chile']);
+  const titulo = opciones.find(([f]) => f === fuente)?.[1] ?? '';
   const selector = (
     <div className="flex flex-wrap justify-center gap-2">
       {opciones.map(([f, nombre]) => (
@@ -197,18 +209,25 @@ export default function SimulacionTab() {
   const costoAcciones = estado.posiciones.reduce((s, p) => s + p.costo * p.cantidad, 0);
   const gananciaCartera = valorAcciones - costoAcciones;
   const pendiente = !estado.rebalanceo || estado.proximo_rebalanceo <= estado.actualizado.slice(0, 10);
+  const porHacer = realcl ? estado.libro?.pendientes ?? [] : [];
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {selector}
       <div className={`${tarjeta} p-6 space-y-4`}>
         <div className="text-center">
-          <h2 className="text-xl font-bold text-[#d946ef] uppercase tracking-widest">{real ? 'Cuenta real' : chile ? 'Simulación Chile' : 'Simulación EE.UU.'}</h2>
-          {real ? (
+          <h2 className="text-xl font-bold text-[#d946ef] uppercase tracking-widest">{titulo}</h2>
+          {realcl ? (
             <p className="text-zinc-600 dark:text-[#a1a1aa] text-sm max-w-2xl mx-auto mt-2">
-              Tu cuenta de Alpaca con dinero de verdad. Cada mes el sistema compra las acciones del Top de EE.UU. con el peso que el Top le da a cada una
-              {estado.tope ? `, con hasta ${dinero(estado.tope)},` : ''} y las mantiene hasta el mes siguiente, con las mismas reglas de riesgo que la simulación.
-              Solo tú ves esta página.
+              Tus acciones chilenas del Top, en tu corredora{estado.libro?.capital ? `, con ${dinero(estado.libro.capital)}` : ''}. Las corredoras chilenas no dejan que
+              un programa envíe órdenes, así que el bot decide igual que en la simulación y te avisa cada orden por Telegram; tú la haces y le respondes,
+              y aquí queda lo que confirmaste. Solo tú ves esta página.
+            </p>
+          ) : real ? (
+            <p className="text-zinc-600 dark:text-[#a1a1aa] text-sm max-w-2xl mx-auto mt-2">
+              Tu cuenta de Alpaca con dinero de verdad. El sistema compra las acciones del Top de EE.UU. con el peso que el Top le da a cada una
+              {estado.tope ? `, con hasta ${dinero(estado.tope)},` : ''} y en cada corrida vende la que sale del Top y compra la que entra, con las mismas
+              reglas de riesgo que la simulación. Solo tú ves esta página.
             </p>
           ) : chile ? (
             <p className="text-zinc-600 dark:text-[#a1a1aa] text-sm max-w-2xl mx-auto mt-2">
@@ -246,8 +265,34 @@ export default function SimulacionTab() {
           ))}
         </div>
 
-        <Curva curva={estado.curva ?? []} real={real} indice={indice} signo={signo} />
+        <Curva curva={estado.curva ?? []} real={real} indice={indice} signo={signo}
+          nota={realcl ? 'Los aportes y retiros no cuentan como ganancia. Ninguno de los dos incluye dividendos: los que te pague tu corredora no entran al libro.' : undefined} />
       </div>
+
+      {realcl && (
+        <section className={`${tarjeta} p-4 space-y-2`}>
+          <h3 className="text-sm font-bold text-zinc-900 dark:text-[#e4e4e7]">Por hacer en tu corredora</h3>
+          {porHacer.length === 0 ? (
+            <p className="text-xs text-zinc-500">Nada pendiente. Cuando el bot decida comprar o vender, te llega un aviso por Telegram.</p>
+          ) : (
+            <>
+              {porHacer.map((p, i) => (
+                <div key={i} className="flex flex-wrap items-baseline gap-x-3 text-sm font-mono">
+                  <span className={`font-bold ${p.lado === 'compra' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {p.lado === 'compra' ? 'Comprar' : 'Vender'} {p.cantidad} {p.ticker.replace(/\.SN$/, '')}
+                  </span>
+                  <span className="text-zinc-700 dark:text-[#d4d4d8]">a ~{dinero(p.precio)} ≈ {dinero(p.cantidad * p.precio)}</span>
+                  <span className="text-xs text-zinc-500">avisada el {fechaCorta(p.hora.slice(0, 10))}{p.detalle ? ` · ${p.detalle}` : ''}</span>
+                </div>
+              ))}
+              <p className="text-[11px] text-zinc-500 dark:text-[#71717a]">
+                Responde en Telegram: ✅ si la hiciste tal cual, «cantidad precio» respondiendo al aviso si fue distinto, o ❌ si no la harás.
+                Mientras haya una sin respuesta, el bot no avisa nada nuevo.
+              </p>
+            </>
+          )}
+        </section>
+      )}
 
       <section className={`${tarjeta} p-4 space-y-3`}>
         <h3 className="text-sm font-bold text-zinc-900 dark:text-[#e4e4e7]">
@@ -327,11 +372,11 @@ export default function SimulacionTab() {
           <li>Ninguna acción pasa de {pct(limites.peso_maximo, 0)} de la cartera.</li>
           <li>Si el patrimonio cae {pct(limites.perdida_diaria_maxima, 0)} en un día, ese día no se compra nada.</li>
           <li>Una acción que cae {pct(limites.stop_loss, 0)} bajo su costo se vende. Es un freno ante una catástrofe, no parte del método medido.</li>
-          {!real && (
-            <li>Entre rebalanceos, una acción que sale de la lista se mantiene mientras siga cerca de la cabeza del ranking (entre las primeras 1,5 veces el largo de la lista): un cambio menor de puesto no obliga a vender hoy y volver a comprar mañana.</li>
-          )}
+          <li>Entre rebalanceos, una acción que sale de la lista se mantiene mientras siga cerca de la cabeza del ranking (entre las primeras 1,5 veces el largo de la lista): un cambio menor de puesto no obliga a vender hoy y volver a comprar mañana.</li>
           <li>Sin margen ni ventas en corto: solo se gasta el efectivo que hay.</li>
-          {real ? (
+          {realcl ? (
+            <li>Solo acciones enteras. Cada orden espera tu respuesta en Telegram; si pasa un día sin ella, el bot te la recuerda.</li>
+          ) : real ? (
             <li>Invierte como máximo {estado.tope ? dinero(estado.tope) : 'el tope que fijaste'}: si la cuenta tiene más, el resto queda en efectivo. Trata toda la cuenta como suya: no compres a mano en ella.</li>
           ) : chile ? (
             <li>Solo acciones enteras, como en una corredora chilena.</li>
@@ -344,7 +389,12 @@ export default function SimulacionTab() {
       <details className="text-[11px] text-zinc-500 dark:text-[#71717a]">
         <summary className="cursor-pointer flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> {real ? 'Antes de confiar en estos números' : 'Límites de la simulación'}</summary>
         <ul className="mt-2 space-y-1 list-disc pl-4">
-          {real ? (
+          {realcl ? (
+            <>
+              <li>El libro anota el precio que confirmas y estima la comisión en 0,3%; si tu corredora cobra otra, el efectivo real puede diferir un poco.</li>
+              <li>Si haces algo distinto de lo avisado sin contárselo al bot, el libro deja de coincidir con tu cuenta: escríbele /cartera para ver lo que cree que tienes.</li>
+            </>
+          ) : real ? (
             <>
               <li>Alpaca no cobra comisión por comprar o vender acciones; solo descuenta cargos regulatorios ínfimos en las ventas.</li>
               <li>Las ganancias de acciones de EE.UU. se declaran en Chile; los dividendos llegan con la retención de EE.UU. ya descontada.</li>

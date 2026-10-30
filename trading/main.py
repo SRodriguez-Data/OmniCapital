@@ -1,17 +1,19 @@
 """El Top v2 operado automáticamente: el de EE.UU. en Alpaca (la cuenta de paper o, con --real, la de dinero real)
-y el de Chile en una cuenta simulada con los precios de la Bolsa de Santiago (Alpaca no opera acciones chilenas).
+y el de Chile en una cuenta simulada con los precios de la Bolsa de Santiago (Alpaca no opera acciones chilenas) o,
+con --real, en la cuenta del dueño en su corredora, a la que el bot le avisa cada orden por Telegram (core/manual.py).
 
 Cada corrida revisa los stops y aplica el freno diario. Una vez al mes lleva la cartera a las ideas del último
-escaneo del Top, con el peso que el escaneo le da a cada una (cartera.py). En las simulaciones el bot además opera cuando quiere, en cualquier corrida: vende
-la acción que sale de la lista (y de su margen en el ranking), compra la que entra y corrige un peso muy desviado. La
-cuenta real solo opera en el rebalanceo mensual. Correrla varias veces el mismo día no duplica órdenes: si una corrida
-se corta a la mitad, la siguiente termina lo pendiente.
+escaneo del Top, con el peso que el escaneo le da a cada una (cartera.py). Entre rebalanceos el bot opera cuando
+quiere, en cualquier corrida: vende la acción que sale de la lista (y de su margen en el ranking), compra la que entra
+el mismo día y corrige un peso muy desviado (si una acción cae y queda muy bajo su peso, compra más). Correrla varias
+veces el mismo día no duplica órdenes: si una corrida se corta a la mitad, la siguiente termina lo pendiente.
 
-    python -m trading.main                           # muestra qué haría en la cuenta de paper, sin enviar nada
-    python -m trading.main --enviar                  # envía las órdenes a la cuenta de paper (lo usa GitHub Actions)
-    python -m trading.main --mercado chile --enviar  # opera la cuenta simulada de la Bolsa de Santiago
-    python -m trading.main --real                    # lo mismo con la cuenta real: solo muestra el plan
-    python -m trading.main --real --enviar           # opera con dinero real, hasta ALPACA_REAL_TOPE_USD
+    python -m trading.main                                   # muestra qué haría en la cuenta de paper, sin enviar nada
+    python -m trading.main --enviar                          # envía las órdenes a la cuenta de paper (lo usa GitHub Actions)
+    python -m trading.main --mercado chile --enviar          # opera la cuenta simulada de la Bolsa de Santiago
+    python -m trading.main --real                            # lo mismo con la cuenta real: solo muestra el plan
+    python -m trading.main --real --enviar                   # opera con dinero real, hasta ALPACA_REAL_TOPE_USD
+    python -m trading.main --mercado chile --real --enviar   # avisa por Telegram las órdenes de tu cuenta de Chile
 
 En modo real el log no muestra montos: los logs de GitHub Actions de un repositorio público los ve cualquiera.
 """
@@ -29,8 +31,10 @@ from supabase import create_client
 from trading.core import risk
 from trading.core.broker import CLAVES, FINALES, Broker, ErrorConfiguracion, estado, hace, inicio_de_mes
 from trading.core.plan import Orden, planificar
-from trading.core.registro import TABLA_CHILE, TABLAS, guardar, ultimo_estado
+from trading.core.manual import BrokerManual
+from trading.core.registro import TABLA_CHILE, TABLA_CHILE_REAL, TABLAS, guardar, ultimo_estado
 from trading.core.simulado import BrokerSimulado
+from trading.core.telegram import Telegram
 from trading.strategies.momentum_chile import MomentumChile
 from trading.strategies.top_calidad import TopCalidad
 
@@ -90,19 +94,29 @@ def tope_real() -> int:
     return int(texto)
 
 
+def capital_chile() -> int:
+    """Los pesos que el dueño destina a la cuenta real de Chile (CHILE_REAL_TOPE_CLP). Es obligatorio."""
+    texto = os.getenv('CHILE_REAL_TOPE_CLP', '').strip()
+    if not texto.isdigit() or int(texto) <= 0:
+        raise ErrorConfiguracion('Falta CHILE_REAL_TOPE_CLP: los pesos que destinas a la cuenta de Chile, enteros y sin puntos '
+                                 '(por ejemplo 1000000).')
+    return int(texto)
+
+
 class Corrida:
     def __init__(self, broker: Broker, supabase, enviar: bool, tope: float | None = None, dueno: str | None = None,
-                 mercado: str = 'eeuu', continuo: bool | None = None):
+                 mercado: str = 'eeuu', continuo: bool = True):
         self.broker, self.supabase, self.enviar = broker, supabase, enviar
         self.real = broker.real
+        self.manual = getattr(broker, 'manual', False)   # las órdenes las ejecuta el dueño (avisos por Telegram)
         self.mercado = mercado
         self.chile = mercado == 'chile'
-        self.tabla = TABLA_CHILE if self.chile else TABLAS[self.real]
+        self.tabla = (TABLA_CHILE_REAL if self.real else TABLA_CHILE) if self.chile else TABLAS[self.real]
         self.tope, self.dueno = tope, dueno
         self.limites = risk.LIMITES_CHILE if self.chile else risk.Limites()
         self.estrategia = MomentumChile(supabase) if self.chile else TopCalidad(supabase)
-        # Las simulaciones operan cuando el bot quiere; la cuenta real, solo en el rebalanceo mensual
-        self.continuo = not self.real if continuo is None else continuo
+        # Con continuo=False solo se opera en el rebalanceo mensual
+        self.continuo = continuo
         self.moneda = getattr(broker, 'moneda', 'USD')
         self.reloj = broker.reloj()
         self.hoy = self.reloj.ahora.date()
@@ -131,9 +145,10 @@ class Corrida:
         for o in ordenes:
             try:
                 if o.lado == 'venta':
-                    enviadas.append(self.broker.vender(o.simbolo, o.cantidad, self.estrategia.nombre, o.motivo))
+                    enviadas.append(self.broker.vender(o.simbolo, o.cantidad, self.estrategia.nombre, o.motivo, detalle=o.detalle))
                 else:
-                    enviadas.append(self.broker.comprar(o.simbolo, o.monto, self.estrategia.nombre, o.motivo, precios.get(o.simbolo)))
+                    enviadas.append(self.broker.comprar(o.simbolo, o.monto, self.estrategia.nombre, o.motivo, precios.get(o.simbolo),
+                                                        detalle=o.detalle))
             except Exception as e:
                 self.errores += 1
                 logging.error(f'  {o.lado} {o.simbolo}: rechazada ({str(e)[:160]})')
@@ -145,7 +160,9 @@ class Corrida:
         m = MONEDA[self.moneda]
         bolsa = (f'Bolsa {"abierta" if self.reloj.abierto else "cerrada"} '
                  f'({self.reloj.ahora:%Y-%m-%d %H:%M} {"Santiago" if self.chile else "Nueva York"}).')
-        if self.real:
+        if self.manual:
+            logging.info(f'💵 Cuenta real de Chile: la operas tú en tu corredora y el bot te avisa cada orden por Telegram. {bolsa}')
+        elif self.real:
             logging.info(f'💵 Cuenta de DINERO REAL {cuenta.numero[:2]}…: se invierte hasta el tope fijado. {bolsa}')
         elif self.chile:
             logging.info(f'🇨🇱 Cuenta simulada de la Bolsa de Santiago: patrimonio {m} {cuenta.patrimonio:,.0f}, '
@@ -160,8 +177,14 @@ class Corrida:
         # Órdenes propias aún vivas (de otra corrida o llenándose de a poco): se espera a que terminen
         vivas = self.broker.ordenes(hace(5), self.estrategia.nombre, abiertas=True)
         if vivas:
-            logging.warning(f'Hay {len(vivas)} órdenes propias pendientes ({", ".join(o.symbol for o in vivas)}): se espera a que terminen.')
-            return 0
+            logging.warning(f'Hay {len(vivas)} órdenes propias pendientes ({", ".join(o.symbol for o in vivas)}): se espera a '
+                            f'{"que confirmes o descartes en Telegram" if self.manual else "que terminen"}.')
+            if not self.enviar:
+                return 0
+            if recordar := getattr(self.broker, 'recordar', None):
+                recordar()
+            # Se guarda igual: en la cuenta de Chile las respuestas ya anotadas viven en el libro de esa fila
+            return 1 if not self.guardar(None) and self.chile else 0
 
         posiciones = self.broker.posiciones()
         ventas = risk.stops(posiciones, self.limites)
@@ -216,6 +239,10 @@ class Corrida:
                     logging.info(f'Revisión de la cartera con {objetivo.descripcion}: {len(pesos)} acciones objetivo '
                                  f'(se mantienen las que sigan entre las primeras {len(mantener)} del ranking).')
 
+        if omitida := getattr(self.broker, 'omitida', None):
+            # Lo que el dueño descartó hoy en Telegram no se vuelve a pedir hasta mañana
+            ventas = [o for o in ventas if not omitida(o.simbolo, o.lado)]
+            compras = [o for o in compras if not omitida(o.simbolo, o.lado)]
         ventas = risk.ajustar_ventas(ventas, posiciones)
         # Para mostrar el plan se cuenta con el efectivo que liberan las ventas; al enviar se usa el real
         previstas = risk.ajustar_compras(compras, cuenta.efectivo + sum(o.monto for o in ventas), self.base(cuenta.patrimonio),
@@ -230,8 +257,9 @@ class Corrida:
             logging.info('Nada que operar.')
 
         if not self.enviar:
-            destino = 'REAL' if self.real else 'simulada de Chile' if self.chile else 'de paper'
-            logging.info(f'Modo revisión: no se envió nada. Con --enviar las órdenes van a la cuenta {destino}.')
+            destino = ('por Telegram, a tu cuenta de Chile' if self.manual else 'a la cuenta REAL' if self.real
+                       else 'a la cuenta simulada de Chile' if self.chile else 'a la cuenta de paper')
+            logging.info(f'Modo revisión: no se envió nada. Con --enviar las órdenes van {destino}.')
             return 0
         if not self.reloj.abierto:
             if ventas or previstas:
@@ -262,11 +290,13 @@ class Corrida:
         if objetivo and not objetivo.problema and not freno:
             if not ventas_listas:
                 # Las compras esperan a que se completen las ventas: la próxima corrida termina lo pendiente
-                logging.warning('Algunas ventas no se completaron a tiempo: las compras quedan para la próxima corrida.')
+                logging.warning('Las compras se avisan cuando confirmes las ventas.' if self.manual else
+                                'Algunas ventas no se completaron a tiempo: las compras quedan para la próxima corrida.')
             elif mensual:
                 rebalanceo = {'mes': self.hoy.strftime('%Y-%m'), 'fecha': self.hoy.isoformat(), 'descripcion': objetivo.descripcion}
                 n_v = sum(1 for o in vendidas if motivo(o) == 'reb')
-                self.evento('rebalanceo', f'Rebalanceo mensual hacia {objetivo.descripcion}: {n_v} ventas y {len(compradas)} compras.')
+                self.evento('rebalanceo', f'Rebalanceo mensual hacia {objetivo.descripcion}: ' + (
+                    f'se avisaron por Telegram {len(compradas)} compras.' if self.manual else f'{n_v} ventas y {len(compradas)} compras.'))
             elif texto := cambios(ventas + compras, hechas):
                 self.evento('cambio', texto)
         if not self.guardar(rebalanceo) and self.chile:
@@ -277,8 +307,10 @@ class Corrida:
 
     def guardar(self, rebalanceo: dict | None) -> bool:
         hecho = rebalanceo is not None or self.rebalanceo_hecho()
+        # Los avisos del broker (en Chile real: lo avisado, confirmado o descartado en Telegram) van antes que los de la corrida
+        eventos = getattr(self.broker, 'eventos', []) + self.eventos
         return guardar(self.supabase, self.tabla, self.broker, self.estrategia.nombre, self.estrategia.titulo, self.hoy,
-                       self.broker.cuenta(), self.broker.posiciones(), self.eventos, self.limites, rebalanceo,
+                       self.broker.cuenta(), self.broker.posiciones(), eventos, self.limites, rebalanceo,
                        (proximo_rebalanceo(self.hoy) if hecho else self.hoy).isoformat(), tope=self.tope, dueno=self.dueno,
                        mercado=self.mercado, continuo=self.continuo)
 
@@ -304,18 +336,22 @@ def main(enviar: bool, real: bool, mercado: str = 'eeuu') -> int:
         if not (os.getenv('SUPABASE_URL') and os.getenv('SUPABASE_SECRET_KEY')):
             raise ErrorConfiguracion('Faltan SUPABASE_URL y SUPABASE_SECRET_KEY.')
         supabase = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_SECRET_KEY'])
-        if mercado == 'chile':
-            if real:
-                raise ErrorConfiguracion('En Chile solo hay cuenta simulada: Alpaca no opera acciones chilenas.')
-            previo = ultimo_estado(supabase, TABLA_CHILE)
-            if previo is None:
-                raise ErrorConfiguracion(f'Falta la tabla {TABLA_CHILE}: ejecuta supabase/{TABLA_CHILE}.sql en el SQL Editor de Supabase.')
-            return Corrida(BrokerSimulado(previo.get('libro')), supabase, enviar, mercado='chile').correr()
-        tope = tope_real() if real else None
-        broker = Broker(real=real)
         # Quién ve la cuenta real en la web (user_id de Supabase); sin él se opera igual, pero la web no la muestra
-        dueno = (os.getenv('TRADING_REAL_USUARIO') or '').strip() if real else ''
-        return Corrida(broker, supabase, enviar, tope=tope, dueno=dueno or None).correr()
+        dueno = ((os.getenv('TRADING_REAL_USUARIO') or '').strip() if real else '') or None
+        if mercado == 'chile':
+            tabla = TABLA_CHILE_REAL if real else TABLA_CHILE
+            previo = ultimo_estado(supabase, tabla)
+            if previo is None:
+                raise ErrorConfiguracion(f'Falta la tabla {tabla}: ejecuta supabase/{tabla}.sql en el SQL Editor de Supabase.')
+            if not real:
+                return Corrida(BrokerSimulado(previo.get('libro')), supabase, enviar, mercado='chile').correr()
+            # Ninguna corredora chilena tiene API: el bot avisa cada orden por Telegram y anota lo que le confirmas
+            broker = BrokerManual(previo.get('libro'), capital_chile(), Telegram())
+            if enviar and (n := broker.procesar_respuestas()):
+                logging.info(f'Respuestas de Telegram anotadas: {n}.')
+            return Corrida(broker, supabase, enviar, dueno=dueno, mercado='chile').correr()
+        tope = tope_real() if real else None
+        return Corrida(Broker(real=real), supabase, enviar, tope=tope, dueno=dueno).correr()
     except ErrorConfiguracion as e:
         logging.error(f'❌ {e}')
         return 1
@@ -326,10 +362,10 @@ def main(enviar: bool, real: bool, mercado: str = 'eeuu') -> int:
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='El Top v2 operado: EE.UU. en Alpaca (paper, o dinero real con --real) '
-                                                 'y Chile en una cuenta simulada de la Bolsa de Santiago')
+    parser = argparse.ArgumentParser(description='El Top v2 operado: EE.UU. en Alpaca (paper, o dinero real con --real) y Chile '
+                                                 'en una cuenta simulada (o, con --real, avisos por Telegram para tu corredora)')
     parser.add_argument('--enviar', action='store_true', help='envía las órdenes (sin esto solo muestra el plan)')
-    parser.add_argument('--real', action='store_true', help='opera la cuenta de dinero real en vez de la de paper')
-    parser.add_argument('--mercado', choices=['eeuu', 'chile'], default='eeuu', help='eeuu (Alpaca) o chile (simulada)')
+    parser.add_argument('--real', action='store_true', help='la cuenta de dinero real en vez de la simulación')
+    parser.add_argument('--mercado', choices=['eeuu', 'chile'], default='eeuu', help='eeuu (Alpaca) o chile (Bolsa de Santiago)')
     args = parser.parse_args()
     sys.exit(main(args.enviar, args.real, args.mercado))

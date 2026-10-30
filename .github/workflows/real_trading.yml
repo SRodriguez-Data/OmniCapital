@@ -1,14 +1,19 @@
 name: Trading real (Top v2 con dinero de verdad)
 
-# Apagado hasta que la variable del repositorio TRADING_REAL valga "activo" (Settings → Secrets and variables →
-# Actions → Variables). Sin ella las corridas programadas se saltan y una manual solo puede mostrar el plan.
-# Necesita los secrets ALPACA_REAL_API_KEY, ALPACA_REAL_SECRET_KEY y ALPACA_REAL_TOPE_USD (y TRADING_REAL_USUARIO
-# para verla en la web). Apagarlo: borrar la variable o cambiarle el valor.
+# Dos cuentas, cada una apagada hasta que su variable de repositorio valga "activo" (Settings → Secrets and variables
+# → Actions → Variables). Sin ella las corridas se saltan y una manual solo puede mostrar el plan. Apagarla: borrar la
+# variable o cambiarle el valor.
+# - EE.UU. (TRADING_REAL): opera sola en Alpaca. Secrets ALPACA_REAL_API_KEY, ALPACA_REAL_SECRET_KEY y ALPACA_REAL_TOPE_USD.
+# - Chile (TRADING_REAL_CL): las corredoras chilenas no tienen API, así que el bot te avisa cada orden por Telegram, tú la
+#   haces en tu corredora y le respondes. Secrets TELEGRAM_TOKEN, TELEGRAM_CHAT_ID y CHILE_REAL_TOPE_CLP.
+# Ambas guardan su estado para la web con TRADING_REAL_USUARIO (tu user_id de Supabase): solo tú lo ves.
 
 on:
   schedule:
-    # Con la bolsa de Nueva York abierta: cuatro por si GitHub atrasa un cron; cada corrida es idempotente y solo la
-    # primera con la bolsa abierta rebalancea. A diferencia de la simulación, la cuenta real opera solo una vez al mes.
+    # GitHub atrasa estos cron hasta varias horas; el despertador de Supabase (supabase/despertador.sql) dispara el
+    # workflow a la hora exacta. Cada corrida es idempotente: una tardía o repetida no duplica órdenes. El bot decide en
+    # cada corrida, como la simulación; con la bolsa cerrada solo guarda el estado (y anota tus respuestas de Telegram)
+    - cron: '47 12 * * 1-5'
     - cron: '47 14 * * 1-5'
     - cron: '17 16 * * 1-5'
     - cron: '47 17 * * 1-5'
@@ -16,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       enviar:
-        description: 'Enviar órdenes con DINERO REAL (necesita TRADING_REAL = activo; si no, solo muestra el plan)'
+        description: 'Enviar órdenes con DINERO REAL (necesita la variable en "activo"; si no, solo muestra el plan)'
         type: boolean
         default: false
 
@@ -29,17 +34,17 @@ permissions:
   contents: read
 
 jobs:
-  operar:
+  eeuu:
     if: vars.TRADING_REAL == 'activo' || (github.event_name == 'workflow_dispatch' && !inputs.enviar)
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -54,7 +59,7 @@ jobs:
         run: python -m unittest discover -s trading/tests -t .
 
       # El log no muestra montos (el repositorio es público): el detalle queda en la web, solo para su dueño
-      - name: Run the strategy on the real account
+      - name: Run the strategy on the real US account (Alpaca)
         env:
           ALPACA_REAL_API_KEY: ${{ secrets.ALPACA_REAL_API_KEY }}
           ALPACA_REAL_SECRET_KEY: ${{ secrets.ALPACA_REAL_SECRET_KEY }}
@@ -63,3 +68,38 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: python -m trading.main --real ${{ vars.TRADING_REAL == 'activo' && (github.event_name == 'schedule' || inputs.enviar) && '--enviar' || '' }}
+
+  chile:
+    if: vars.TRADING_REAL_CL == 'activo' || (github.event_name == 'workflow_dispatch' && !inputs.enviar)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: trading/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r trading/requirements.txt
+
+      - name: Test the order plan and risk rules
+        run: python -m unittest discover -s trading/tests -t .
+
+      # Lee tus respuestas de Telegram, anota lo que confirmaste y avisa las órdenes nuevas. El log no muestra montos
+      - name: Run the strategy on your Chilean account (Telegram alerts)
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CHILE_REAL_TOPE_CLP: ${{ secrets.CHILE_REAL_TOPE_CLP }}
+          TRADING_REAL_USUARIO: ${{ secrets.TRADING_REAL_USUARIO }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python -m trading.main --mercado chile --real ${{ vars.TRADING_REAL_CL == 'activo' && (github.event_name == 'schedule' || inputs.enviar) && '--enviar' || '' }}
