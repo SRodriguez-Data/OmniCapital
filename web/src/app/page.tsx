@@ -14,19 +14,21 @@ import BacktestTab from './components/BacktestTab';
 import DataWarehouseTab from './components/DataWarehouseTab';
 import SimulacionTab from './components/SimulacionTab';
 import AvisosTab from './components/AvisosTab';
+import AsesorTab from './components/AsesorTab';
 import Portada from './components/Portada';
 import { useBienvenida } from './components/Bienvenida';
 import { LogoMarca, LogoNombre } from './components/Logo';
 import { ThemeToggle } from './components/ThemeToggle';
 import { RESORTE, SUAVE } from './components/Movimiento';
-import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History, LogOut, Database, FlaskConical, Siren, type LucideIcon } from 'lucide-react';
+import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History, LogOut, Database, FlaskConical, Siren, Sparkles, type LucideIcon } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { usePortfolio } from './context/PortfolioContext';
 
-type Pestana = 'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA' | 'AVISOS' | 'TOP5' | 'DIVIDENDOS' | 'BACKTEST' | 'SIMULACION' | 'DATA_WAREHOUSE';
+type Pestana = 'ASESOR' | 'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA' | 'AVISOS' | 'TOP5' | 'DIVIDENDOS' | 'BACKTEST' | 'SIMULACION' | 'DATA_WAREHOUSE';
 
 // `corto` es el nombre en el celular, donde no caben los largos. Las clases van completas para que Tailwind las vea
 const PESTANAS: { id: Pestana; codigo: string; nombre: string; corto: string; icono: LucideIcon; texto: string; linea: string }[] = [
+  { id: 'ASESOR', codigo: '★', nombre: 'Tu Asesor', corto: 'Asesor', icono: Sparkles, texto: 'text-emerald-600 dark:text-emerald-400', linea: 'bg-emerald-500' },
   { id: 'DATA_WAREHOUSE', codigo: '00', nombre: 'DATA WAREHOUSE', corto: 'Datos', icono: Database, texto: 'text-orange-600 dark:text-orange-400', linea: 'bg-orange-500' },
   { id: 'PORTFOLIO', codigo: '01', nombre: 'Mi Portafolio', corto: 'Portafolio', icono: Briefcase, texto: 'text-blue-600 dark:text-blue-400', linea: 'bg-blue-500' },
   { id: 'RECOMENDACIONES', codigo: '02', nombre: 'Mi Diagnóstico IA', corto: 'Diagnóstico', icono: Activity, texto: 'text-indigo-600 dark:text-indigo-400', linea: 'bg-indigo-500' },
@@ -62,11 +64,11 @@ const BOTON: Variants = {
 };
 
 const VISTA_PENDIENTE = 'omnicapital_vista_pendiente';
-// Enlaces de los avisos de Telegram: /?vista=rebalancear y /?vista=avisos
-const VISTAS: Record<string, Pestana> = { rebalancear: 'CALCULADORA', avisos: 'AVISOS' };
+// Enlaces de los avisos (Telegram y el celular): /?vista=asesor, /?vista=rebalancear y /?vista=avisos
+const VISTAS: Record<string, Pestana> = { asesor: 'ASESOR', rebalancear: 'CALCULADORA', avisos: 'AVISOS' };
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<Pestana>('DATA_WAREHOUSE');
+  const [activeTab, setActiveTab] = useState<Pestana>('ASESOR');
   const [direccion, setDireccion] = useState(0);
   const [session, setSession] = useState<{ user: { id: string; email?: string } } | null>(null);
   // Sin sesión se muestra la portada (components/Portada.tsx), que lleva al demo o al login
@@ -157,7 +159,7 @@ export default function Home() {
     setSession(null);
     setSinSesion(true);
     setDireccion(0);
-    setActiveTab('DATA_WAREHOUSE');
+    setActiveTab('ASESOR');
     window.scrollTo({ top: 0 });
   };
 
@@ -299,6 +301,7 @@ export default function Home() {
               exit="sale"
               className={`${listo ? 'entrada-escalonada' : ''} p-3 sm:p-4 md:p-6 max-w-[1600px] mx-auto`}
             >
+              {activeTab === 'ASESOR' && <AsesorTab irA={cambiarPestana} />}
               {activeTab === 'DATA_WAREHOUSE' && <DataWarehouseTab onPortfolioUpdate={() => cambiarPestana('PORTFOLIO')} />}
               {activeTab === 'PORTFOLIO' && <PortfolioTab />}
               {activeTab === 'RECOMENDACIONES' && <RecommendationsTab />}

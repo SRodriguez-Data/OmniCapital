@@ -148,9 +148,10 @@ function recortarArriba(valores: { ticker: string; valor: number }[], monto: num
 export function planRebalanceo(
   report: AdvisorReport,
   modelo: RiskModel,
-  { metaChile = META_CHILE_DEFECTO, aporteCLP = 0, fraccionar = true, proteccion = 'avisar', nivel = null, ideas = null, precios = new Map() }:
+  { metaChile = META_CHILE_DEFECTO, aporteCLP = 0, fraccionar = true, proteccion = 'avisar', nivel = null, ideas = null, precios = new Map(), frenos = new Map() }:
     {
       metaChile?: number; aporteCLP?: number; fraccionar?: boolean; proteccion?: Proteccion;
+      frenos?: Map<string, string>; // ticker → por qué no se compra (un hecho relevante grave)
       // Para reinvertir como el aporte del mes: el nivel de riesgo del perfil, las ideas del bot y sus precios
       nivel?: NivelRiesgo | null; ideas?: IdeasDelBot | null; precios?: Map<string, { price: number; name?: string; time?: string }>;
     } = {},
@@ -275,6 +276,7 @@ export function planRebalanceo(
   const sectorLleno = (nombre: string) => sectoresReducidos.has(nombre) || (sectoresAntes.find(s => s.nombre === nombre)?.peso ?? 0) >= LIMITE_SECTOR - MARGEN;
   const excluir = (a: AssetReport): string | null => {
     if (vendidas.has(a.ticker)) return 'Se vende en este rebalanceo.';
+    if (frenos.has(a.ticker)) return frenos.get(a.ticker)!;
     const rojo = proteccion !== 'avisar' ? semaforoRojoDe(a, semaforos) : null;
     if (rojo) return `${rojo.nombre} está en zona roja: no se compra ahí hasta que vuelva a verde (si ${rojo.clave === 'chile' ? 'el fondo del IPSA' : 'el índice'} cierra sobre ${fmtNivel(rojo, rojo.cambiaEn)}).`;
     if (a.moneda === 'CLP' && chileLleno) return `Chile queda en ${pct(chileDespuesVentas, 0)} de tu patrimonio (meta hasta ${pct(metaChile, 0)}): lo vendido se invierte fuera de Chile.`;
@@ -297,7 +299,7 @@ export function planRebalanceo(
 
   if (nucleoTop) {
     // Lo vendido (y el aporte) se invierte como el aporte del mes, sobre la cartera que queda después de vender
-    const bloqueados = new Map([...vendidas.keys()].map(t => [t, 'Se vende en este rebalanceo.']));
+    const bloqueados = new Map([...frenos, ...[...vendidas.keys()].map(t => [t, 'Se vende en este rebalanceo.'] as [string, string])]);
     const sectores = sectoresAntes.map(s => ({ nombre: s.nombre, peso: sectoresReducidos.has(s.nombre) ? 1 : sectorTras(s.nombre) }));
     const pa = presupuesto > 0 ? planAporte({
       montoCLP: presupuesto, usdClp, valorCLP: V - ventasCLP, chileCLP: Math.max(0, chileTras()) * V,

@@ -60,6 +60,7 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           AGENTE_USUARIO: ${{ secrets.TRADING_REAL_USUARIO }}
+          SEC_CONTACTO: ${{ secrets.SEC_CONTACTO }}
 
       - name: Alert by Telegram if the run failed
         if: failure()
@@ -68,7 +69,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           CORRIDA: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          TEXTO="⚠️ El agente de cartera no pudo revisar tu cartera hoy. El plan sigue en la app (Optimizador → Rebalancear). Detalle: ${CORRIDA}"
+          TEXTO="⚠️ El agente de cartera no pudo revisar tu cartera hoy. El plan sigue en la app (pestaña Asesor). Detalle: ${CORRIDA}"
           curl -s -o /dev/null --max-time 30 "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
             --data-urlencode "text=${TEXTO}"

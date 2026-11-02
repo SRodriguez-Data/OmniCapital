@@ -55,10 +55,42 @@ const sinSufijo = (t: string) => t.replace(/\.SN$/, '');
 
 const campo = 'w-full bg-zinc-50 dark:bg-[#09090b] border border-zinc-300 dark:border-[#3f3f46] text-zinc-900 dark:text-[#e4e4e7] p-3 font-mono focus:outline-none focus:border-[#60a5fa]';
 
-type Registrar = (o: Orden, cantidad: number, precio: number, fecha: string) => Promise<void>;
+// Lo mínimo de una orden para registrarla (la usa también la pestaña Asesor)
+export type OrdenRegistro = Pick<Orden, 'ticker' | 'lado' | 'moneda' | 'cantidad' | 'precio'>;
+export type Registrar = (o: OrdenRegistro, cantidad: number, precio: number, fecha: string) => Promise<void>;
+
+// Guarda en la cartera lo ejecutado: en la cuenta (API, con tu sesión) o, en modo cartola, en este navegador. En el
+// demo no hay dónde guardar: devuelve null
+export function useRegistrar(): Registrar | null {
+  const { items, isDemo, isCartolaMode, setItems, refreshPortfolio } = usePortfolio();
+  if (isDemo) return null;
+  return async (o, cantidad, precio, fecha) => {
+    const e = leerEjecucion(o.lado === 'VENDER'
+      ? { ticker: o.ticker, lado: 'VENDER', cantidad }
+      : { ticker: o.ticker, lado: 'COMPRAR', cantidad, precio, moneda: o.moneda, fecha });
+    if ('error' in e) throw new Error(e.error);
+    if (isCartolaMode) {
+      const lotes = items.map(i => ({ ...i, purchase_date: i.purchase_date || null }));
+      const cambios = cambiosPorEjecucion(lotes, e);
+      if ('error' in cambios) throw new Error(cambios.error);
+      setItems(aplicarCambios(lotes, cambios, () => `cartola-${crypto.randomUUID()}`).map(i => ({ ...i, purchase_date: i.purchase_date ?? '' })));
+      return;
+    }
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Inicia sesión para guardar operaciones.');
+    const res = await fetch('/api/portfolio/ejecucion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify(e),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok) throw new Error(data?.error || `No se pudo guardar (error ${res.status}).`);
+    await refreshPortfolio();
+  };
+}
 
 // Lo que de verdad se ejecutó en la corredora: cantidad (y, en una compra, precio y fecha) parten del plan
-function FormRegistro({ o, registrar, onListo }: { o: Orden; registrar: Registrar; onListo: () => void }) {
+export function FormRegistro({ o, registrar, onListo }: { o: OrdenRegistro; registrar: Registrar; onListo: () => void }) {
   const venta = o.lado === 'VENDER';
   const [cant, setCant] = useState(String(o.cantidad));
   const [px, setPx] = useState(String(o.precio));
@@ -187,7 +219,8 @@ function TablaOrdenes({ titulo, ordenes, icono, registrar, registradas, marcar }
 }
 
 export default function RebalanceoPanel() {
-  const { items, isDemo, isCartolaMode, setItems, refreshPortfolio } = usePortfolio();
+  const { items, isDemo } = usePortfolio();
+  const registrar = useRegistrar();
   const [registradas, setRegistradas] = useState<Set<string>>(new Set());
   const [metaChile, setMetaChile] = useState<number>(META_CHILE_DEFECTO);
   const [proteccion, setProteccion] = useState<Proteccion>('avisar');
@@ -216,30 +249,6 @@ export default function RebalanceoPanel() {
     return () => { vigente = false; };
   }, []);
 
-  // Guarda en la cartera lo ejecutado: en la cuenta (API, con tu sesión) o, en modo cartola, en este navegador
-  const registrar: Registrar = async (o, cantidad, precio, fecha) => {
-    const e = leerEjecucion(o.lado === 'VENDER'
-      ? { ticker: o.ticker, lado: 'VENDER', cantidad }
-      : { ticker: o.ticker, lado: 'COMPRAR', cantidad, precio, moneda: o.moneda, fecha });
-    if ('error' in e) throw new Error(e.error);
-    if (isCartolaMode) {
-      const lotes = items.map(i => ({ ...i, purchase_date: i.purchase_date || null }));
-      const cambios = cambiosPorEjecucion(lotes, e);
-      if ('error' in cambios) throw new Error(cambios.error);
-      setItems(aplicarCambios(lotes, cambios, () => `cartola-${crypto.randomUUID()}`).map(i => ({ ...i, purchase_date: i.purchase_date ?? '' })));
-      return;
-    }
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('Inicia sesión para guardar operaciones.');
-    const res = await fetch('/api/portfolio/ejecucion', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-      body: JSON.stringify(e),
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok || !data?.ok) throw new Error(data?.error || `No se pudo guardar (error ${res.status}).`);
-    await refreshPortfolio();
-  };
   const marcar = (clave: string) => setRegistradas(prev => new Set(prev).add(clave));
 
   const calcular = async (e: React.FormEvent) => {
@@ -346,9 +355,9 @@ export default function RebalanceoPanel() {
             <p className="text-xs text-emerald-700 dark:text-emerald-400">Tu cartera ya cambió: vuelve a calcular cuando termines para ver el plan al día.</p>
           )}
           <TablaOrdenes titulo={`Vender (${pesos(plan.ventasCLP)})`} ordenes={plan.ventas} icono={<ArrowDownRight className="w-4 h-4 text-[#f87171]" />}
-            registrar={isDemo ? null : registrar} registradas={registradas} marcar={marcar} />
+            registrar={registrar} registradas={registradas} marcar={marcar} />
           <TablaOrdenes titulo={`Comprar (${pesos(plan.comprasCLP)})`} ordenes={plan.compras} icono={<ArrowUpRight className="w-4 h-4 text-[#34d399]" />}
-            registrar={isDemo ? null : registrar} registradas={registradas} marcar={marcar} />
+            registrar={registrar} registradas={registradas} marcar={marcar} />
           {plan.motivoSinInvertir && (
             <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30 rounded p-3">
               Quedan {pesos(plan.sinInvertirCLP)} sin invertir: {plan.motivoSinInvertir}

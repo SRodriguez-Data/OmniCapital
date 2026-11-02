@@ -1,5 +1,6 @@
 import { buildAdvisorReport, fmtMoney, type Accion, type AdvisorReport, type HoldingInput } from './advisor';
 import { NUCLEO, planAporte, type PlanAporte } from './aporte';
+import { frenosPorEventos, type EventoSec } from './eventos';
 import { ideasDelBot, type IdeasDelBot } from './ideas';
 import { liveQuotes } from './marketData';
 import { metaChileDe, nivelDe, proteccionDe, type NivelRiesgo, type PerfilInversionista } from './perfil';
@@ -25,6 +26,7 @@ export interface AsesorDelDia {
   aporte: PlanAporte | null;
   rebalanceo: PlanRebalanceo;
   ideas: IdeasDelBot | null;
+  frenos: { ticker: string; motivo: string }[]; // empresas que no se compran por un hecho relevante grave
 }
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -71,7 +73,7 @@ export async function preciosIdeas(ideas: IdeasDelBot | null, report: AdvisorRep
 export async function asesorDelDia(
   items: HoldingInput[],
   perfil: PerfilInversionista | null,
-  { montoCLP, fraccionar = true }: { montoCLP?: number | null; fraccionar?: boolean } = {},
+  { montoCLP, fraccionar = true, eventos = null }: { montoCLP?: number | null; fraccionar?: boolean; eventos?: Record<string, EventoSec[]> | null } = {},
 ): Promise<{ asesor: AsesorDelDia; report: AdvisorReport }> {
   const nivel = nivelDe(perfil);
   const [ideas, oportunidades] = await Promise.all([
@@ -83,7 +85,8 @@ export async function asesorDelDia(
   const metaChile = metaChileDe(perfil);
   const proteccion = proteccionDe(perfil);
   const semaforos = report.mercado?.semaforos ?? [];
-  const rebalanceo = planRebalanceo(report, modelo, { metaChile, fraccionar, proteccion, nivel, ideas, precios });
+  const frenos = frenosPorEventos(eventos, report.generado.slice(0, 10));
+  const rebalanceo = planRebalanceo(report, modelo, { metaChile, fraccionar, proteccion, nivel, ideas, precios, frenos });
 
   // El aporte se calcula sobre la cartera que deja el rebalanceo: así no repite las mismas ideas del Top y no compra en
   // Chile mientras se está reduciendo. Si no haces el rebalanceo, sus compras siguen siendo del Top.
@@ -107,7 +110,7 @@ export async function asesorDelDia(
     chileCLP: Math.max(0, chileCLP), posiciones: [...tras.values()],
     sectores: report.exposicion.sectores, ideas, precios, nivel, metaChile, semaforos, proteccion, fraccionar,
     // Lo que el rebalanceo vende no se recompra con el aporte
-    bloqueados: new Map(rebalanceo.ventas.map(o => [o.ticker, 'Se vende en el rebalanceo de hoy.'])),
+    bloqueados: new Map([...frenos, ...rebalanceo.ventas.map(o => [o.ticker, 'Se vende en el rebalanceo de hoy.'] as [string, string])]),
     sinChile: rebalanceo.ventas.some(o => o.moneda === 'CLP') && rebalanceo.antes.chile > metaChile
       ? `Chile es ${Math.round(rebalanceo.antes.chile * 100)}% de tu patrimonio y tu máximo es ${Math.round(metaChile * 100)}%: el aporte va completo a EE.UU.` : null,
     hoy: report.generado.slice(0, 10),
@@ -118,6 +121,7 @@ export async function asesorDelDia(
       generado: report.generado, nivel, aporteMensual: perfil?.aporteMensual ?? null,
       veredicto: veredictoDe(aporte, rebalanceo, report.generado.slice(0, 10)),
       aporte, rebalanceo, ideas,
+      frenos: [...frenos].map(([ticker, motivo]) => ({ ticker, motivo })),
     },
     report,
   };

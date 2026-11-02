@@ -5,6 +5,7 @@
  *   - empezó un mes: qué comprar con tu aporte (núcleo + Top medido, según tu perfil),
  *   - cambió el plan (aparece o desaparece una venta o una compra),
  *   - un precio quedó a menos de 3% de un nivel que cambia la decisión,
+ *   - una de tus empresas de EE.UU. presentó a la SEC un hecho relevante que conviene mirar (src/lib/eventos.ts),
  *   - hay un aviso nuevo (src/lib/avisos.ts): un mercado pasó a rojo, se acercó a la zona roja o volvió a verde, o una
  *     posición devolvió la mitad o más de su mejor ganancia,
  *   - el primer día hábil de la semana (o si pasó una semana sin avisos), con el resumen,
@@ -21,12 +22,14 @@
  *   npx tsx scripts/agente-cartera.ts --prueba   # no envía ni guarda: muestra el mensaje (solo en tu computador)
  *
  * Variables: SUPABASE_URL, SUPABASE_SECRET_KEY, TELEGRAM_TOKEN y TELEGRAM_CHAT_ID; si hay carteras de más de un
- * usuario, AGENTE_USUARIO (el user_id de Supabase del dueño). En tu computador las toma del .env de la raíz.
+ * usuario, AGENTE_USUARIO (el user_id de Supabase del dueño); SEC_CONTACTO para leer los hechos relevantes (sin ella se
+ * omiten). En tu computador las toma del .env de la raíz.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { AsesorDelDia } from '../src/lib/asesor';
+import type { EventoSec } from '../src/lib/eventos';
 import type { Semaforo } from '../src/lib/proteccion';
 
 const APP = 'https://quantum-trader-app.vercel.app';
@@ -66,6 +69,7 @@ interface Estado {
   rojos: string[]; // mercados con el semáforo en rojo
   ultimoAviso: string | null;
   mesAporte: string | null; // YYYY-MM del último aviso del aporte del mes
+  eventosVistos: string[]; // hechos relevantes ya avisados (su enlace)
 }
 
 const hoyEnChile = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
@@ -90,7 +94,7 @@ async function leerEstado(db: SupabaseClient, usuario: string): Promise<{ estado
   const d = data?.datos as Partial<Estado> | undefined;
   return {
     estado: d?.fecha
-      ? { fecha: d.fecha, firma: d.firma ?? [], cerca: d.cerca ?? [], avisos: d.avisos ?? [], rojos: d.rojos ?? [], ultimoAviso: d.ultimoAviso ?? null, mesAporte: d.mesAporte ?? null }
+      ? { fecha: d.fecha, firma: d.firma ?? [], cerca: d.cerca ?? [], avisos: d.avisos ?? [], rojos: d.rojos ?? [], ultimoAviso: d.ultimoAviso ?? null, mesAporte: d.mesAporte ?? null, eventosVistos: d.eventosVistos ?? [] }
       : null,
     hayTabla: true,
   };
@@ -117,7 +121,7 @@ function lineaSemaforo(s: Semaforo, fmtNivel: (s: Semaforo, x: number) => string
 const VERBO: Record<AsesorDelDia['veredicto']['accion'], string> = { COMPRAR: '🟢 COMPRA', 'VENDER Y COMPRAR': '🔁 VENDE Y COMPRA', VENDER: '🔴 VENDE', MANTENER: '⚪ MANTÉN' };
 
 function mensaje(asesor: AsesorDelDia, motivos: string[], avisos: string[], verdes: Semaforo[], hoy: string,
-  fmtPrecio: (n: number, m: 'USD' | 'CLP') => string, fmtNivel: (s: Semaforo, x: number) => string): string {
+  fmtPrecio: (n: number, m: 'USD' | 'CLP') => string, fmtNivel: (s: Semaforo, x: number) => string, hechos: EventoSec[]): string {
   const plan = asesor.rebalanceo;
   const cantidad = (n: number) => n.toLocaleString('es-CL', { maximumFractionDigits: 4 });
   const [a, m, d] = hoy.split('-');
@@ -135,6 +139,15 @@ function mensaje(asesor: AsesorDelDia, motivos: string[], avisos: string[], verd
     const ev = ap.evidencia.top['EE.UU.'];
     if (ap.ordenes.some(o => o.papel === 'top' && o.mercado === 'EE.UU.') && ev) l.push(`<i>${esc(corto(ev, 260))}</i>`);
     for (const n of ap.notas.slice(0, 2)) l.push(`<i>${esc(corto(n, 220))}</i>`);
+  }
+
+  if (hechos.length) {
+    l.push('', '<b>📰 Hechos relevantes de tus empresas (SEC)</b>');
+    for (const e of hechos.slice(0, 5)) l.push(`${e.gravedad === 'grave' ? '🔴' : '🟡'} <b>${esc(e.ticker)}</b> ${e.fecha.slice(8, 10)}-${e.fecha.slice(5, 7)}: ${esc(corto(e.titulo, 160))} · <a href="${esc(e.url)}">ver</a>`);
+    if (hechos.some(e => e.gravedad === 'grave')) l.push('<i>Un hecho grave frena las compras de esa empresa por un mes, hasta que lo revises.</i>');
+  }
+  for (const f of asesor.frenos.filter(f => !hechos.some(e => e.ticker === f.ticker && e.gravedad === 'grave')).slice(0, 2)) {
+    l.push(`🔴 <b>${esc(f.ticker)}</b>: ${esc(corto(f.motivo, 200))}`);
   }
 
   if (plan.semaforos.length) {
@@ -237,7 +250,20 @@ async function main() {
   if ('error' in parsed) throw new Error(`La cartera guardada no es válida (${parsed.error.split(':')[0]}).`);
   const perfil = parsePerfil(perfilFila.data?.datos);
 
-  const { asesor, report } = await asesorDelDia(parsed.items, perfil);
+  // Hechos relevantes (SEC) de tus empresas de EE.UU. y de las ideas del Top: los graves frenan sus compras
+  const contacto = (process.env.SEC_CONTACTO ?? '').trim();
+  let eventos: Record<string, EventoSec[]> | null = null;
+  if (contacto) {
+    const [{ eventosSec }, { ideasDelBot }] = await Promise.all([import('../src/lib/eventos'), import('../src/lib/ideas')]);
+    const ideas = await ideasDelBot().catch(() => null);
+    eventos = await eventosSec([...parsed.items.map(i => i.ticker), ...(ideas?.us ?? []).map(i => i.ticker)], contacto, hoy)
+      .catch(e => { decir(`Sin hechos relevantes de la SEC hoy (${e instanceof Error ? e.message.slice(0, 80) : 'error'}).`); return null; });
+  }
+  const { asesor, report } = await asesorDelDia(parsed.items, perfil, { eventos });
+  const mias = new Set(parsed.items.map(i => i.ticker.toUpperCase()));
+  const hechos = Object.values(eventos ?? {}).flat()
+    .filter(e => mias.has(e.ticker) && e.gravedad !== 'info' && !(estado?.eventosVistos ?? []).includes(e.url))
+    .sort((a, b) => b.fecha.localeCompare(a.fecha));
   const plan = asesor.rebalanceo;
   const mes = hoy.slice(0, 7);
   const aporteNuevo = !!asesor.aporte?.ordenes.length && estado?.mesAporte !== mes;
@@ -253,6 +279,7 @@ async function main() {
   if (forzar) motivos.push('lo pediste');
   if (!estado) motivos.push('es la primera revisión');
   if (aporteNuevo) motivos.push('empezó el mes: esto compras con tu aporte');
+  if (hechos.length) motivos.push('una de tus empresas presentó un hecho relevante');
   if (estado) {
     if (firma.join('|') !== estado.firma.join('|')) motivos.push('cambió el plan');
     if (cerca.some(c => !estado.cerca.includes(c))) motivos.push('un precio se acercó a un nivel que cambia la decisión');
@@ -268,7 +295,7 @@ async function main() {
   const avisar = motivos.length > 0;
   // Sin el dólar observado se usa el del mercado (Yahoo), que basta para pesar la cartera: no vale un aviso diario
   const avisos = report.avisosDatos.filter(a => !/dólar observado/i.test(a));
-  const texto = mensaje(asesor, motivos.length ? motivos : ['sin novedades'], avisos, verdes, hoy, fmtPrecio, fmtNivel);
+  const texto = mensaje(asesor, motivos.length ? motivos : ['sin novedades'], avisos, verdes, hoy, fmtPrecio, fmtNivel, hechos);
 
   if (prueba) {
     decir(texto.replace(/<\/?[bi]>/g, ''));
@@ -280,6 +307,9 @@ async function main() {
     const datos = {
       fecha: hoy, firma, cerca, avisos: vigentes, ultimoAviso: avisar ? hoy : estado?.ultimoAviso ?? null,
       mesAporte: avisar && asesor.aporte?.ordenes.length ? mes : estado?.mesAporte ?? null,
+      // Los enlaces avisados (los de más de 60 días ya no vuelven en la consulta de 45)
+      eventosVistos: [...new Set([...(avisar ? hechos.map(e => e.url) : []), ...(estado?.eventosVistos ?? [])])].slice(0, 300),
+      eventos: eventos ? { fecha: hoy, porTicker: eventos } : null,
       // Un mercado sin dato hoy conserva el color de ayer: así no parece que "volvió a verde" por un dato que faltó
       rojos: [...new Set([...rojos, ...(estado?.rojos ?? []).filter(c => !plan.semaforos.some(s => s.clave === c))])].sort(),
       plan: {
