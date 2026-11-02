@@ -181,12 +181,12 @@ function TarjetaIdea({ i, noticias, eventos, tienes, enAporte, registrar }: {
       </div>
 
       <div className="grid grid-cols-3 gap-2 text-[11px] font-mono">
-        <div><p className="text-zinc-500 dark:text-[#71717a] uppercase">{i.mercado === 'Chile' ? 'Momentum' : 'PER'}</p><p className="text-zinc-900 dark:text-[#e4e4e7]">{i.mercado === 'Chile' ? (i.momentum !== null ? signo(i.momentum, 0) : '—') : (i.per ? i.per.toFixed(1) : '—')}</p></div>
+        <div><p className="text-zinc-500 dark:text-[#71717a] uppercase">{i.mercado === 'Chile' ? 'Momentum' : 'PER'}</p><p className="text-zinc-900 dark:text-[#e4e4e7]">{i.mercado === 'Chile' ? (i.momentum !== null ? signo(i.momentum, 0) : '—') : (i.per && i.per > 0 ? i.per.toFixed(1) : '—')}</p></div>
         <div><p className="text-zinc-500 dark:text-[#71717a] uppercase">Dividendo</p><p className="text-zinc-900 dark:text-[#e4e4e7]">{i.dividendo ?? '—'}</p></div>
         <div><p className="text-zinc-500 dark:text-[#71717a] uppercase">Resultados</p><p className="text-zinc-900 dark:text-[#e4e4e7]">{i.proximosResultados ? fecha(i.proximosResultados) : '—'}</p></div>
       </div>
 
-      {a && a.n > 0 && (
+      {a && a.n > 0 && a.recomendacion !== 'none' && (
         <p className="text-xs text-zinc-600 dark:text-[#a1a1aa]">
           <span className="font-mono uppercase text-[10px] text-zinc-500 dark:text-[#71717a]">Analistas ({a.n}): </span>
           <span className={`font-bold ${RECOMENDACION_COLOR(a.recomendacion)}`}>{a.recomendacion}</span>
