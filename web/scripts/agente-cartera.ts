@@ -4,6 +4,8 @@
  * por Telegram solo cuando hay algo que hacer o mirar:
  *   - cambió el plan (aparece o desaparece una venta o una compra),
  *   - un precio quedó a menos de 3% de un nivel que cambia la decisión,
+ *   - hay un aviso nuevo (src/lib/avisos.ts): un mercado pasó a rojo, se acercó a la zona roja o volvió a verde, o una
+ *     posición devolvió la mitad o más de su mejor ganancia,
  *   - el primer día hábil de la semana (o si pasó una semana sin avisos), con el resumen,
  *   - con --forzar, siempre.
  * Revisa una vez por día: si GitHub dispara también el horario de respaldo, esa corrida no hace nada. Lo avisado se
@@ -24,6 +26,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { PlanRebalanceo } from '../src/lib/rebalanceo';
+import type { Semaforo } from '../src/lib/proteccion';
 
 const APP = 'https://quantum-trader-app.vercel.app';
 const CERCA = 0.03;
@@ -58,6 +61,8 @@ interface Estado {
   fecha: string;
   firma: string[];
   cerca: string[];
+  avisos: string[]; // ids de los avisos vigentes (lib/avisos.ts)
+  rojos: string[]; // mercados con el semáforo en rojo
   ultimoAviso: string | null;
 }
 
@@ -82,7 +87,9 @@ async function leerEstado(db: SupabaseClient, usuario: string): Promise<{ estado
   }
   const d = data?.datos as Partial<Estado> | undefined;
   return {
-    estado: d?.fecha ? { fecha: d.fecha, firma: d.firma ?? [], cerca: d.cerca ?? [], ultimoAviso: d.ultimoAviso ?? null } : null,
+    estado: d?.fecha
+      ? { fecha: d.fecha, firma: d.firma ?? [], cerca: d.cerca ?? [], avisos: d.avisos ?? [], rojos: d.rojos ?? [], ultimoAviso: d.ultimoAviso ?? null }
+      : null,
     hayTabla: true,
   };
 }
@@ -96,12 +103,37 @@ const pct1 = (x: number) => `${(x * 100).toFixed(1)}%`;
 const pesos = (n: number) => `$${Math.round(n).toLocaleString('es-CL')}`;
 const corto = (s: string, max = 150) => (s.length <= max ? s : `${s.slice(0, s.lastIndexOf(' ', max))}…`);
 
-function mensaje(plan: PlanRebalanceo, motivos: string[], avisos: string[], hoy: string, fmtPrecio: (n: number, m: 'USD' | 'CLP') => string): string {
+const signo1 = (x: number) => `${x >= 0 ? '+' : '−'}${pct1(Math.abs(x)).replace('.', ',')}`;
+
+// Una línea por mercado: color, distancia a su media de 200 días y el cierre que lo cambiaría
+function lineaSemaforo(s: Semaforo, fmtNivel: (s: Semaforo, x: number) => string): string {
+  const nombre = s.nombre.replace(/^.*\((.*)\)$/, '$1');
+  const rojo = s.estado === 'rojo';
+  return `${rojo ? '🔴' : '🟢'} <b>${esc(nombre)}</b> ${signo1(s.distancia)} vs. su media · ${rojo ? 'verde si cierra sobre' : 'rojo si cierra bajo'} ${esc(fmtNivel(s, s.cambiaEn))} (${signo1(s.distanciaCambio)})`;
+}
+
+function mensaje(plan: PlanRebalanceo, motivos: string[], avisos: string[], verdes: Semaforo[], hoy: string,
+  fmtPrecio: (n: number, m: 'USD' | 'CLP') => string, fmtNivel: (s: Semaforo, x: number) => string): string {
   const cantidad = (n: number) => n.toLocaleString('es-CL', { maximumFractionDigits: 4 });
   const [a, m, d] = hoy.split('-');
   const l: string[] = [`<b>🧭 Tu cartera · ${d}-${m}-${a}</b>`];
   const sector = plan.antes.sector;
   l.push(`Valor ${pesos(plan.valorCLP)} · Chile ${pct0(plan.antes.chile)} (meta hasta ${pct0(plan.metaChile)})${sector ? ` · ${esc(sector.nombre)} ${pct0(sector.peso)} (máx. 35%)` : ''}`);
+
+  if (plan.semaforos.length) {
+    l.push('', '<b>🚦 Mercados</b>');
+    for (const s of plan.semaforos) l.push(lineaSemaforo(s, fmtNivel));
+  }
+  for (const s of verdes) {
+    l.push(`✅ <b>${esc(s.nombre)}</b> volvió a verde: si dejaste plata en refugio por la protección, ingrésala como aporte en el Optimizador para volver a invertirla.`);
+  }
+  const importantes = plan.avisos.filter(x => x.nivel !== 'info');
+  if (importantes.length) {
+    l.push('', '<b>⚠️ Avisos</b>');
+    for (const x of importantes.slice(0, 4)) {
+      l.push(`${x.nivel === 'alerta' ? '🔴' : '🟡'} <b>${esc(x.titulo)}</b>`, esc(corto(x.detalle, 320)), `→ ${esc(corto(x.queHacer, 340))}`);
+    }
+  }
 
   if (plan.ventas.length) {
     l.push('', '<b>🔴 Vender</b>');
@@ -125,6 +157,7 @@ function mensaje(plan: PlanRebalanceo, motivos: string[], avisos: string[], hoy:
   const mantener = plan.posturas.filter(p => p.accion === 'MANTENER').length;
   if (mantener) l.push(`⚪ Mantener: ${mantener} posiciones.`);
 
+  if (plan.refugioCLP > 0) l.push('', `🛟 ${pesos(plan.refugioCLP)} de las ventas van a refugio (depósito o money market), no a bolsa, hasta que su mercado vuelva a verde.`);
   if (plan.niveles.length) {
     l.push('', '<b>🎯 Precios que vigilo</b>');
     for (const n of plan.niveles.slice(0, 6)) l.push(`• <b>${sinSufijo(n.ticker)}</b>: ${esc(corto(n.texto, 200))}`);
@@ -135,6 +168,7 @@ function mensaje(plan: PlanRebalanceo, motivos: string[], avisos: string[], hoy:
     for (const a of avisos.slice(0, 3)) l.push(`• ${esc(corto(a, 200))}`);
   }
   l.push('', `<i>Te aviso porque: ${motivos.join(', ')}.</i>`,
+    `Avisos y semáforos: ${APP}/?vista=avisos`,
     `Plan completo y botón para registrar lo que ejecutes: ${APP}/?vista=rebalancear`);
 
   let texto = l.join('\n');
@@ -164,8 +198,8 @@ async function main() {
   const clave = requerida('SUPABASE_SECRET_KEY');
   process.env.NEXT_PUBLIC_SUPABASE_URL = url;
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = clave;
-  const [{ buildAdvisorReport }, { fmtPrecio, oportunidadesDelBot, planRebalanceo }, { metaChileDe, parsePerfil }, { parsePortfolioItems }] = await Promise.all([
-    import('../src/lib/advisor'), import('../src/lib/rebalanceo'), import('../src/lib/perfil'), import('../src/lib/validation'),
+  const [{ buildAdvisorReport }, { fmtPrecio, oportunidadesDelBot, planRebalanceo }, { metaChileDe, parsePerfil, proteccionDe }, { parsePortfolioItems }, { fmtNivel }] = await Promise.all([
+    import('../src/lib/advisor'), import('../src/lib/rebalanceo'), import('../src/lib/perfil'), import('../src/lib/validation'), import('../src/lib/avisos'),
   ]);
   const db = createClient(url, clave, { auth: { persistSession: false } });
 
@@ -189,17 +223,26 @@ async function main() {
 
   const oportunidades = await oportunidadesDelBot().catch(() => []);
   const { modelo, ...report } = await buildAdvisorReport(parsed.items, oportunidades, perfil);
-  const plan = planRebalanceo(report, modelo, { metaChile: metaChileDe(perfil), fraccionar: true });
+  const plan = planRebalanceo(report, modelo, { metaChile: metaChileDe(perfil), fraccionar: true, proteccion: proteccionDe(perfil) });
 
   // ¿Hay algo que avisar?
   const firma = [...plan.ventas, ...plan.compras].map(o => `${o.lado} ${o.ticker}`).sort();
   const cerca = plan.niveles.filter(n => Math.abs(n.distancia) <= CERCA).map(n => `${n.tipo} ${n.ticker}`).sort();
+  const vigentes = plan.avisos.filter(x => x.nivel !== 'info').map(x => x.id).sort();
+  const rojos = plan.semaforos.filter(s => s.estado === 'rojo').map(s => s.clave);
+  // Volvió a verde: estaba en rojo en la revisión anterior y hoy hay dato (sin dato no se concluye nada)
+  const verdes = plan.semaforos.filter(s => s.estado === 'verde' && estado?.rojos.includes(s.clave));
   const motivos: string[] = [];
   if (forzar) motivos.push('lo pediste');
   if (!estado) motivos.push('es la primera revisión');
   else {
     if (firma.join('|') !== estado.firma.join('|')) motivos.push('cambió el plan');
     if (cerca.some(c => !estado.cerca.includes(c))) motivos.push('un precio se acercó a un nivel que cambia la decisión');
+    const nuevos = plan.avisos.filter(x => x.nivel !== 'info' && !estado.avisos.includes(x.id));
+    if (nuevos.some(x => x.id.startsWith('rojo:'))) motivos.push('un mercado pasó a zona roja');
+    if (nuevos.some(x => x.id.startsWith('cerca:'))) motivos.push('un mercado se acercó a la zona roja');
+    if (nuevos.some(x => x.tipo === 'ganancia')) motivos.push('una posición devolvió buena parte de su ganancia');
+    if (verdes.length) motivos.push('un mercado volvió a verde');
     const primeraDeLaSemana = !estado.ultimoAviso || diasEntre(estado.ultimoAviso, hoy) >= 7
       || (new Date(`${hoy}T12:00:00Z`).getUTCDay() < new Date(`${estado.ultimoAviso}T12:00:00Z`).getUTCDay() && diasEntre(estado.ultimoAviso, hoy) > 0);
     if (primeraDeLaSemana) motivos.push('es el resumen de la semana');
@@ -207,7 +250,7 @@ async function main() {
   const avisar = motivos.length > 0;
   // Sin el dólar observado se usa el del mercado (Yahoo), que basta para pesar la cartera: no vale un aviso diario
   const avisos = report.avisosDatos.filter(a => !/dólar observado/i.test(a));
-  const texto = mensaje(plan, motivos.length ? motivos : ['sin novedades'], avisos, hoy, fmtPrecio);
+  const texto = mensaje(plan, motivos.length ? motivos : ['sin novedades'], avisos, verdes, hoy, fmtPrecio, fmtNivel);
 
   if (prueba) {
     decir(texto.replace(/<\/?[bi]>/g, ''));
@@ -217,10 +260,12 @@ async function main() {
   if (avisar) await enviarTelegram(texto);
   if (hayTabla) {
     const datos = {
-      fecha: hoy, firma, cerca, ultimoAviso: avisar ? hoy : estado?.ultimoAviso ?? null,
+      fecha: hoy, firma, cerca, avisos: vigentes, ultimoAviso: avisar ? hoy : estado?.ultimoAviso ?? null,
+      // Un mercado sin dato hoy conserva el color de ayer: así no parece que "volvió a verde" por un dato que faltó
+      rojos: [...new Set([...rojos, ...(estado?.rojos ?? []).filter(c => !plan.semaforos.some(s => s.clave === c))])].sort(),
       plan: {
         valorCLP: plan.valorCLP, metaChile: plan.metaChile, antes: plan.antes, despues: plan.despues,
-        ventas: plan.ventas, compras: plan.compras, niveles: plan.niveles,
+        ventas: plan.ventas, compras: plan.compras, niveles: plan.niveles, semaforos: plan.semaforos, refugioCLP: plan.refugioCLP,
       },
     };
     const { error } = await db.from('agente_cartera').upsert({ user_id: usuario, datos, actualizado: new Date().toISOString() });

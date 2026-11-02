@@ -1,5 +1,6 @@
 import { BENCH_CL, BENCH_GLOBAL, BENCH_US, FX_TICKER, dailyHistory, riskFreeRateClp, type DailyHistory } from './marketData';
 import { momentum, sma } from './quant';
+import { semaforo, type Semaforo } from './proteccion';
 
 // Contexto de mercado con reglas explícitas: tendencia de los grandes índices (precio sobre su media de 200 días
 // y momentum 12-1), nivel de miedo (VIX contra sus últimos 3 años), dólar, cobre y tasas.
@@ -23,6 +24,7 @@ export interface ContextoMercado {
   indicadores: Indicador[];
   vixPercentil: number | null;
   tpm: number;
+  semaforos: Semaforo[]; // EE.UU., tecnología y Chile, con la regla medida de lib/proteccion.ts
 }
 
 const pct = (x: number, d = 1) => `${(x * 100).toFixed(d)}%`;
@@ -43,14 +45,16 @@ function indicador(nombre: string, ticker: string, h: DailyHistory | null, unida
   return { nombre, ticker, valor, unidad, distSma200: dist, momentum: mom, cambio3m, caidaDesdeMaximo: max > 0 ? 1 - serie.at(-1)! / max : null, tendencia };
 }
 
+const NASDAQ_100 = '^NDX';
+
 let cache: { at: number; data: ContextoMercado } | null = null;
 
 export async function contextoMercado(): Promise<ContextoMercado | null> {
   if (cache && Date.now() - cache.at < 30 * 60 * 1000) return cache.data;
-  const [sp, ipsa, global, vix, fx, cobre, tasa10, tpm] = await Promise.all([
+  const [sp, ipsa, global, vix, fx, cobre, tasa10, tpm, ndx] = await Promise.all([
     dailyHistory(BENCH_US, 3 * 365), dailyHistory(BENCH_CL, 3 * 365), dailyHistory(BENCH_GLOBAL, 3 * 365),
     dailyHistory('^VIX', 3 * 365), dailyHistory(FX_TICKER, 3 * 365), dailyHistory('HG=F', 3 * 365), dailyHistory('^TNX', 3 * 365),
-    riskFreeRateClp(),
+    riskFreeRateClp(), dailyHistory(NASDAQ_100, 3 * 365),
   ]);
   const indicadores = [
     indicador('S&P 500', BENCH_US, sp, ''),
@@ -94,7 +98,14 @@ export async function contextoMercado(): Promise<ContextoMercado | null> {
     : regimen === 'defensivo'
       ? 'Mercado defensivo: las bolsas están en tendencia bajista o hay pánico'
       : 'Mercado mixto: las tendencias no están alineadas';
-  const data: ContextoMercado = { regimen, titulo, lecturas, indicadores, vixPercentil, tpm };
+  // Semáforos con cierres ajustados por dividendos (en los índices coinciden con el cierre; el IPSA es su ETF)
+  const semaforos = ([
+    ['eeuu', 'Bolsa de EE.UU. (S&P 500)', BENCH_US, sp],
+    ['tecnologia', 'Tecnología (Nasdaq-100)', NASDAQ_100, ndx],
+    ['chile', 'Bolsa chilena (IPSA)', BENCH_CL, ipsa],
+  ] as const).map(([clave, nombre, ticker, h]) => (h && h.fresh && !h.frozen ? semaforo(clave, nombre, ticker, h.dates, h.adj) : null))
+    .filter((x): x is Semaforo => x !== null);
+  const data: ContextoMercado = { regimen, titulo, lecturas, indicadores, vixPercentil, tpm, semaforos };
   cache = { at: Date.now(), data };
   return data;
 }

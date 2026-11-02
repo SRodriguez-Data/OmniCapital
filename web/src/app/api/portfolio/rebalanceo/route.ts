@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { parsePortfolioItems } from '@/lib/validation';
 import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 import { buildAdvisorReport } from '@/lib/advisor';
-import { METAS_CHILE, META_CHILE_DEFECTO } from '@/lib/perfil';
+import { METAS_CHILE, META_CHILE_DEFECTO, esProteccion } from '@/lib/perfil';
 import { oportunidadesDelBot, planRebalanceo } from '@/lib/rebalanceo';
 
 export const maxDuration = 60;
@@ -10,12 +10,12 @@ export const maxDuration = 60;
 const MAX_APORTE = 1e12;
 
 // Rebalanceo completo: qué vender, qué comprar con lo obtenido y a qué precio, más los precios que cambiarían la
-// decisión. Es el mismo cálculo que hace cada día el agente que avisa por Telegram (scripts/agente-cartera.ts).
+// decisión, los semáforos de mercado y los avisos de la cartera (la pestaña Avisos usa esta misma respuesta). Es el mismo cálculo que hace cada día el agente que avisa por Telegram (scripts/agente-cartera.ts).
 export async function POST(request: Request) {
   if (!rateLimit(request, 'rebalanceo', 15)) {
     return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
   }
-  let body: { items?: unknown; metaChile?: unknown; aporte?: unknown; fraccionar?: unknown };
+  let body: { items?: unknown; metaChile?: unknown; aporte?: unknown; fraccionar?: unknown; proteccion?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -35,7 +35,10 @@ export async function POST(request: Request) {
   try {
     const oportunidades = await oportunidadesDelBot().catch(() => []);
     const { modelo, ...report } = await buildAdvisorReport(parsed.items, oportunidades);
-    return NextResponse.json(planRebalanceo(report, modelo, { metaChile, aporteCLP: aporte, fraccionar: body?.fraccionar !== false }));
+    return NextResponse.json(planRebalanceo(report, modelo, {
+      metaChile, aporteCLP: aporte, fraccionar: body?.fraccionar !== false,
+      proteccion: esProteccion(body?.proteccion) ? body.proteccion : 'avisar',
+    }));
   } catch (err) {
     console.error('Error calculando el rebalanceo:', err);
     return NextResponse.json({ error: 'No se pudieron obtener los datos de mercado. Intenta de nuevo en unos minutos.' }, { status: 502 });

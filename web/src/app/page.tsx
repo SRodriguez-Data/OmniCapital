@@ -13,16 +13,17 @@ import NotificationBell from './components/NotificationBell';
 import BacktestTab from './components/BacktestTab';
 import DataWarehouseTab from './components/DataWarehouseTab';
 import SimulacionTab from './components/SimulacionTab';
+import AvisosTab from './components/AvisosTab';
 import Portada from './components/Portada';
 import { useBienvenida } from './components/Bienvenida';
 import { LogoMarca, LogoNombre } from './components/Logo';
 import { ThemeToggle } from './components/ThemeToggle';
 import { RESORTE, SUAVE } from './components/Movimiento';
-import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History, LogOut, Database, FlaskConical, type LucideIcon } from 'lucide-react';
+import { Briefcase, Activity, Search, Calculator, Target, DollarSign, History, LogOut, Database, FlaskConical, Siren, type LucideIcon } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { usePortfolio } from './context/PortfolioContext';
 
-type Pestana = 'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA' | 'TOP5' | 'DIVIDENDOS' | 'BACKTEST' | 'SIMULACION' | 'DATA_WAREHOUSE';
+type Pestana = 'PORTFOLIO' | 'RECOMENDACIONES' | 'BUSCADOR' | 'CALCULADORA' | 'AVISOS' | 'TOP5' | 'DIVIDENDOS' | 'BACKTEST' | 'SIMULACION' | 'DATA_WAREHOUSE';
 
 // `corto` es el nombre en el celular, donde no caben los largos. Las clases van completas para que Tailwind las vea
 const PESTANAS: { id: Pestana; codigo: string; nombre: string; corto: string; icono: LucideIcon; texto: string; linea: string }[] = [
@@ -33,8 +34,9 @@ const PESTANAS: { id: Pestana; codigo: string; nombre: string; corto: string; ic
   { id: 'DIVIDENDOS', codigo: '04', nombre: 'Ingresos Pasivos', corto: 'Dividendos', icono: DollarSign, texto: 'text-emerald-600 dark:text-emerald-400', linea: 'bg-emerald-500' },
   { id: 'BUSCADOR', codigo: '05', nombre: 'Buscador Límite', corto: 'Buscador', icono: Search, texto: 'text-cyan-600 dark:text-cyan-400', linea: 'bg-cyan-500' },
   { id: 'CALCULADORA', codigo: '06', nombre: 'Optimizador', corto: 'Optimizador', icono: Calculator, texto: 'text-amber-600 dark:text-amber-400', linea: 'bg-amber-500' },
-  { id: 'BACKTEST', codigo: '07', nombre: 'Backtesting', corto: 'Backtest', icono: History, texto: 'text-rose-600 dark:text-rose-400', linea: 'bg-rose-500' },
-  { id: 'SIMULACION', codigo: '08', nombre: 'Simulación', corto: 'Simulación', icono: FlaskConical, texto: 'text-purple-600 dark:text-purple-400', linea: 'bg-purple-500' },
+  { id: 'AVISOS', codigo: '07', nombre: 'Avisos', corto: 'Avisos', icono: Siren, texto: 'text-red-600 dark:text-red-400', linea: 'bg-red-500' },
+  { id: 'BACKTEST', codigo: '08', nombre: 'Backtesting', corto: 'Backtest', icono: History, texto: 'text-rose-600 dark:text-rose-400', linea: 'bg-rose-500' },
+  { id: 'SIMULACION', codigo: '09', nombre: 'Simulación', corto: 'Simulación', icono: FlaskConical, texto: 'text-purple-600 dark:text-purple-400', linea: 'bg-purple-500' },
 ];
 const posicion = (id: Pestana) => PESTANAS.findIndex(p => p.id === id);
 
@@ -60,6 +62,8 @@ const BOTON: Variants = {
 };
 
 const VISTA_PENDIENTE = 'omnicapital_vista_pendiente';
+// Enlaces de los avisos de Telegram: /?vista=rebalancear y /?vista=avisos
+const VISTAS: Record<string, Pestana> = { rebalancear: 'CALCULADORA', avisos: 'AVISOS' };
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Pestana>('DATA_WAREHOUSE');
@@ -105,15 +109,18 @@ export default function Home() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Enlace directo desde el aviso de Telegram: /?vista=rebalancear abre el Optimizador (que parte en el rebalanceo).
-  // Sin sesión, el login vuelve a "/" sin la URL: la vista pedida espera en esta pestaña hasta que haya sesión
+  // Enlace directo desde el aviso de Telegram: /?vista=rebalancear abre el Optimizador (que parte en el rebalanceo) y
+  // /?vista=avisos, los Avisos. Sin sesión, el login vuelve a "/" sin la URL: la vista pedida espera en esta pestaña
+  // hasta que haya sesión
   useEffect(() => {
-    let pendiente = false;
-    try { pendiente = sessionStorage.getItem(VISTA_PENDIENTE) === 'rebalancear'; } catch { /* sin almacenamiento */ }
-    if (new URLSearchParams(window.location.search).get('vista') !== 'rebalancear' && !pendiente) return;
+    let pendiente: string | null = null;
+    try { pendiente = sessionStorage.getItem(VISTA_PENDIENTE); } catch { /* sin almacenamiento */ }
+    const pedida = new URLSearchParams(window.location.search).get('vista');
+    const vista = pedida && VISTAS[pedida] ? pedida : pendiente && VISTAS[pendiente] ? pendiente : null;
+    if (!vista) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- la URL solo existe en el cliente, tras hidratar
-    setActiveTab('CALCULADORA');
-    try { sessionStorage.setItem(VISTA_PENDIENTE, 'rebalancear'); } catch { /* sin almacenamiento */ }
+    setActiveTab(VISTAS[vista]);
+    try { sessionStorage.setItem(VISTA_PENDIENTE, vista); } catch { /* sin almacenamiento */ }
   }, []);
   useEffect(() => {
     if (session) try { sessionStorage.removeItem(VISTA_PENDIENTE); } catch { /* sin almacenamiento */ }
@@ -299,6 +306,7 @@ export default function Home() {
               {activeTab === 'DIVIDENDOS' && <DividendsTab />}
               {activeTab === 'BUSCADOR' && <ScreenerTab />}
               {activeTab === 'CALCULADORA' && <SizingTab />}
+              {activeTab === 'AVISOS' && <AvisosTab irAlPlan={() => cambiarPestana('CALCULADORA')} />}
               {activeTab === 'BACKTEST' && <BacktestTab />}
               {activeTab === 'SIMULACION' && <SimulacionTab />}
             </motion.div>

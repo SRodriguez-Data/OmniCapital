@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { UserCheck } from 'lucide-react';
 import {
-  METAS_CHILE, PREGUNTAS, adecuacion, textoDe, type PerfilInversionista,
+  METAS_CHILE, PREGUNTAS, PROTECCIONES, adecuacion, textoDe, type PerfilInversionista, type Proteccion,
 } from '@/lib/perfil';
 
 // Cuestionario corto de perfil del inversionista. Las preguntas son las que la cartera no responde por sí sola:
@@ -41,6 +41,7 @@ export function PerfilInversionistaForm({ inicial, guardando, error, onGuardar, 
     experiencia: b.experiencia!, deudaCara: b.deudaCara!,
     aporteMensual: Number(b.aporteMensual.replace(/\D/g, '')) || null,
     metaChile: b.metaChile ?? null,
+    proteccion: b.proteccion ?? null,
   } : null;
   const nivel = perfil ? adecuacion(perfil).nivel : null;
 
@@ -93,6 +94,14 @@ export function PerfilInversionistaForm({ inicial, guardando, error, onGuardar, 
           <select className={campo} value={b.metaChile ?? ''} onChange={e => set('metaChile', e.target.value ? Number(e.target.value) : null)}>
             <option value="">Lo que sugiere el asesor (hasta 60%)</option>
             {METAS_CHILE.filter(m => m < 0.6).map(m => <option key={m} value={m}>Hasta {Math.round(m * 100)}%</option>)}
+          </select>
+        </Pregunta>
+        <Pregunta
+          titulo="Opcional: protección ante caídas. Si un mercado pasa a zona roja (cae bajo su tendencia), ¿qué hago?"
+          ayuda="Siempre deja de comprar ahí. Vender protege de las caídas grandes (medido: el S&P 500 cayó −19% en vez de −55%), pero cuesta algo de rentabilidad y a veces es falsa alarma."
+        >
+          <select className={campo} value={b.proteccion ?? 'avisar'} onChange={e => set('proteccion', e.target.value === 'avisar' ? null : e.target.value as Proteccion)}>
+            {PROTECCIONES.map(o => <option key={o.valor} value={o.valor}>{o.texto}</option>)}
           </select>
         </Pregunta>
       </div>

@@ -11,7 +11,8 @@ export type { Mercado, Nivel };
 export type ClaveRegla =
   | 'veredicto_alcista' | 'veredicto_bajista' | 'stop_roto' | 'estirado' | 'rsi30_alcista' | 'rsi30_bajista'
   | 'rsi70' | 'momentum_positivo' | 'momentum_negativo' | 'tendencia_alcista' | 'tendencia_bajista'
-  | 'calidad_alta' | 'calidad_baja' | 'payout_alto' | 'fundamental_favorable' | 'fundamental_debil';
+  | 'calidad_alta' | 'calidad_baja' | 'payout_alto' | 'fundamental_favorable' | 'fundamental_debil'
+  | 'maximo_52s' | 'devolvio_mitad';
 
 interface Medicion { exceso_promedio: number | null; t: number | null; acierto: number | null; casos: number }
 type PorHorizonte = Partial<Record<'3m' | '6m', Medicion>>;

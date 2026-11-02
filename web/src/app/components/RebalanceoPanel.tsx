@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { ArrowDownRight, ArrowUpRight, BellRing, CheckCircle2, Loader2, Scale, Target } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 import { supabase } from '@/lib/supabase';
-import { METAS_CHILE, META_CHILE_DEFECTO, parsePerfil } from '@/lib/perfil';
+import { METAS_CHILE, META_CHILE_DEFECTO, PROTECCIONES, parsePerfil, type Proteccion } from '@/lib/perfil';
 import { aplicarCambios, cambiosPorEjecucion, hoyEnChile, leerEjecucion } from '@/lib/ejecucion';
 
 // Rebalanceo completo (vender y comprar). El cálculo es el de lib/rebalanceo.ts, el mismo que usa el agente que avisa
@@ -34,6 +34,7 @@ interface Plan {
   ventasCLP: number;
   comprasCLP: number;
   aporteCLP: number;
+  refugioCLP: number;
   sinInvertirCLP: number;
   motivoSinInvertir: string | null;
   antes: { chile: number; sector: { nombre: string; peso: number } | null };
@@ -189,6 +190,7 @@ export default function RebalanceoPanel() {
   const { items, isDemo, isCartolaMode, setItems, refreshPortfolio } = usePortfolio();
   const [registradas, setRegistradas] = useState<Set<string>>(new Set());
   const [metaChile, setMetaChile] = useState<number>(META_CHILE_DEFECTO);
+  const [proteccion, setProteccion] = useState<Proteccion>('avisar');
   const [aporte, setAporte] = useState('');
   const [fraccionar, setFraccionar] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -204,8 +206,9 @@ export default function RebalanceoPanel() {
         const datos = session
           ? (await supabase.from('perfil_inversionista').select('datos').eq('user_id', session.user.id).maybeSingle()).data?.datos
           : JSON.parse(localStorage.getItem(PERFIL_LOCAL) ?? 'null');
-        const meta = parsePerfil(datos)?.metaChile;
-        if (vigente && meta) setMetaChile(meta);
+        const perfil = parsePerfil(datos);
+        if (vigente && perfil?.metaChile) setMetaChile(perfil.metaChile);
+        if (vigente && perfil?.proteccion) setProteccion(perfil.proteccion);
       } catch { /* sin perfil: queda la meta del asesor */ }
     })();
     return () => { vigente = false; };
@@ -248,7 +251,7 @@ export default function RebalanceoPanel() {
       const res = await fetch('/api/portfolio/rebalanceo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items, metaChile, aporte: Number(aporte.replace(/\D/g, '')) || 0, fraccionar }),
+        body: JSON.stringify({ items, metaChile, aporte: Number(aporte.replace(/\D/g, '')) || 0, fraccionar, proteccion }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data || data.error) throw new Error(data?.error || `El cálculo no respondió (error ${res.status}). Intenta de nuevo.`);
@@ -268,8 +271,8 @@ export default function RebalanceoPanel() {
           <div>
             <h2 className="text-lg font-sans font-bold tracking-tight text-zinc-900 dark:text-[#e4e4e7] uppercase tracking-wider">Rebalancear mi cartera</h2>
             <p className="text-zinc-600 dark:text-[#a1a1aa] text-xs font-sans">
-              Vende solo por cuatro razones: una señal de venta con evidencia medida en 10 años, una empresa o fondo sobre su máximo (20% / 40%),
-              un sector sobre 35% o Chile sobre tu meta. Recorta primero las posiciones más grandes y deja 2 puntos de holgura. Lo obtenido se
+              Vende solo por estas razones: una señal de venta con evidencia medida en 10 años, una empresa o fondo sobre su máximo (20% / 40%),
+              un sector sobre 35%, Chile sobre tu meta o, si lo elegiste, un mercado en zona roja (eso va a refugio, no a bolsa). Recorta primero las posiciones más grandes y deja 2 puntos de holgura. Lo obtenido se
               reinvierte solo en lo que tiene señal AUMENTAR, con el mismo optimizador de la compra con capital nuevo, y nunca en el grupo que se está reduciendo.
             </p>
           </div>
@@ -292,6 +295,12 @@ export default function RebalanceoPanel() {
               />
             </label>
           </div>
+          <label className="block">
+            <span className="block text-xs font-sans font-medium text-zinc-500 dark:text-[#71717a] mb-1">Si un mercado está en zona roja (bajo su tendencia)</span>
+            <select value={proteccion} onChange={e => setProteccion(e.target.value as Proteccion)} className={campo}>
+              {PROTECCIONES.map(o => <option key={o.valor} value={o.valor}>{o.texto}</option>)}
+            </select>
+          </label>
           <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-[#a1a1aa] cursor-pointer select-none">
             <input type="checkbox" checked={fraccionar} onChange={e => setFraccionar(e.target.checked)} className="accent-[#60a5fa]" />
             Permitir fracciones de acciones de EE.UU. (las chilenas siempre van enteras)
@@ -341,6 +350,12 @@ export default function RebalanceoPanel() {
           {plan.motivoSinInvertir && (
             <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30 rounded p-3">
               Quedan {pesos(plan.sinInvertirCLP)} sin invertir: {plan.motivoSinInvertir}
+            </p>
+          )}
+
+          {plan.refugioCLP > 0 && (
+            <p className="text-xs text-sky-800 dark:text-sky-300 bg-sky-50 dark:bg-sky-900/10 border border-sky-200 dark:border-sky-900/30 rounded p-3">
+              {pesos(plan.refugioCLP)} de las ventas van a refugio (depósito a plazo o fondo money market), no a bolsa, hasta que su mercado vuelva a verde.
             </p>
           )}
 

@@ -76,6 +76,7 @@ function activo(ticker: string, peso: number, x: Partial<AssetReport>): AssetRep
     ticker, tipo: 'accion', moneda, cantidad: valorCLP / (moneda === 'USD' ? precio * 1000 : precio), costoPromedio: precio, precio, valorCLP,
     peso, pesoEfectivo: peso, pnl: 0, ret1y: 0, ret3y: 0, momentum: 0.2, momentumMeses: 12, vol: 0.2, maxDD: 0.1, beta: 1,
     benchmark: 'IPSA', rsi: 50, sma200: precio * 0.9, distSma200: 0.1, stop: null, stopDist: null, stopActivado: false,
+    distMaximo52s: -0.05, pico: null,
     diversificado: false, aporteRiesgo: null, fundamentales: null,
     tecnico: { veredicto: 'alcista', motivos: [] }, fundamental: { veredicto: 'neutral', motivos: [] },
     riesgo: { veredicto: 'holgado', motivos: [] }, accion: 'MANTENER', conviccion: 'media', puntaje: 0,

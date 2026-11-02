@@ -1,19 +1,23 @@
 import { LIMITE_SECTOR, fmtMoney, limiteDe, type AdvisorReport, type AssetReport, type RiskModel } from './advisor';
+import { avisosCartera, fmtNivel, mediciones, semaforoRojoDe, type Aviso } from './avisos';
 import { evidencia, mercadoDe } from './evidencia';
 import { FONDOS_CHILE } from './fundamentals';
 import { planPurchases } from './optimizer';
-import { META_CHILE_DEFECTO } from './perfil';
+import { META_CHILE_DEFECTO, type Proteccion } from './perfil';
+import type { Semaforo } from './proteccion';
 import { supabase } from './supabase';
 
 // Rebalanceo completo de la cartera: vende lo que las reglas del asesor dicen que sobra y reinvierte lo obtenido con el
-// optimizador de compras. Se vende solo por cuatro razones, en este orden:
+// optimizador de compras. Se vende solo por estas razones, en este orden:
 //   1. Señal REDUCIR con evidencia significativa en su mercado (se vende todo).
+//   P. Si el inversionista eligió protegerse: lo que está en un mercado con el semáforo en rojo (la mitad o todo). Eso
+//      no se reinvierte en bolsa: queda en refugio hasta que el semáforo vuelva a verde.
 //   2. Una empresa o fondo sobre su máximo prudente (20% / 40%, contando lo que hay dentro de tus fondos).
 //   3. Un sector sobre 35% del patrimonio (contando los fondos).
 //   4. Chile sobre la meta del inversionista (60% si no eligió otra).
 // En 2 a 4 se vende hasta quedar 2 puntos dentro del límite, para que un vaivén del precio no obligue a vender de nuevo,
 // recortando primero las posiciones más grandes (menos órdenes y menos concentración). Lo vendido no se recompra en el
-// mismo grupo que se está reduciendo. Además entrega, para cada activo, los precios en que cambiaría la decisión: lo
+// mismo grupo que se está reduciendo, ni en un mercado en rojo. Además entrega, para cada activo, los precios en que cambiaría la decisión: lo
 // que vigila el agente que avisa por Telegram (scripts/agente-cartera.ts).
 
 const MARGEN = 0.02;
@@ -76,6 +80,7 @@ export interface PlanRebalanceo {
   ventasCLP: number;
   comprasCLP: number;
   aporteCLP: number;
+  refugioCLP: number; // lo vendido para protegerse de un mercado en rojo: no se reinvierte en bolsa
   sinInvertirCLP: number;
   motivoSinInvertir: string | null;
   antes: Foto;
@@ -84,6 +89,10 @@ export interface PlanRebalanceo {
   posturas: Postura[];
   excluidosCompra: { ticker: string; motivo: string }[];
   notas: string[];
+  proteccion: Proteccion;
+  semaforos: Semaforo[];
+  avisos: Aviso[];
+  mediciones: ReturnType<typeof mediciones>;
 }
 
 const pct = (x: number, d = 1) => `${(x * 100).toFixed(d)}%`;
@@ -141,7 +150,8 @@ function recortarArriba(valores: { ticker: string; valor: number }[], monto: num
 export function planRebalanceo(
   report: AdvisorReport,
   modelo: RiskModel,
-  { metaChile = META_CHILE_DEFECTO, aporteCLP = 0, fraccionar = true }: { metaChile?: number; aporteCLP?: number; fraccionar?: boolean } = {},
+  { metaChile = META_CHILE_DEFECTO, aporteCLP = 0, fraccionar = true, proteccion = 'avisar' }:
+    { metaChile?: number; aporteCLP?: number; fraccionar?: boolean; proteccion?: Proteccion } = {},
 ): PlanRebalanceo {
   const V = report.resumen.valorCLP;
   const usdClp = report.usdClp;
@@ -150,6 +160,7 @@ export function planRebalanceo(
   const operable = (a: AssetReport) => a.conDatos && a.cantidad > 0 && a.precio > 0;
   const individual = (a: AssetReport) => operable(a) && !a.diversificado;
   const sectorDe = (a: AssetReport) => a.sector ?? FONDOS_CHILE[a.ticker]?.sector ?? 'Sin clasificar'; // como en la exposición
+  const semaforos = report.mercado?.semaforos ?? [];
 
   // --- Ventas, en pesos -------------------------------------------------------------------------------------------
   const venta = new Map<string, { clp: number; motivos: string[]; evidencia: boolean }>();
@@ -170,11 +181,24 @@ export function planRebalanceo(
       vender(a, a.valorCLP, (a.motivos[0] ?? 'Señal REDUCIR del asesor.').replace(/\.$/, ''), true);
     }
   }
+  // P. Protección elegida por el inversionista: la mitad o todo lo que está en un mercado en rojo
+  const paraRefugio = new Map<string, number>();
+  if (proteccion !== 'avisar') {
+    const parte = proteccion === 'mitad' ? 0.5 : 1;
+    for (const a of pos) {
+      const rojo = operable(a) ? semaforoRojoDe(a, semaforos) : null;
+      if (!rojo) continue;
+      const antes = vendidoCLP(a.ticker);
+      vender(a, parte * a.valorCLP - antes,
+        `${rojo.nombre} está en zona roja (bajo su media de 200 días) y elegiste proteger ${parte < 1 ? 'la mitad' : 'todo'} hasta que vuelva a verde`);
+      paraRefugio.set(a.ticker, vendidoCLP(a.ticker) - antes);
+    }
+  }
   // 2. Concentración en una empresa o fondo
   for (const a of pos) {
     if (!operable(a) || a.riesgo.veredicto !== 'excedido') continue;
     const limite = limiteDe(a);
-    vender(a, (a.pesoEfectivo - (limite - MARGEN)) * V,
+    vender(a, (a.pesoEfectivo - (limite - MARGEN)) * V - vendidoCLP(a.ticker),
       `Pesa ${pct(a.pesoEfectivo)} de tu patrimonio${a.pesoEfectivo > a.peso + 0.005 ? ' contando tus fondos' : ''}, sobre el máximo de ${pct(limite, 0)}`);
   }
   // 3. Sectores sobre el límite
@@ -235,6 +259,7 @@ export function planRebalanceo(
   }
   const vendidas = new Map(ventas.map(o => [o.ticker, o]));
   const ventasCLP = ventas.reduce((s, o) => s + o.montoCLP, 0);
+  const refugioCLP = ventas.reduce((s, o) => s + Math.min(o.montoCLP, paraRefugio.get(o.ticker) ?? 0), 0);
 
   // --- Compras con lo vendido (y el aporte, si hay) ---------------------------------------------------------------
   const tras = pos.map(a => {
@@ -248,13 +273,15 @@ export function planRebalanceo(
   const sectorLleno = (nombre: string) => sectoresReducidos.has(nombre) || (sectoresAntes.find(s => s.nombre === nombre)?.peso ?? 0) >= LIMITE_SECTOR - MARGEN;
   const excluir = (a: AssetReport): string | null => {
     if (vendidas.has(a.ticker)) return 'Se vende en este rebalanceo.';
+    const rojo = semaforoRojoDe(a, semaforos);
+    if (rojo) return `${rojo.nombre} está en zona roja: no se compra ahí hasta que vuelva a verde (si ${rojo.clave === 'chile' ? 'el fondo del IPSA' : 'el índice'} cierra sobre ${fmtNivel(rojo, rojo.cambiaEn)}).`;
     if (a.moneda === 'CLP' && chileLleno) return `Chile queda en ${pct(chileDespuesVentas, 0)} de tu patrimonio (meta hasta ${pct(metaChile, 0)}): lo vendido se invierte fuera de Chile.`;
     if (!a.diversificado && sectorLleno(sectorDe(a))) return `${sectorDe(a)} ya está en su máximo de ${pct(LIMITE_SECTOR, 0)}: no se suma más de ese sector.`;
     // Lo vendido no va a posiciones sin respaldo para crecer (la paridad de riesgo sola llenaría las más chicas)
     if (a.accion !== 'AUMENTAR') return `Su señal es ${a.accion}: el rebalanceo solo compra lo que tiene señal AUMENTAR.`;
     return null;
   };
-  const presupuesto = ventasCLP + Math.max(0, aporteCLP);
+  const presupuesto = ventasCLP - refugioCLP + Math.max(0, aporteCLP);
   const reportTras: AdvisorReport = { ...report, posiciones: tras, resumen: { ...report.resumen, valorCLP: V - ventasCLP } };
   const planCompra = presupuesto > 0
     ? planPurchases(reportTras, modelo, presupuesto, 'CLP', { fraccionar, excluir })
@@ -339,6 +366,9 @@ export function planRebalanceo(
   if (ventas.some(o => o.moneda === 'CLP') && compras.some(o => o.moneda === 'USD')) {
     notas.push('Lo que vendes en Chile queda en pesos: para comprar lo de EE.UU. hay que pasarlo a dólares en tu corredora, lo que tiene un costo de cambio. Primero vende y después compra.');
   }
+  if (refugioCLP > 0) {
+    notas.push(`Lo que se vende por protección (${fmtMoney(refugioCLP, 'CLP')}) no se reinvierte en bolsa: déjalo donde no caiga con el mercado. En pesos, un depósito a plazo o un fondo mutuo money market; en dólares, un fondo de letras del Tesoro de EE.UU. (como SGOV o BIL) si tu corredora lo tiene. Cuando el semáforo vuelva a verde te aviso: ahí lo ingresas como aporte en el Optimizador y el plan lo reinvierte.`);
+  }
   if (ventas.length) notas.push('Vender con ganancia puede pagar impuesto a la renta y cada orden puede cobrar comisión: revisa tu caso antes de ejecutar.');
   if (ventas.length || compras.length) notas.push('Cuando una orden se ejecute, regístrala con su botón Registrar (lo que de verdad se hizo): tu cartera guardada se actualiza y el agente la revisa así.');
   const chicas = pos.filter(a => a.peso < 0.01 && !vendidas.has(a.ticker));
@@ -356,6 +386,7 @@ export function planRebalanceo(
     ventasCLP,
     comprasCLP,
     aporteCLP: Math.max(0, aporteCLP),
+    refugioCLP,
     sinInvertirCLP,
     motivoSinInvertir: sinInvertirCLP > Math.max(MIN_VENTA_CLP, 0.01 * presupuesto) ? planCompra.motivoSinAsignar : null,
     antes: { chile: chileAntes, sector: sectorMayor ? { nombre: sectorMayor.nombre, peso: sectorMayor.peso } : null },
@@ -364,5 +395,9 @@ export function planRebalanceo(
     posturas,
     excluidosCompra: planCompra.excluidos.filter(e => !vendidas.has(e.ticker)),
     notas,
+    proteccion,
+    semaforos,
+    avisos: avisosCartera(report, { proteccion, vendidas }),
+    mediciones: mediciones(),
   };
 }

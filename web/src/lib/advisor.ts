@@ -11,6 +11,7 @@ import { ETF_CONOCIDOS, FONDOS_CHILE, fundamentales, type Fundamentales, type Ti
 import { contextoMercado, type ContextoMercado } from './mercado';
 import { adecuacion, metaChileDe, type Adecuacion, type PerfilInversionista } from './perfil';
 import { evidencia, mercadoDe, type Evidencia, type Mercado } from './evidencia';
+import { picoGanancia, type PicoGanancia } from './proteccion';
 import { supabase } from './supabase';
 
 // Motor de recomendaciones: todas las cifras salen de datos reales (precios ajustados por dividendos,
@@ -63,6 +64,8 @@ export interface AssetReport {
   stop: number | null;
   stopDist: number | null;
   stopActivado: boolean; // dos cierres seguidos bajo el stop
+  distMaximo52s: number | null; // precio / máximo de 52 semanas - 1 (con dividendos)
+  pico: PicoGanancia | null; // la mayor ganancia que llegó a tener la posición desde la compra
   diversificado: boolean;
   aporteRiesgo: number | null; // fracción del riesgo total del portafolio
   fundamentales: Fundamentales | null;
@@ -574,6 +577,8 @@ export async function buildAdvisorReport(
       benchmark: benchTicker === BENCH_CL ? 'IPSA' : 'S&P 500',
       rsi, sma200, distSma200,
       stop: stopCalc?.stop ?? null, stopDist: stopCalc ? stopCalc.stop / precio - 1 : null, stopActivado,
+      distMaximo52s: conDatos && year.length >= 200 ? closes[n - 1] / Math.max(...year) - 1 : null,
+      pico: h && p.cantidad > 0 ? picoGanancia(p.lotes, h.dates, h.closes, precio) : null,
       diversificado, aporteRiesgo: null, fundamentales: f,
       tecnico, fundamental, riesgo, ...decision, evidencia: evid, conDatos,
     };
