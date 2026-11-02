@@ -1,7 +1,7 @@
-name: Agente de cartera (avisos por Telegram)
+name: Agente de cartera (avisos al celular)
 
 # Revisa tu cartera real guardada en la app, calcula qué comprar con tu aporte del mes, el rebalanceo (qué vender, qué
-# comprar y a qué precio) y los precios que cambian la decisión, y te avisa por Telegram al empezar cada mes, si cambió
+# comprar y a qué precio) y los precios que cambian la decisión, y te avisa al celular (Telegram de respaldo) al empezar cada mes, si cambió
 # algo, si un precio se acerca a uno de esos niveles o, una vez por semana, con el resumen
 # (web/scripts/agente-cartera.ts). No opera: tú ejecutas en tu corredora.
 # El registro de las corridas es público, así que el agente no imprime nada de tu cartera. Si una corrida falla (pruebas,
@@ -62,6 +62,8 @@ jobs:
           AGENTE_USUARIO: ${{ secrets.TRADING_REAL_USUARIO }}
           SEC_CONTACTO: ${{ secrets.SEC_CONTACTO }}
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          # 'siempre' para recibir también Telegram aunque el aviso llegue al celular (variable del repositorio)
+          AGENTE_TELEGRAM: ${{ vars.AGENTE_TELEGRAM }}
 
       - name: Alert by Telegram if the run failed
         if: failure()

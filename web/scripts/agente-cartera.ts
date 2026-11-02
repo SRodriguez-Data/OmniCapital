@@ -21,7 +21,8 @@
  *   npx tsx scripts/agente-cartera.ts --forzar   # avisa aunque nada haya cambiado
  *   npx tsx scripts/agente-cartera.ts --prueba   # no envía ni guarda: muestra el mensaje (solo en tu computador)
  *
- * Cada aviso llega por Telegram y, si activaste los avisos en la app (pestaña Asesor), como notificación al celular.
+ * Cada aviso llega como notificación al celular si activaste los avisos en la app (pestaña Asesor). Telegram queda de
+ * respaldo: se usa solo si el aviso no llegó a ningún celular (o siempre, con la variable AGENTE_TELEGRAM=siempre).
  *
  * Variables: SUPABASE_URL, SUPABASE_SECRET_KEY, TELEGRAM_TOKEN y TELEGRAM_CHAT_ID; VAPID_PRIVATE_KEY para las
  * notificaciones al celular (sin ella solo Telegram); si hay carteras de más de un
@@ -210,12 +211,13 @@ function mensaje(asesor: AsesorDelDia, motivos: string[], avisos: string[], verd
 
 // Notificación al celular: el veredicto y por qué aviso, con el enlace a la pestaña Asesor. Una suscripción que el
 // navegador dio de baja se borra
-async function enviarCelular(db: SupabaseClient, usuario: string, asesor: AsesorDelDia, motivos: string[], hechos: EventoSec[]): Promise<string> {
+async function enviarCelular(db: SupabaseClient, usuario: string, asesor: AsesorDelDia, motivos: string[], hechos: EventoSec[]): Promise<{ enviados: number; detalle: string }> {
+  const nada = (detalle: string) => ({ enviados: 0, detalle });
   const privada = (process.env.VAPID_PRIVATE_KEY ?? '').trim();
-  if (!privada) return 'sin llave de notificaciones';
+  if (!privada) return nada('sin llave de notificaciones');
   const { data, error } = await db.from('push_suscripciones').select('endpoint, p256dh, auth').eq('user_id', usuario);
-  if (error) return error.code === 'PGRST205' || error.code === '42P01' ? 'falta la tabla push_suscripciones' : 'no se pudieron leer las suscripciones';
-  if (!data?.length) return 'ningún celular suscrito';
+  if (error) return nada(error.code === 'PGRST205' || error.code === '42P01' ? 'falta la tabla push_suscripciones' : 'no se pudieron leer las suscripciones');
+  if (!data?.length) return nada('ningún celular suscrito');
   const { enviarPush } = await import('../src/lib/push');
   const v = asesor.veredicto;
   const partes = [v.detalle.split(' Además:')[0]];
@@ -224,7 +226,7 @@ async function enviarCelular(db: SupabaseClient, usuario: string, asesor: Asesor
   const r = await enviarPush(data, { titulo: `${VERBO[v.accion].replace(/^\S+\s/, '')}: ${v.titulo}`, cuerpo: partes.join(' '), url: '/?vista=asesor', etiqueta: 'asesor' },
     privada, (process.env.SEC_CONTACTO ?? '').trim() || 'avisos@omnicapital.app');
   if (r.vencidas.length) await db.from('push_suscripciones').delete().in('endpoint', r.vencidas);
-  return `${r.enviados} de ${data.length} celulares`;
+  return { enviados: r.enviados, detalle: `${r.enviados} de ${data.length} celulares` };
 }
 
 async function enviarTelegram(texto: string) {
@@ -324,11 +326,13 @@ async function main() {
     decir(`\n[prueba] ${avisar ? `Avisaría (${motivos.join(', ')})` : 'No avisaría'}; no se envió ni guardó nada.`);
     return;
   }
-  let celular = '';
+  // Primero el celular; Telegram solo si no llegó a ninguno (o si pediste ambos con AGENTE_TELEGRAM=siempre)
+  let celular = { enviados: 0, detalle: '' };
+  let porTelegram = false;
   if (avisar) {
-    await enviarTelegram(texto);
-    // El celular no frena la corrida: si falla, el aviso ya llegó por Telegram
-    celular = await enviarCelular(db, usuario, asesor, motivos, hechos).catch(() => 'falló el envío');
+    celular = await enviarCelular(db, usuario, asesor, motivos, hechos).catch(() => ({ enviados: 0, detalle: 'falló el envío' }));
+    porTelegram = celular.enviados === 0 || (process.env.AGENTE_TELEGRAM ?? '').trim() === 'siempre';
+    if (porTelegram) await enviarTelegram(texto);
   }
   if (hayTabla) {
     const datos = {
@@ -350,7 +354,7 @@ async function main() {
     if (error) throw new Error(`No se pudo guardar el estado del agente: ${error.message}`);
   }
   decir(`Agente de cartera: ${asesor.aporte?.ordenes.length ?? 0} compras del aporte, ${plan.ventas.length} ventas, ${plan.compras.length} compras, ${plan.niveles.length} niveles vigilados. `
-    + (avisar ? `Aviso enviado por Telegram (${motivos.join(', ')}); al celular: ${celular}.` : 'Sin novedades: no se avisó.')
+    + (avisar ? `Aviso enviado (${motivos.join(', ')}): al celular ${celular.detalle}${porTelegram ? '; también por Telegram' : ''}.` : 'Sin novedades: no se avisó.')
     + (hayTabla ? '' : ' Falta la tabla agente_cartera (supabase/agente_cartera.sql): sin ella avisa en cada corrida.'));
 }
 
