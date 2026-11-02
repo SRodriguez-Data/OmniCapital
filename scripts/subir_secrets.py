@@ -15,7 +15,7 @@ REPO = 'SRodriguez-Data/OmniCapital'
 # Los que leen los workflows. Los de dinero real (ALPACA_REAL_*, CHILE_REAL_TOPE_CLP, TRADING_REAL_USUARIO) se suben
 # cuando decidas activarlos, con --solo
 NECESARIOS = ['SUPABASE_URL', 'SUPABASE_SECRET_KEY', 'SEC_CONTACTO', 'ALPACA_API_KEY', 'ALPACA_SECRET_KEY',
-              'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID']
+              'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID', 'VAPID_PRIVATE_KEY']
 
 
 def main() -> int:

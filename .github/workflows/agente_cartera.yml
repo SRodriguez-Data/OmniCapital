@@ -61,6 +61,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           AGENTE_USUARIO: ${{ secrets.TRADING_REAL_USUARIO }}
           SEC_CONTACTO: ${{ secrets.SEC_CONTACTO }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
 
       - name: Alert by Telegram if the run failed
         if: failure()

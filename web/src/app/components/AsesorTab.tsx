@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase';
 import { parsePerfil, type PerfilInversionista } from '@/lib/perfil';
 import { FormRegistro, useRegistrar, type OrdenRegistro, type Registrar } from './RebalanceoPanel';
 import ChatAsesor from './ChatAsesor';
+import AvisosCelular from './AvisosCelular';
 
 // Tu asesor: lo que conviene hacer hoy, en una pantalla. El veredicto, las órdenes de tu aporte del mes (núcleo + Top
 // medido), los ajustes de la cartera, los mercados, los hechos relevantes de tus empresas y todas las oportunidades del
@@ -360,6 +361,7 @@ export default function AsesorTab({ irA }: { irA: (destino: 'DATA_WAREHOUSE' | '
       </section>
 
       {error && <div className="bg-[#f87171]/10 border border-[#f87171]/50 text-[#f87171] p-4 rounded text-sm font-mono">[ERROR] {error}</div>}
+      <AvisosCelular />
       {perfilListo && !perfil && (
         <div className={`${tarjeta} p-4 text-sm text-zinc-700 dark:text-zinc-300 flex flex-wrap items-center justify-between gap-3`}>
           <span>Responde tu perfil de inversionista (2 minutos): con él sé cuánto arriesgar y cuánto aportas al mes.</span>
