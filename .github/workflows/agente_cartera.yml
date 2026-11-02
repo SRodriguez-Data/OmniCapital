@@ -1,8 +1,9 @@
 name: Agente de cartera (avisos por Telegram)
 
-# Revisa tu cartera real guardada en la app, calcula el rebalanceo (qué vender, qué comprar y a qué precio) y los
-# precios que cambian la decisión, y te avisa por Telegram solo si cambió algo, si un precio se acerca a uno de esos
-# niveles o, una vez por semana, con el resumen (web/scripts/agente-cartera.ts). No opera: tú ejecutas en tu corredora.
+# Revisa tu cartera real guardada en la app, calcula qué comprar con tu aporte del mes, el rebalanceo (qué vender, qué
+# comprar y a qué precio) y los precios que cambian la decisión, y te avisa por Telegram al empezar cada mes, si cambió
+# algo, si un precio se acerca a uno de esos niveles o, una vez por semana, con el resumen
+# (web/scripts/agente-cartera.ts). No opera: tú ejecutas en tu corredora.
 # El registro de las corridas es público, así que el agente no imprime nada de tu cartera. Si una corrida falla (pruebas,
 # instalación o datos), te avisa por Telegram con el link a la corrida.
 

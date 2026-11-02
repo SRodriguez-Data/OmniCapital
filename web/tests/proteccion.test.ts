@@ -95,12 +95,11 @@ test('las tecnológicas siguen también al Nasdaq-100; Chile, al IPSA', () => {
   assert.deepEqual(mercadosDe(activo('CHILE.SN', 0.1)), ['chile']);
 });
 
-test('mercado en rojo, solo avisar: no vende por eso, no compra ahí y avisa con lo medido', () => {
+test('mercado en rojo, solo avisar: no vende por eso, sigue comprando ahí y avisa con lo medido', () => {
   const { report, modelo } = cartera([luz('chile', 'rojo'), luz('eeuu', 'verde')]);
   const plan = planRebalanceo(report, modelo, { metaChile: 0.9, aporteCLP: 1_000_000 });
   assert.equal(plan.ventas.length, 0);
-  assert.ok(!plan.compras.some(o => o.moneda === 'CLP'), 'no compra BCI aunque tenga señal AUMENTAR');
-  assert.ok(plan.excluidosCompra.some(e => e.ticker === 'BCI.SN' && /zona roja/.test(e.motivo)));
+  assert.ok(!plan.excluidosCompra.some(e => /zona roja/.test(e.motivo)), 'el rojo no frena compras si solo se avisa');
   assert.equal(plan.refugioCLP, 0);
   const rojo = plan.avisos.find(a => a.id.startsWith('rojo:chile'));
   assert.ok(rojo && rojo.nivel === 'alerta' && rojo.evidencia, 'avisa la zona roja con la evidencia medida');

@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { ArrowDownRight, ArrowUpRight, BellRing, CheckCircle2, Loader2, Scale, Target } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 import { supabase } from '@/lib/supabase';
-import { METAS_CHILE, META_CHILE_DEFECTO, PROTECCIONES, parsePerfil, type Proteccion } from '@/lib/perfil';
+import { METAS_CHILE, META_CHILE_DEFECTO, PROTECCIONES, parsePerfil, type PerfilInversionista, type Proteccion } from '@/lib/perfil';
 import { aplicarCambios, cambiosPorEjecucion, hoyEnChile, leerEjecucion } from '@/lib/ejecucion';
 
 // Rebalanceo completo (vender y comprar). El cálculo es el de lib/rebalanceo.ts, el mismo que usa el agente que avisa
@@ -196,8 +196,9 @@ export default function RebalanceoPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [plan, setPlan] = useState<Plan | null>(null);
+  const [perfil, setPerfil] = useState<PerfilInversionista | null>(null);
 
-  // La meta parte de la que elegiste en tu perfil (la misma que usa el agente)
+  // La meta parte de la que elegiste en tu perfil (la misma que usa el agente); el perfil decide cómo se reinvierte
   useEffect(() => {
     let vigente = true;
     (async () => {
@@ -207,6 +208,7 @@ export default function RebalanceoPanel() {
           ? (await supabase.from('perfil_inversionista').select('datos').eq('user_id', session.user.id).maybeSingle()).data?.datos
           : JSON.parse(localStorage.getItem(PERFIL_LOCAL) ?? 'null');
         const perfil = parsePerfil(datos);
+        if (vigente) setPerfil(perfil);
         if (vigente && perfil?.metaChile) setMetaChile(perfil.metaChile);
         if (vigente && perfil?.proteccion) setProteccion(perfil.proteccion);
       } catch { /* sin perfil: queda la meta del asesor */ }
@@ -251,7 +253,7 @@ export default function RebalanceoPanel() {
       const res = await fetch('/api/portfolio/rebalanceo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items, metaChile, aporte: Number(aporte.replace(/\D/g, '')) || 0, fraccionar, proteccion }),
+        body: JSON.stringify({ items, metaChile, aporte: Number(aporte.replace(/\D/g, '')) || 0, fraccionar, proteccion, perfil }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data || data.error) throw new Error(data?.error || `El cálculo no respondió (error ${res.status}). Intenta de nuevo.`);

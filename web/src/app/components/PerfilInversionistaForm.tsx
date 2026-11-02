@@ -98,7 +98,7 @@ export function PerfilInversionistaForm({ inicial, guardando, error, onGuardar, 
         </Pregunta>
         <Pregunta
           titulo="Opcional: protección ante caídas. Si un mercado pasa a zona roja (cae bajo su tendencia), ¿qué hago?"
-          ayuda="Siempre deja de comprar ahí. Vender protege de las caídas grandes (medido: el S&P 500 cayó −19% en vez de −55%), pero cuesta algo de rentabilidad y a veces es falsa alarma."
+          ayuda="Solo avisar sigue comprando: a 10 años o más rinde más (medido en el S&P 500: 11,4% al año contra 10,5%). Vender protege de las caídas grandes (el S&P 500 cayó −19% en vez de −55%), pero cuesta esa rentabilidad y a veces es falsa alarma."
         >
           <select className={campo} value={b.proteccion ?? 'avisar'} onChange={e => set('proteccion', e.target.value === 'avisar' ? null : e.target.value as Proteccion)}>
             {PROTECCIONES.map(o => <option key={o.valor} value={o.valor}>{o.texto}</option>)}

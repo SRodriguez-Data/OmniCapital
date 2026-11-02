@@ -180,7 +180,7 @@ export default function AvisosTab({ irAlPlan }: { irAlPlan: () => void }) {
             <p className="text-xs text-zinc-600 dark:text-[#a1a1aa] flex gap-2">
               <ShieldAlert className="w-4 h-4 shrink-0 text-[#60a5fa]" />
               <span>
-                Si un mercado pasa a rojo, el rebalanceo deja de comprar ahí. Tu protección: <strong>{textoProteccion.toLowerCase()}</strong>.
+                Si un mercado pasa a rojo, te aviso. Tu protección: <strong>{textoProteccion.toLowerCase()}</strong>.
                 Se cambia en tu perfil (pestaña Diagnóstico) o en el Optimizador.
               </span>
             </p>

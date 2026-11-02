@@ -123,8 +123,8 @@ export function avisosCartera(
         titulo: `${s.nombre}: zona roja`,
         detalle: `${QUE_SIGUE[s.clave][0].toUpperCase()}${QUE_SIGUE[s.clave].slice(1)} cerró ${pct(-s.distancia)} bajo su media de 200 días${s.desde ? ` (en rojo desde el ${fecha(s.desde)})` : ''} y está ${pct(s.caidaDesdeMaximo)} bajo su máximo del año. ${enCartera} Vuelve a verde si cierra sobre ${nivel}.`,
         queHacer: proteccion === 'avisar'
-          ? 'El rebalanceo ya no compra en este mercado mientras siga en rojo; lo que tienes se mantiene. Si prefieres que también venda para protegerte, elige "vender la mitad" o "vender todo" en Protección ante caídas, en tu perfil.'
-          : `El rebalanceo vende ${proteccion === 'mitad' ? 'la mitad de' : 'todo'} lo que tienes en este mercado y lo deja en un refugio (depósito o fondo money market) hasta que vuelva a verde; ahí te avisa para volver a entrar.`,
+          ? 'Se sigue comprando: tu aporte del mes entra igual, más barato, y lo que tienes se mantiene. A 10 años o más, dejar de comprar en rojo costó rentabilidad. Si prefieres protegerte de una caída grande, elige "vender la mitad" o "vender todo" en Protección ante caídas, en tu perfil.'
+          : `El rebalanceo deja de comprar ahí, vende ${proteccion === 'mitad' ? 'la mitad de' : 'todo'} lo que tienes en este mercado y lo deja en un refugio (depósito o fondo money market) hasta que vuelva a verde; ahí te avisa para volver a entrar.`,
         evidencia: evidenciaSemaforo(s.clave),
       });
     } else if (s.distanciaCambio >= -CERCA_SEMAFORO) {
@@ -132,7 +132,7 @@ export function avisosCartera(
         id: `cerca:${s.clave}`, nivel: 'atencion', tipo: 'mercado', tickers: suyas.map(a => a.ticker),
         titulo: `${s.nombre}: cerca de la zona roja`,
         detalle: `Pasa a rojo si ${QUE_SIGUE[s.clave]} cierra bajo ${nivel}. Hoy está ${pct(s.distancia)} sobre su media de 200 días y ${pct(s.caidaDesdeMaximo)} bajo su máximo del año. ${enCartera}`,
-        queHacer: `Todavía nada: es un aviso previo para que no te pille de sorpresa. Si cruza, el rebalanceo deja de comprar ahí${proteccion === 'avisar' ? '' : ` y vende ${proteccion === 'mitad' ? 'la mitad' : 'todo'}`}, y te aviso por Telegram.`,
+        queHacer: `Todavía nada: es un aviso previo para que no te pille de sorpresa. Si cruza, ${proteccion === 'avisar' ? 'se sigue comprando (elegiste solo avisar)' : `el rebalanceo deja de comprar ahí y vende ${proteccion === 'mitad' ? 'la mitad' : 'todo'}`}, y te aviso.`,
         evidencia: evidenciaSemaforo(s.clave),
       });
     }

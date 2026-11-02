@@ -7,8 +7,9 @@ export type ReaccionCaida = 'vender_todo' | 'vender_parte' | 'mantener' | 'compr
 export type FondoEmergencia = 'si' | 'parcial' | 'no';
 export type Experiencia = 'principiante' | 'intermedia' | 'avanzada';
 export type NivelRiesgo = 'conservador' | 'moderado' | 'agresivo';
-// Qué hace el rebalanceo cuando el semáforo de un mercado pasa a rojo (lib/proteccion.ts): siempre deja de comprar ahí;
-// además puede vender la mitad o todo lo que tienes en ese mercado y dejarlo en un refugio hasta que vuelva a verde
+// Qué hace el rebalanceo cuando el semáforo de un mercado pasa a rojo (lib/proteccion.ts). Solo avisar: sigue comprando
+// (a 10 años o más, dejar de comprar en rojo costó rentabilidad). Protegerse: deja de comprar ahí y vende la mitad o
+// todo lo que tienes en ese mercado, que queda en un refugio hasta que vuelva a verde
 export type Proteccion = 'avisar' | 'mitad' | 'todo';
 
 export interface PerfilInversionista {
@@ -29,12 +30,13 @@ export const META_CHILE_DEFECTO = 0.6;
 export const METAS_CHILE = [0.6, 0.5, 0.4, 0.3] as const;
 export const metaChileDe = (p: PerfilInversionista | null | undefined) => p?.metaChile ?? META_CHILE_DEFECTO;
 export const PROTECCIONES: { valor: Proteccion; texto: string }[] = [
-  { valor: 'avisar', texto: 'Solo avísame y no compres más ahí' },
+  { valor: 'avisar', texto: 'Solo avísame y sigue comprando' },
   { valor: 'mitad', texto: 'Vende la mitad de lo que tengo en ese mercado' },
   { valor: 'todo', texto: 'Vende todo lo que tengo en ese mercado' },
 ];
 export const esProteccion = (x: unknown): x is Proteccion => PROTECCIONES.some(o => o.valor === x);
 export const proteccionDe = (p: PerfilInversionista | null | undefined): Proteccion => p?.proteccion ?? 'avisar';
+export const nivelDe = (p: PerfilInversionista | null | undefined): NivelRiesgo | null => (p ? adecuacion(p).nivel : null);
 
 type Opciones<T extends string> = { valor: T; texto: string }[];
 

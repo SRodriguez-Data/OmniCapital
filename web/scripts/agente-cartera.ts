@@ -1,7 +1,8 @@
 /**
- * Agente de cartera: cada mañana hábil revisa la cartera real guardada en la app (mi_portafolio), calcula el
- * rebalanceo y los precios que cambian la decisión con las mismas reglas de la web (src/lib/rebalanceo.ts) y avisa
- * por Telegram solo cuando hay algo que hacer o mirar:
+ * Agente de cartera: cada mañana hábil revisa la cartera real guardada en la app (mi_portafolio), calcula con las mismas
+ * reglas de la web (src/lib/asesor.ts) qué comprar con el aporte del mes, el rebalanceo y los precios que cambian la
+ * decisión, y avisa por Telegram solo cuando hay algo que hacer o mirar:
+ *   - empezó un mes: qué comprar con tu aporte (núcleo + Top medido, según tu perfil),
  *   - cambió el plan (aparece o desaparece una venta o una compra),
  *   - un precio quedó a menos de 3% de un nivel que cambia la decisión,
  *   - hay un aviso nuevo (src/lib/avisos.ts): un mercado pasó a rojo, se acercó a la zona roja o volvió a verde, o una
@@ -25,7 +26,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { PlanRebalanceo } from '../src/lib/rebalanceo';
+import type { AsesorDelDia } from '../src/lib/asesor';
 import type { Semaforo } from '../src/lib/proteccion';
 
 const APP = 'https://quantum-trader-app.vercel.app';
@@ -64,6 +65,7 @@ interface Estado {
   avisos: string[]; // ids de los avisos vigentes (lib/avisos.ts)
   rojos: string[]; // mercados con el semáforo en rojo
   ultimoAviso: string | null;
+  mesAporte: string | null; // YYYY-MM del último aviso del aporte del mes
 }
 
 const hoyEnChile = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
@@ -88,7 +90,7 @@ async function leerEstado(db: SupabaseClient, usuario: string): Promise<{ estado
   const d = data?.datos as Partial<Estado> | undefined;
   return {
     estado: d?.fecha
-      ? { fecha: d.fecha, firma: d.firma ?? [], cerca: d.cerca ?? [], avisos: d.avisos ?? [], rojos: d.rojos ?? [], ultimoAviso: d.ultimoAviso ?? null }
+      ? { fecha: d.fecha, firma: d.firma ?? [], cerca: d.cerca ?? [], avisos: d.avisos ?? [], rojos: d.rojos ?? [], ultimoAviso: d.ultimoAviso ?? null, mesAporte: d.mesAporte ?? null }
       : null,
     hayTabla: true,
   };
@@ -112,13 +114,28 @@ function lineaSemaforo(s: Semaforo, fmtNivel: (s: Semaforo, x: number) => string
   return `${rojo ? '🔴' : '🟢'} <b>${esc(nombre)}</b> ${signo1(s.distancia)} vs. su media · ${rojo ? 'verde si cierra sobre' : 'rojo si cierra bajo'} ${esc(fmtNivel(s, s.cambiaEn))} (${signo1(s.distanciaCambio)})`;
 }
 
-function mensaje(plan: PlanRebalanceo, motivos: string[], avisos: string[], verdes: Semaforo[], hoy: string,
+const VERBO: Record<AsesorDelDia['veredicto']['accion'], string> = { COMPRAR: '🟢 COMPRA', 'VENDER Y COMPRAR': '🔁 VENDE Y COMPRA', VENDER: '🔴 VENDE', MANTENER: '⚪ MANTÉN' };
+
+function mensaje(asesor: AsesorDelDia, motivos: string[], avisos: string[], verdes: Semaforo[], hoy: string,
   fmtPrecio: (n: number, m: 'USD' | 'CLP') => string, fmtNivel: (s: Semaforo, x: number) => string): string {
+  const plan = asesor.rebalanceo;
   const cantidad = (n: number) => n.toLocaleString('es-CL', { maximumFractionDigits: 4 });
   const [a, m, d] = hoy.split('-');
-  const l: string[] = [`<b>🧭 Tu cartera · ${d}-${m}-${a}</b>`];
+  const l: string[] = [`<b>🧭 Tu asesor · ${d}-${m}-${a}</b>`];
   const sector = plan.antes.sector;
   l.push(`Valor ${pesos(plan.valorCLP)} · Chile ${pct0(plan.antes.chile)} (meta hasta ${pct0(plan.metaChile)})${sector ? ` · ${esc(sector.nombre)} ${pct0(sector.peso)} (máx. 35%)` : ''}`);
+  l.push('', `<b>${VERBO[asesor.veredicto.accion]}: ${esc(asesor.veredicto.titulo)}</b>`);
+
+  const ap = asesor.aporte;
+  if (ap?.ordenes.length) {
+    l.push('', `<b>💰 Tu aporte del mes (${pesos(ap.montoCLP)})</b>`);
+    for (const o of ap.ordenes) {
+      l.push(`• <b>${sinSufijo(o.ticker)}</b> ${cantidad(o.cantidad)} · hasta ${fmtPrecio(o.limite, o.moneda)} · ≈${pesos(o.montoCLP)}${o.papel === 'nucleo' ? ' · núcleo' : ` · Top #${o.puesto}`}`);
+    }
+    const ev = ap.evidencia.top['EE.UU.'];
+    if (ap.ordenes.some(o => o.papel === 'top' && o.mercado === 'EE.UU.') && ev) l.push(`<i>${esc(corto(ev, 260))}</i>`);
+    for (const n of ap.notas.slice(0, 2)) l.push(`<i>${esc(corto(n, 220))}</i>`);
+  }
 
   if (plan.semaforos.length) {
     l.push('', '<b>🚦 Mercados</b>');
@@ -146,13 +163,13 @@ function mensaje(plan: PlanRebalanceo, motivos: string[], avisos: string[], verd
     l.push('', `<b>🟢 Comprar</b> con ${pesos(plan.comprasCLP)}${plan.ventas.length ? ' de las ventas' : ''}`);
     for (const o of plan.compras) {
       l.push(`• <b>${sinSufijo(o.ticker)}</b> ${cantidad(o.cantidad)} · hasta ${fmtPrecio(o.limite, o.moneda)} · ≈${pesos(o.montoCLP)}`);
-      l.push(`   <i>${esc(o.motivo.replace(/^Señal AUMENTAR\.\s*/, '').split(/[:.]/)[0])} · peso ${pct1(o.pesoAntes)} → ${pct1(o.pesoDespues)}</i>`);
+      if (plan.reinversion === 'paridad') l.push(`   <i>${esc(o.motivo.replace(/^Señal AUMENTAR\.\s*/, '').split(/[:.]/)[0])} · peso ${pct1(o.pesoAntes)} → ${pct1(o.pesoDespues)}</i>`);
     }
   }
   if (plan.ventas.length || plan.compras.length) {
     l.push('', `Después: Chile ${pct0(plan.despues.chile)}${plan.despues.sector ? ` · ${esc(plan.despues.sector.nombre)} ${pct0(plan.despues.sector.peso)}` : ''}. Primero vende y después compra, con órdenes límite.`);
   } else {
-    l.push('', '✅ Nada que vender ni comprar: tu cartera está dentro de sus límites y nada tiene una señal de venta con evidencia.');
+    l.push('', '✅ Nada que vender: tu cartera está dentro de sus límites y nada tiene una señal de venta con evidencia.');
   }
   const mantener = plan.posturas.filter(p => p.accion === 'MANTENER').length;
   if (mantener) l.push(`⚪ Mantener: ${mantener} posiciones.`);
@@ -168,8 +185,7 @@ function mensaje(plan: PlanRebalanceo, motivos: string[], avisos: string[], verd
     for (const a of avisos.slice(0, 3)) l.push(`• ${esc(corto(a, 200))}`);
   }
   l.push('', `<i>Te aviso porque: ${motivos.join(', ')}.</i>`,
-    `Avisos y semáforos: ${APP}/?vista=avisos`,
-    `Plan completo y botón para registrar lo que ejecutes: ${APP}/?vista=rebalancear`);
+    `Tu asesor, con el botón para registrar lo que compres: ${APP}/?vista=asesor`);
 
   let texto = l.join('\n');
   if (texto.length > MAX_MENSAJE) texto = `${texto.slice(0, texto.lastIndexOf('\n', MAX_MENSAJE - 60))}\n…\nDetalle completo: ${APP}`;
@@ -198,8 +214,8 @@ async function main() {
   const clave = requerida('SUPABASE_SECRET_KEY');
   process.env.NEXT_PUBLIC_SUPABASE_URL = url;
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = clave;
-  const [{ buildAdvisorReport }, { fmtPrecio, oportunidadesDelBot, planRebalanceo }, { metaChileDe, parsePerfil, proteccionDe }, { parsePortfolioItems }, { fmtNivel }] = await Promise.all([
-    import('../src/lib/advisor'), import('../src/lib/rebalanceo'), import('../src/lib/perfil'), import('../src/lib/validation'), import('../src/lib/avisos'),
+  const [{ asesorDelDia }, { fmtPrecio }, { parsePerfil }, { parsePortfolioItems }, { fmtNivel }] = await Promise.all([
+    import('../src/lib/asesor'), import('../src/lib/rebalanceo'), import('../src/lib/perfil'), import('../src/lib/validation'), import('../src/lib/avisos'),
   ]);
   const db = createClient(url, clave, { auth: { persistSession: false } });
 
@@ -221,9 +237,10 @@ async function main() {
   if ('error' in parsed) throw new Error(`La cartera guardada no es válida (${parsed.error.split(':')[0]}).`);
   const perfil = parsePerfil(perfilFila.data?.datos);
 
-  const oportunidades = await oportunidadesDelBot().catch(() => []);
-  const { modelo, ...report } = await buildAdvisorReport(parsed.items, oportunidades, perfil);
-  const plan = planRebalanceo(report, modelo, { metaChile: metaChileDe(perfil), fraccionar: true, proteccion: proteccionDe(perfil) });
+  const { asesor, report } = await asesorDelDia(parsed.items, perfil);
+  const plan = asesor.rebalanceo;
+  const mes = hoy.slice(0, 7);
+  const aporteNuevo = !!asesor.aporte?.ordenes.length && estado?.mesAporte !== mes;
 
   // ¿Hay algo que avisar?
   const firma = [...plan.ventas, ...plan.compras].map(o => `${o.lado} ${o.ticker}`).sort();
@@ -235,7 +252,8 @@ async function main() {
   const motivos: string[] = [];
   if (forzar) motivos.push('lo pediste');
   if (!estado) motivos.push('es la primera revisión');
-  else {
+  if (aporteNuevo) motivos.push('empezó el mes: esto compras con tu aporte');
+  if (estado) {
     if (firma.join('|') !== estado.firma.join('|')) motivos.push('cambió el plan');
     if (cerca.some(c => !estado.cerca.includes(c))) motivos.push('un precio se acercó a un nivel que cambia la decisión');
     const nuevos = plan.avisos.filter(x => x.nivel !== 'info' && !estado.avisos.includes(x.id));
@@ -250,7 +268,7 @@ async function main() {
   const avisar = motivos.length > 0;
   // Sin el dólar observado se usa el del mercado (Yahoo), que basta para pesar la cartera: no vale un aviso diario
   const avisos = report.avisosDatos.filter(a => !/dólar observado/i.test(a));
-  const texto = mensaje(plan, motivos.length ? motivos : ['sin novedades'], avisos, verdes, hoy, fmtPrecio, fmtNivel);
+  const texto = mensaje(asesor, motivos.length ? motivos : ['sin novedades'], avisos, verdes, hoy, fmtPrecio, fmtNivel);
 
   if (prueba) {
     decir(texto.replace(/<\/?[bi]>/g, ''));
@@ -261,17 +279,20 @@ async function main() {
   if (hayTabla) {
     const datos = {
       fecha: hoy, firma, cerca, avisos: vigentes, ultimoAviso: avisar ? hoy : estado?.ultimoAviso ?? null,
+      mesAporte: avisar && asesor.aporte?.ordenes.length ? mes : estado?.mesAporte ?? null,
       // Un mercado sin dato hoy conserva el color de ayer: así no parece que "volvió a verde" por un dato que faltó
       rojos: [...new Set([...rojos, ...(estado?.rojos ?? []).filter(c => !plan.semaforos.some(s => s.clave === c))])].sort(),
       plan: {
         valorCLP: plan.valorCLP, metaChile: plan.metaChile, antes: plan.antes, despues: plan.despues,
         ventas: plan.ventas, compras: plan.compras, niveles: plan.niveles, semaforos: plan.semaforos, refugioCLP: plan.refugioCLP,
       },
+      veredicto: asesor.veredicto,
+      aporte: asesor.aporte ? { montoCLP: asesor.aporte.montoCLP, ordenes: asesor.aporte.ordenes } : null,
     };
     const { error } = await db.from('agente_cartera').upsert({ user_id: usuario, datos, actualizado: new Date().toISOString() });
     if (error) throw new Error(`No se pudo guardar el estado del agente: ${error.message}`);
   }
-  decir(`Agente de cartera: ${plan.ventas.length} ventas, ${plan.compras.length} compras, ${plan.niveles.length} niveles vigilados. `
+  decir(`Agente de cartera: ${asesor.aporte?.ordenes.length ?? 0} compras del aporte, ${plan.ventas.length} ventas, ${plan.compras.length} compras, ${plan.niveles.length} niveles vigilados. `
     + (avisar ? `Aviso enviado por Telegram (${motivos.join(', ')}).` : 'Sin novedades: no se avisó.')
     + (hayTabla ? '' : ' Falta la tabla agente_cartera (supabase/agente_cartera.sql): sin ella avisa en cada corrida.'));
 }

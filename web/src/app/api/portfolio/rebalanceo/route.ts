@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server';
 import { parsePortfolioItems } from '@/lib/validation';
 import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 import { buildAdvisorReport } from '@/lib/advisor';
-import { METAS_CHILE, META_CHILE_DEFECTO, esProteccion } from '@/lib/perfil';
+import { preciosIdeas } from '@/lib/asesor';
+import { ideasDelBot } from '@/lib/ideas';
+import { METAS_CHILE, META_CHILE_DEFECTO, esProteccion, nivelDe, parsePerfil } from '@/lib/perfil';
 import { oportunidadesDelBot, planRebalanceo } from '@/lib/rebalanceo';
 
 export const maxDuration = 60;
@@ -15,7 +17,7 @@ export async function POST(request: Request) {
   if (!rateLimit(request, 'rebalanceo', 15)) {
     return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
   }
-  let body: { items?: unknown; metaChile?: unknown; aporte?: unknown; fraccionar?: unknown; proteccion?: unknown };
+  let body: { items?: unknown; metaChile?: unknown; aporte?: unknown; fraccionar?: unknown; proteccion?: unknown; perfil?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -32,12 +34,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Aporte inválido.' }, { status: 400 });
   }
 
+  // Con un perfil moderado o agresivo, lo vendido se reinvierte en núcleo + Top medido (lib/aporte.ts)
+  const perfil = parsePerfil(body?.perfil);
+  const nivel = nivelDe(perfil);
+
   try {
-    const oportunidades = await oportunidadesDelBot().catch(() => []);
-    const { modelo, ...report } = await buildAdvisorReport(parsed.items, oportunidades);
+    const [oportunidades, ideas] = await Promise.all([
+      oportunidadesDelBot().catch(() => []),
+      nivel ? ideasDelBot().catch(() => null) : Promise.resolve(null),
+    ]);
+    const { modelo, ...report } = await buildAdvisorReport(parsed.items, oportunidades, perfil);
+    const precios = ideas ? await preciosIdeas(ideas, report) : new Map();
     return NextResponse.json(planRebalanceo(report, modelo, {
       metaChile, aporteCLP: aporte, fraccionar: body?.fraccionar !== false,
       proteccion: esProteccion(body?.proteccion) ? body.proteccion : 'avisar',
+      nivel, ideas, precios,
     }));
   } catch (err) {
     console.error('Error calculando el rebalanceo:', err);
