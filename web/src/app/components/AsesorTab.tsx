@@ -9,6 +9,7 @@ import { usePortfolio } from '../context/PortfolioContext';
 import { supabase } from '@/lib/supabase';
 import { parsePerfil, type PerfilInversionista } from '@/lib/perfil';
 import { FormRegistro, useRegistrar, type OrdenRegistro, type Registrar } from './RebalanceoPanel';
+import ChatAsesor from './ChatAsesor';
 
 // Tu asesor: lo que conviene hacer hoy, en una pantalla. El veredicto, las órdenes de tu aporte del mes (núcleo + Top
 // medido), los ajustes de la cartera, los mercados, los hechos relevantes de tus empresas y todas las oportunidades del
@@ -44,7 +45,7 @@ interface Respuesta {
   eventos: { porTicker: Record<string, EventoSec[]>; fecha: string } | null;
   mercado: { titulo: string; lecturas: string[]; indicadores: Indicador[] } | null;
   resumen: { valorCLP: number; pnlCLP: number; pnlPct: number | null; usdClp: number };
-  posiciones: { ticker: string; nombre?: string; valorCLP: number; peso: number }[];
+  posiciones: { ticker: string; nombre?: string; valorCLP: number; peso: number; accion: string }[];
   avisosDatos: string[];
 }
 interface Noticia { titulo: string; fuente: string; fecha: string; url: string }
@@ -297,6 +298,29 @@ export default function AsesorTab({ irA }: { irA: (destino: 'DATA_WAREHOUSE' | '
   const ideas = (ops?.ideas ?? []).filter(i => filtro === 'todas' || (filtro === 'aporte' ? enAporte.has(i.ticker) : i.mercado === filtro));
   const mes = MESES[new Date().getMonth()];
 
+  // Lo que el chat sabe de esta pantalla (compacto: las cifras finas las pide al motor)
+  const contexto = useMemo(() => {
+    if (!datos) return null;
+    const as = datos.asesor;
+    return {
+      hoy: as.generado.slice(0, 10),
+      perfil: { nivel: as.nivel, aporte_mensual: as.aporteMensual, meta_chile: as.rebalanceo.metaChile, chile_hoy: as.rebalanceo.antes.chile },
+      cartera: { valor_clp: Math.round(datos.resumen.valorCLP), ganancia_clp: Math.round(datos.resumen.pnlCLP), dolar: datos.resumen.usdClp,
+        posiciones: datos.posiciones.map(p => ({ ticker: p.ticker, nombre: p.nombre, peso: Number(p.peso.toFixed(3)), accion_asesor: p.accion })) },
+      veredicto: as.veredicto,
+      aporte_del_mes: as.aporte && { monto: as.aporte.montoCLP, ordenes: as.aporte.ordenes.map(o => ({ ticker: o.ticker, papel: o.papel, monto: Math.round(o.montoCLP), cantidad: o.cantidad, limite: o.limite, motivo: o.motivo })), notas: as.aporte.notas },
+      ajustes: [...as.rebalanceo.ventas, ...as.rebalanceo.compras].map(o => ({ ticker: o.ticker, lado: o.lado, monto: Math.round(o.montoCLP), cantidad: o.cantidad, motivo: o.motivo })),
+      frenos: as.frenos,
+      mercados: as.rebalanceo.semaforos.map(s => ({ nombre: s.nombre, estado: s.estado, vs_media_200d: Number(s.distancia.toFixed(3)), bajo_maximo: Number(s.caidaDesdeMaximo.toFixed(3)) })),
+      indicadores: datos.mercado?.indicadores.map(x => ({ nombre: x.nombre, valor: x.valor, cambio_3m: x.cambio3m })) ?? [],
+      avisos: as.rebalanceo.avisos.filter(x => x.nivel !== 'info').map(x => ({ titulo: x.titulo, que_hacer: x.queHacer })),
+      hechos_relevantes_sec: Object.values(datos.eventos?.porTicker ?? {}).flat().filter(e => e.gravedad !== 'info').slice(0, 15),
+      ideas_top: (ops?.ideas ?? []).map(i => ({ ticker: i.ticker, nombre: i.nombre, mercado: i.mercado, puesto: i.puesto, sector: i.sector, precio: i.precioHoy,
+        analistas: i.analistas && { recomendacion: i.analistas.recomendacion, potencial: Number(i.analistas.potencial.toFixed(3)), n: i.analistas.n }, resultados: i.proximosResultados })),
+      titulares: Object.entries(ops?.noticias ?? {}).flatMap(([t, ns]) => ns.slice(0, 2).map(n => ({ ticker: t, titulo: n.titulo, fuente: n.fuente, fecha: n.fecha }))).slice(0, 40),
+    };
+  }, [datos, ops]);
+
   if (!items.length && !cargandoCartera) {
     return (
       <div className={`${tarjeta} max-w-2xl mx-auto p-8 text-center space-y-3`}>
@@ -484,6 +508,8 @@ export default function AsesorTab({ irA }: { irA: (destino: 'DATA_WAREHOUSE' | '
           )}
         </section>
       )}
+
+      {items.length > 0 && <ChatAsesor contexto={contexto} items={items} perfil={perfil} />}
 
       {datos && datos.avisosDatos.length > 0 && (
         <details className="text-[11px] text-zinc-500 dark:text-[#71717a]">

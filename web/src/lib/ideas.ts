@@ -70,3 +70,36 @@ export async function ideasDelBot(): Promise<IdeasDelBot | null> {
   cache = { at: Date.now(), datos };
   return datos;
 }
+
+export interface LugarEnRanking {
+  mercado: Mercado;
+  enTop: boolean;
+  // EE.UU.: percentil de su utilidad respaldada por caja dentro de su sector (1 = la mejor) y si reparte más que su
+  // utilidad. Chile: su puesto por momentum de 12 meses en el IPSA.
+  percentilSector?: number;
+  repartoAlto?: boolean;
+  puesto?: number;
+  de?: number;
+  momentum?: number;
+}
+
+/** Dónde queda una acción en los rankings completos del último escaneo (no solo en el Top). */
+export async function lugarEnRanking(ticker: string): Promise<LugarEnRanking | null> {
+  const t = ticker.toUpperCase();
+  const chile = t.endsWith('.SN');
+  const { data } = await supabase
+    .from('analisis_ia')
+    .select(chile ? 'r:candidatos_json->ranking_cl' : 'r:candidatos_json->calidad_us')
+    .order('fecha', { ascending: false })
+    .limit(1);
+  const r = (data?.[0] as { r?: unknown } | undefined)?.r;
+  const ideas = await ideasDelBot().catch(() => null);
+  const enTop = !!(chile ? ideas?.cl : ideas?.us)?.some(i => i.ticker === t);
+  if (chile) {
+    const lista = Array.isArray(r) ? r as { ticker: string; momentum: number }[] : [];
+    const k = lista.findIndex(x => x.ticker === t);
+    return k < 0 ? (enTop ? { mercado: 'Chile', enTop } : null) : { mercado: 'Chile', enTop, puesto: k + 1, de: lista.length, momentum: lista[k].momentum };
+  }
+  const q = (r as Record<string, { p?: number; pa?: boolean }> | null | undefined)?.[t];
+  return q && typeof q.p === 'number' ? { mercado: 'EE.UU.', enTop, percentilSector: q.p, repartoAlto: !!q.pa } : (enTop ? { mercado: 'EE.UU.', enTop } : null);
+}
