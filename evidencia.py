@@ -92,6 +92,22 @@ def rsi_wilder(p: pd.DataFrame, n: int = 14) -> pd.DataFrame:
     return 100 - 100 / (1 + sube / baja)
 
 
+def devolvio_mitad(p: pd.DataFrame, ventana: int = 252, alza_minima: float = 0.3) -> pd.DataFrame:
+    """En el último año subió al menos 30% desde un mínimo hasta un máximo posterior, y hoy ya devolvió la mitad o más
+    de esa subida: el caso de una ganancia que se va (el aviso de lib/avisos.ts)."""
+    x = p.to_numpy(dtype=float)
+    salida = np.zeros_like(x, dtype=bool)
+    columnas = np.arange(x.shape[1])
+    for i in range(ventana - 1, len(x)):
+        w = x[i - ventana + 1:i + 1]
+        k = np.argmax(np.where(np.isnan(w), -np.inf, w), axis=0)
+        alto = w[k, columnas]
+        bajo = np.fmin.accumulate(w, axis=0)[k, columnas]  # el mínimo antes del máximo
+        with np.errstate(invalid="ignore", divide="ignore"):
+            salida[i] = (alto / bajo - 1 >= alza_minima) & (w[-1] <= bajo + 0.5 * (alto - bajo))
+    return pd.DataFrame(salida, index=p.index, columns=p.columns)
+
+
 def senales(p: pd.DataFrame) -> dict[str, pd.DataFrame]:
     """Cada señal con el signo del asesor: más alto = más atractiva según la regla que la usa."""
     ret = p.pct_change(fill_method=None)
@@ -122,6 +138,7 @@ def senales(p: pd.DataFrame) -> dict[str, pd.DataFrame]:
         "volatilidad_12m": ret.rolling(252, min_periods=200).std() * np.sqrt(252),
         "distancia_maximo_52s": p / p.rolling(252).max() - 1,
         "bajo_bollinger": p < sma20 - 2 * std20,
+        "devolvio_mitad": devolvio_mitad(p),
         # Yahoo repite el mismo cierre por semanas en varias acciones chilenas: esos tramos no sirven
         "congelado": (ret == 0).astype(float).rolling(20).sum() > 8,
     }
@@ -154,6 +171,9 @@ REGLAS = {
     "rsi30_bajista": ("RSI bajo 30 en tendencia bajista", lambda s: (s["rsi14"] < 30) & (s["tendencia_sma200"] < -0.03)),
     "estirado": ("Más de 25% sobre su media de 200 días", lambda s: s["tendencia_sma200"] > 0.25),
     "bajo_bollinger": ("Bajo su banda inferior de Bollinger", lambda s: s["bajo_bollinger"]),
+    # Las dos preguntas de "vender caro": ¿baja una acción que llegó a su máximo? ¿y una que devolvió su ganancia?
+    "maximo_52s": ("A menos de 2% de su máximo de 52 semanas", lambda s: s["distancia_maximo_52s"] >= -0.02),
+    "devolvio_mitad": ("Subió 30% o más en el año y devolvió la mitad o más de esa subida", lambda s: s["devolvio_mitad"]),
     "filtro_top5": ("Filtro del bot: RSI bajo 50 y a menos de 20% bajo la EMA200",
                     lambda s: (s["rsi14"] < 50) & (s["dist_ema200"] > -0.2)),
 }
