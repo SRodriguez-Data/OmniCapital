@@ -185,6 +185,7 @@ test('el veredicto es una sola decisión: primero vender, después comprar, con 
   assert.equal(v.pasos[0].lado, 'VENDER');
   assert.ok(v.pasos.slice(1).every(p => p.lado === 'COMPRAR') && v.pasos.length === 1 + aporte.ordenes.length);
   assert.ok(v.titulo.startsWith('Vende MALA y compra VOO'), v.titulo);
+  assert.ok(veredictoDe(null, { ...plan, ventas: plan.ventas.map(o => ({ ...o, todo: false })) }).titulo.endsWith('(parte)'));
   assert.ok(/MALA se vende: tendencia y momentum en contra/.test(v.detalle), v.detalle);
   assert.ok(/No vendas para bajar/.test(v.detalle), v.detalle);
 

@@ -75,8 +75,9 @@ export function veredictoDe(aporte: PlanAporte | null, plan: PlanRebalanceo): Ve
   if (ventas.length && compras.length) porque.push('Si la plata de la venta demora, parte con lo que te alcance.');
 
   const monto = fmtMoney(invierteCLP, 'CLP');
-  if (ventas.length && compras.length) return { accion: 'VENDER Y COMPRAR', titulo: `Vende ${nombres(ventas)} y compra ${nombres(compras)} con ${monto}`, detalle: porque.join(' '), pasos };
-  if (ventas.length) return { accion: 'VENDER', titulo: `Vende ${nombres(ventas)}`, detalle: porque.join(' '), pasos };
+  const vendes = lista(ventas.map(o => `${sinSufijo(o.ticker)}${o.todo ? '' : ' (parte)'}`));
+  if (ventas.length && compras.length) return { accion: 'VENDER Y COMPRAR', titulo: `Vende ${vendes} y compra ${nombres(compras)} con ${monto}`, detalle: porque.join(' '), pasos };
+  if (ventas.length) return { accion: 'VENDER', titulo: `Vende ${vendes}`, detalle: porque.join(' '), pasos };
   return { accion: 'COMPRAR', titulo: `Compra ${nombres(compras)} con ${monto}`, detalle: porque.join(' '), pasos };
 }
 
