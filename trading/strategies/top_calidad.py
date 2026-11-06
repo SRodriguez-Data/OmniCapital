@@ -37,7 +37,7 @@ class TopCalidad(Estrategia):
         simbolos = [simbolo_alpaca(c['ticker']) for c in ideas]
         # El ranking completo es el de la calidad de todas las evaluadas, con el mismo orden con que el bot elige
         tabla = f.get('calidad') or {}
-        ranking = sorted((t for t, x in tabla.items() if not x.get('pa')), key=lambda t: (-tabla[t]['p'], -tabla[t]['c']))
+        ranking = sorted((t for t, x in tabla.items() if not x.get('pa') and x.get('u', True)), key=lambda t: (-tabla[t]['p'], -tabla[t]['c']))
         return Objetivo(
             pesos=pesos_de(ideas, simbolo_alpaca),
             descripcion=f'{len(simbolos)} ideas del escaneo con precios del {f["precios_del"]}',

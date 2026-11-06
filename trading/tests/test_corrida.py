@@ -185,6 +185,17 @@ class EntreRebalanceos(unittest.TestCase):
         correr(b, sb)
         self.assertEqual(b.enviadas, [])
 
+    def test_la_que_perdio_plata_no_se_mantiene_por_el_margen(self):
+        b = self.cartera_completa()
+        nuevas = IDEAS[1:] + [{'ticker': 'ZZZ', 'price': 100.0}]
+        sb = SupabaseFalso(ideas=nuevas, estado={'rebalanceo': {'mes': '2026-10'}})
+        orden = [c['ticker'] for c in nuevas] + ['AAA']
+        calidad = {t: {'p': 1 - i / 100, 'c': 0.1, 'pa': False} for i, t in enumerate(orden)}
+        calidad['AAA']['u'] = False
+        sb.tablas['analisis_ia'][0]['calidad'] = calidad
+        correr(b, sb)
+        self.assertIn('AAA', [o.symbol for o in b.enviadas if o.side.value == 'sell'])
+
     def test_la_que_se_mantiene_por_el_margen_tiene_una_parte_igual(self):
         from trading.main import cartera
         lista = {'A': 0.4, 'B': 0.35, 'C': 0.25}

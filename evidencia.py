@@ -236,7 +236,7 @@ def senales_fundamentales(F: dict[str, pd.DataFrame], financieras: set[str],
         "deuda_patrimonio": deuda_pat, "crec_utilidad": crec, "payout": payout,
         "per_barato": per_barato, "per_caro": per_caro, "roe_alto": roe_alto, "roe_bajo": roe_bajo,
         "deuda_alta": deuda_alta, "utilidad_creciendo": creciendo, "utilidad_cayendo": cayendo,
-        "payout_alto": payout_alto,
+        "payout_alto": payout_alto, "con_utilidad": ni > 0,
         "fundamental_favorable": (puntos >= 2) & (datos >= 2), "fundamental_debil": (puntos <= -2) & (datos >= 2),
     }
 
@@ -286,10 +286,12 @@ def tabla_sp500() -> pd.DataFrame | None:
 # Los métodos que usa el Top (quantum_trader_serverless.py): cada mes se eligen N acciones y se mide su exceso
 METODOS = {
     "calidad_eeuu": {
-        "nombre": "EE.UU.: utilidad respaldada por caja, la mejor de cada sector",
+        "nombre": "EE.UU.: utilidad respaldada por caja, la mejor de cada sector entre las que ganan plata",
         "mercado": "EE.UU.", "n": 20,
-        # Percentil dentro del sector (sin bancos ni aseguradoras), sin las que reparten más que su utilidad
-        "puntaje": lambda s: s["calidad_sector"].where(~s["payout_alto"]),
+        # Percentil dentro del sector (sin bancos ni aseguradoras), sin las que reparten más que su utilidad ni las que
+        # perdieron plata: un castigo contable hunde la utilidad y sube este puntaje sin que la empresa sea mejor. Medido
+        # el 2026-11-06: el método sin ellas conserva su ventaja, y ellas solas no tienen evidencia (t 0,88)
+        "puntaje": lambda s: s["calidad_sector"].where(~s["payout_alto"] & s["con_utilidad"]),
     },
     "momentum_chile": {
         "nombre": "Chile: las de mayor alza de los últimos 12 meses (sin el último mes)",

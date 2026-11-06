@@ -279,7 +279,7 @@ export default function TopIdeasV2({ us, cl, historial, fecha }: { us: Candidato
         <Historial h={historial} />
       </div>
 
-      {lista('calidad_eeuu', 'EE.UU.: utilidad respaldada por caja (una o dos por sector, sin bancos)', us,
+      {lista('calidad_eeuu', 'EE.UU.: utilidad respaldada por caja (una o dos por sector, sin bancos ni empresas con pérdidas)', us,
         `Se evalúa cada empresa del S&P 500 frente a las de su sector con sus estados financieros en la SEC; quedan fuera las que reparten en dividendos más de lo que ganan.${avisoPesos('calidad_eeuu')}`)}
       {lista('momentum_chile', 'Chile: las de mayor alza de los últimos 12 meses', cl,
         `Precios oficiales de la Bolsa de Santiago.${avisoPesos('momentum_chile')}`)}

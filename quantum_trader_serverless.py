@@ -152,7 +152,8 @@ IDEAS_CHILE = 5
 def ideas_calidad_eeuu(filas):
     """Las acciones del S&P 500 con la utilidad más respaldada por caja frente a su sector: el método
     calidad_eeuu de evidencia.py, el único que en 10 años le ganó al mercado de forma consistente (en las dos
-    mitades de la muestra). Excluye bancos y aseguradoras y a las que reparten más que su utilidad.
+    mitades de la muestra). Excluye bancos y aseguradoras, a las que reparten más que su utilidad y a las que perdieron
+    plata en su último año (un castigo contable les sube el puntaje sin que sean mejores).
     `filas`: ticker -> última fila de precio. Devuelve (ideas, tabla de calidad de todas las evaluadas)."""
     import evidencia
     import fundamentales_sec
@@ -183,14 +184,15 @@ def ideas_calidad_eeuu(filas):
             continue
         regs.append({"ticker": t, "sector_gics": sector_de.get(t), "calidad": calidad,
                      "payout_alto": bool(es_numero(div) and f["utilidad"] > 0 and div / f["utilidad"] > 1),
+                     "con_utilidad": bool(f["utilidad"] > 0),
                      "cierre_fiscal": f["cierre"].strftime("%Y-%m-%d")})
     if not regs:
         return [], {}
     df = pd.DataFrame(regs)
     df["percentil_sector"] = df.groupby("sector_gics")["calidad"].rank(pct=True)
-    tabla = {r.ticker: {"c": round(float(r.calidad), 4), "p": round(float(r.percentil_sector), 3), "pa": r.payout_alto}
+    tabla = {r.ticker: {"c": round(float(r.calidad), 4), "p": round(float(r.percentil_sector), 3), "pa": r.payout_alto, "u": r.con_utilidad}
              for r in df.itertuples()}
-    elegidas = df[~df["payout_alto"]].sort_values(["percentil_sector", "calidad"], ascending=False).head(IDEAS_EEUU)
+    elegidas = df[~df["payout_alto"] & df["con_utilidad"]].sort_values(["percentil_sector", "calidad"], ascending=False).head(IDEAS_EEUU)
     logging.info(f"Calidad de utilidades: {len(df)} acciones evaluadas, elegidas {', '.join(elegidas['ticker'])}")
     ideas = []
     for r in elegidas.itertuples():

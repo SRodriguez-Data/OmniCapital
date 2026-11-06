@@ -3,7 +3,7 @@ import type { Mercado } from './evidenciaMetodos';
 import { supabase } from './supabase';
 
 // Las ideas del último escaneo del bot (quantum_trader_serverless.py, método v2), tal como las guarda en analisis_ia:
-// las 20 acciones de EE.UU. con la utilidad más respaldada por caja de cada sector y las 5 chilenas de mayor momentum,
+// las 20 acciones de EE.UU. que ganan plata con la utilidad más respaldada por caja de su sector y las 5 chilenas de mayor momentum,
 // cada una con el peso que le da el método medido (igual en EE.UU., inverso a la volatilidad en Chile).
 
 export interface IdeaTop {
