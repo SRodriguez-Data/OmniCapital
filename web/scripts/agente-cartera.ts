@@ -108,101 +108,36 @@ async function leerEstado(db: SupabaseClient, usuario: string): Promise<{ estado
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const sinSufijo = (t: string) => esc(t.replace(/\.SN$/, ''));
-const pct0 = (x: number) => `${Math.round(x * 100)}%`;
-const pct1 = (x: number) => `${(x * 100).toFixed(1)}%`;
 const pesos = (n: number) => `$${Math.round(n).toLocaleString('es-CL')}`;
 const corto = (s: string, max = 150) => (s.length <= max ? s : `${s.slice(0, s.lastIndexOf(' ', max))}…`);
 
-const signo1 = (x: number) => `${x >= 0 ? '+' : '−'}${pct1(Math.abs(x)).replace('.', ',')}`;
+const VERBO: Record<AsesorDelDia['veredicto']['accion'], string> = { COMPRAR: '🟢', 'VENDER Y COMPRAR': '🔁', VENDER: '🔴', MANTENER: '⚪' };
 
-// Una línea por mercado: color, distancia a su media de 200 días y el cierre que lo cambiaría
-function lineaSemaforo(s: Semaforo, fmtNivel: (s: Semaforo, x: number) => string): string {
-  const nombre = s.nombre.replace(/^.*\((.*)\)$/, '$1');
-  const rojo = s.estado === 'rojo';
-  return `${rojo ? '🔴' : '🟢'} <b>${esc(nombre)}</b> ${signo1(s.distancia)} vs. su media · ${rojo ? 'verde si cierra sobre' : 'rojo si cierra bajo'} ${esc(fmtNivel(s, s.cambiaEn))} (${signo1(s.distanciaCambio)})`;
-}
-
-const VERBO: Record<AsesorDelDia['veredicto']['accion'], string> = { COMPRAR: '🟢 COMPRA', 'VENDER Y COMPRAR': '🔁 VENDE Y COMPRA', VENDER: '🔴 VENDE', MANTENER: '⚪ MANTÉN' };
-
-function mensaje(asesor: AsesorDelDia, motivos: string[], avisos: string[], verdes: Semaforo[], hoy: string,
-  fmtPrecio: (n: number, m: 'USD' | 'CLP') => string, fmtNivel: (s: Semaforo, x: number) => string, hechos: EventoSec[]): string {
+// El aviso es la decisión y sus pasos. Lo demás vive en la app; aquí solo entra lo que hoy cambia algo
+function mensaje(asesor: AsesorDelDia, alertas: string[], avisos: string[], verdes: Semaforo[], hoy: string,
+  fmtPrecio: (n: number, m: 'USD' | 'CLP') => string, hechos: EventoSec[]): string {
+  const v = asesor.veredicto;
   const plan = asesor.rebalanceo;
   const cantidad = (n: number) => n.toLocaleString('es-CL', { maximumFractionDigits: 4 });
   const [a, m, d] = hoy.split('-');
-  const l: string[] = [`<b>🧭 Tu asesor · ${d}-${m}-${a}</b>`];
-  const sector = plan.antes.sector;
-  l.push(`Valor ${pesos(plan.valorCLP)} · Chile ${pct0(plan.antes.chile)} (meta hasta ${pct0(plan.metaChile)})${sector ? ` · ${esc(sector.nombre)} ${pct0(sector.peso)} (máx. 35%)` : ''}`);
-  l.push('', `<b>${VERBO[asesor.veredicto.accion]}: ${esc(asesor.veredicto.titulo)}</b>`);
+  const l: string[] = [`<b>🧭 Tu asesor · ${d}-${m}-${a}</b>`, '', `<b>${VERBO[v.accion]} ${esc(v.titulo)}</b>`];
+  if (v.pasos.length) l.push('');
+  v.pasos.forEach((p, i) => {
+    const venta = p.lado === 'VENDER';
+    l.push(`${i + 1}. <b>${venta ? 'Vende' : 'Compra'} ${sinSufijo(p.ticker)}</b> ${cantidad(p.cantidad)}${p.todo ? ' (todo)' : ''} · ${venta ? 'no menos de' : 'hasta'} ${fmtPrecio(p.limite, p.moneda)} · ≈${pesos(p.montoCLP)}`);
+  });
+  l.push('', `<i>${esc(v.detalle)}</i>`);
+  if (v.pasos.length) l.push('Todo lo demás: mantén.');
 
-  const ap = asesor.aporte;
-  if (ap?.ordenes.length) {
-    l.push('', `<b>💰 Tu aporte del mes (${pesos(ap.montoCLP)})</b>`);
-    for (const o of ap.ordenes) {
-      l.push(`• <b>${sinSufijo(o.ticker)}</b> ${cantidad(o.cantidad)} · hasta ${fmtPrecio(o.limite, o.moneda)} · ≈${pesos(o.montoCLP)}${o.papel === 'nucleo' ? ' · núcleo' : ` · Top #${o.puesto}`}`);
-    }
-    const ev = ap.evidencia.top['EE.UU.'];
-    if (ap.ordenes.some(o => o.papel === 'top' && o.mercado === 'EE.UU.') && ev) l.push(`<i>${esc(corto(ev, 260))}</i>`);
-    for (const n of ap.notas.slice(0, 2)) l.push(`<i>${esc(corto(n, 220))}</i>`);
-  }
-
-  if (hechos.length) {
-    l.push('', '<b>📰 Hechos relevantes de tus empresas (SEC)</b>');
-    for (const e of hechos.slice(0, 5)) l.push(`${e.gravedad === 'grave' ? '🔴' : '🟡'} <b>${esc(e.ticker)}</b> ${e.fecha.slice(8, 10)}-${e.fecha.slice(5, 7)}: ${esc(corto(e.titulo, 160))} · <a href="${esc(e.url)}">ver</a>`);
-    if (hechos.some(e => e.gravedad === 'grave')) l.push('<i>Un hecho grave frena las compras de esa empresa por un mes, hasta que lo revises.</i>');
-  }
-  for (const f of asesor.frenos.filter(f => !hechos.some(e => e.ticker === f.ticker && e.gravedad === 'grave')).slice(0, 2)) {
-    l.push(`🔴 <b>${esc(f.ticker)}</b>: ${esc(corto(f.motivo, 200))}`);
-  }
-
-  if (plan.semaforos.length) {
-    l.push('', '<b>🚦 Mercados</b>');
-    for (const s of plan.semaforos) l.push(lineaSemaforo(s, fmtNivel));
-  }
-  for (const s of verdes) {
-    l.push(`✅ <b>${esc(s.nombre)}</b> volvió a verde: si dejaste plata en refugio por la protección, ingrésala como aporte en el Optimizador para volver a invertirla.`);
-  }
-  const importantes = plan.avisos.filter(x => x.nivel !== 'info');
-  if (importantes.length) {
-    l.push('', '<b>⚠️ Avisos</b>');
-    for (const x of importantes.slice(0, 4)) {
-      l.push(`${x.nivel === 'alerta' ? '🔴' : '🟡'} <b>${esc(x.titulo)}</b>`, esc(corto(x.detalle, 320)), `→ ${esc(corto(x.queHacer, 340))}`);
-    }
-  }
-
-  if (plan.ventas.length) {
-    l.push('', '<b>🔴 Vender</b>');
-    for (const o of plan.ventas) {
-      l.push(`• <b>${sinSufijo(o.ticker)}</b> ${cantidad(o.cantidad)}${o.todo ? ' (todo)' : ''} · límite ${fmtPrecio(o.limite, o.moneda)} · ≈${pesos(o.montoCLP)}`);
-      l.push(`   <i>${esc(corto(o.motivo))} Peso ${pct1(o.pesoAntes)} → ${pct1(o.pesoDespues)}.</i>`);
-    }
-  }
-  if (plan.compras.length) {
-    l.push('', `<b>🟢 Comprar</b> con ${pesos(plan.comprasCLP)}${plan.ventas.length ? ' de las ventas' : ''}`);
-    for (const o of plan.compras) {
-      l.push(`• <b>${sinSufijo(o.ticker)}</b> ${cantidad(o.cantidad)} · hasta ${fmtPrecio(o.limite, o.moneda)} · ≈${pesos(o.montoCLP)}`);
-      if (plan.reinversion === 'paridad') l.push(`   <i>${esc(o.motivo.replace(/^Señal AUMENTAR\.\s*/, '').split(/[:.]/)[0])} · peso ${pct1(o.pesoAntes)} → ${pct1(o.pesoDespues)}</i>`);
-    }
-  }
-  if (plan.ventas.length || plan.compras.length) {
-    l.push('', `Después: Chile ${pct0(plan.despues.chile)}${plan.despues.sector ? ` · ${esc(plan.despues.sector.nombre)} ${pct0(plan.despues.sector.peso)}` : ''}. Primero vende y después compra, con órdenes límite.`);
-  } else {
-    l.push('', '✅ Nada que vender: tu cartera está dentro de sus límites y nada tiene una señal de venta con evidencia.');
-  }
-  const mantener = plan.posturas.filter(p => p.accion === 'MANTENER').length;
-  if (mantener) l.push(`⚪ Mantener: ${mantener} posiciones.`);
-
-  if (plan.refugioCLP > 0) l.push('', `🛟 ${pesos(plan.refugioCLP)} de las ventas van a refugio (depósito o money market), no a bolsa, hasta que su mercado vuelva a verde.`);
-  if (plan.niveles.length) {
-    l.push('', '<b>🎯 Precios que vigilo</b>');
-    for (const n of plan.niveles.slice(0, 6)) l.push(`• <b>${sinSufijo(n.ticker)}</b>: ${esc(corto(n.texto, 200))}`);
-  }
+  const extras: string[] = [...alertas];
+  for (const e of hechos.slice(0, 3)) extras.push(`${e.gravedad === 'grave' ? '🔴' : '🟡'} <b>${esc(e.ticker)}</b> SEC ${e.fecha.slice(8, 10)}-${e.fecha.slice(5, 7)}: ${esc(corto(e.titulo, 120))} · <a href="${esc(e.url)}">ver</a>`);
+  for (const f of asesor.frenos.filter(f => !hechos.some(e => e.ticker === f.ticker && e.gravedad === 'grave')).slice(0, 2)) extras.push(`🔴 <b>${esc(f.ticker)}</b>: ${esc(corto(f.motivo, 160))}`);
+  for (const s of verdes) extras.push(`✅ <b>${esc(s.nombre)}</b> volvió a verde: si dejaste plata en refugio, ingrésala como aporte en el Optimizador.`);
+  if (plan.refugioCLP > 0) extras.push(`🛟 ${pesos(plan.refugioCLP)} de las ventas van a refugio (depósito o money market) hasta que su mercado vuelva a verde.`);
   // Lo que no se pudo verificar hoy (cotizaciones, dólar): para no ejecutar a ciegas
-  if (avisos.length) {
-    l.push('', '<b>⚠️ Datos de hoy</b>');
-    for (const a of avisos.slice(0, 3)) l.push(`• ${esc(corto(a, 200))}`);
-  }
-  l.push('', `<i>Te aviso porque: ${motivos.join(', ')}.</i>`,
-    `Tu asesor, con el botón para registrar lo que compres: ${APP}/?vista=asesor`);
+  for (const x of avisos.slice(0, 2)) extras.push(`⚠️ ${esc(corto(x, 160))}`);
+  if (extras.length) l.push('', ...extras);
+  l.push('', `Detalle y botón para registrar: ${APP}/?vista=asesor`);
 
   let texto = l.join('\n');
   if (texto.length > MAX_MENSAJE) texto = `${texto.slice(0, texto.lastIndexOf('\n', MAX_MENSAJE - 60))}\n…\nDetalle completo: ${APP}`;
@@ -211,7 +146,7 @@ function mensaje(asesor: AsesorDelDia, motivos: string[], avisos: string[], verd
 
 // Notificación al celular: el veredicto y por qué aviso, con el enlace a la pestaña Asesor. Una suscripción que el
 // navegador dio de baja se borra
-async function enviarCelular(db: SupabaseClient, usuario: string, asesor: AsesorDelDia, motivos: string[], hechos: EventoSec[]): Promise<{ enviados: number; detalle: string }> {
+async function enviarCelular(db: SupabaseClient, usuario: string, asesor: AsesorDelDia, hechos: EventoSec[]): Promise<{ enviados: number; detalle: string }> {
   const nada = (detalle: string) => ({ enviados: 0, detalle });
   const privada = (process.env.VAPID_PRIVATE_KEY ?? '').trim();
   if (!privada) return nada('sin llave de notificaciones');
@@ -220,10 +155,9 @@ async function enviarCelular(db: SupabaseClient, usuario: string, asesor: Asesor
   if (!data?.length) return nada('ningún celular suscrito');
   const { enviarPush } = await import('../src/lib/push');
   const v = asesor.veredicto;
-  const partes = [v.detalle.split(' Además:')[0]];
+  const partes = [v.detalle];
   if (hechos.length) partes.push(`SEC: ${hechos.slice(0, 2).map(e => `${e.ticker} ${e.titulo.toLowerCase()}`).join('; ')}.`);
-  partes.push(`Te aviso porque ${motivos.join(', ')}.`);
-  const r = await enviarPush(data, { titulo: `${VERBO[v.accion].replace(/^\S+\s/, '')}: ${v.titulo}`, cuerpo: partes.join(' '), url: '/?vista=asesor', etiqueta: 'asesor' },
+  const r = await enviarPush(data, { titulo: v.titulo, cuerpo: partes.join(' '), url: '/?vista=asesor', etiqueta: 'asesor' },
     privada, (process.env.SEC_CONTACTO ?? '').trim() || 'avisos@omnicapital.app');
   if (r.vencidas.length) await db.from('push_suscripciones').delete().in('endpoint', r.vencidas);
   return { enviados: r.enviados, detalle: `${r.enviados} de ${data.length} celulares` };
@@ -251,8 +185,8 @@ async function main() {
   const clave = requerida('SUPABASE_SECRET_KEY');
   process.env.NEXT_PUBLIC_SUPABASE_URL = url;
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = clave;
-  const [{ asesorDelDia }, { fmtPrecio }, { parsePerfil }, { parsePortfolioItems }, { fmtNivel }] = await Promise.all([
-    import('../src/lib/asesor'), import('../src/lib/rebalanceo'), import('../src/lib/perfil'), import('../src/lib/validation'), import('../src/lib/avisos'),
+  const [{ asesorDelDia }, { fmtPrecio }, { parsePerfil }, { parsePortfolioItems }] = await Promise.all([
+    import('../src/lib/asesor'), import('../src/lib/rebalanceo'), import('../src/lib/perfil'), import('../src/lib/validation'),
   ]);
   const db = createClient(url, clave, { auth: { persistSession: false } });
 
@@ -299,6 +233,8 @@ async function main() {
   const rojos = plan.semaforos.filter(s => s.estado === 'rojo').map(s => s.clave);
   // Volvió a verde: estaba en rojo en la revisión anterior y hoy hay dato (sin dato no se concluye nada)
   const verdes = plan.semaforos.filter(s => s.estado === 'verde' && estado?.rojos.includes(s.clave));
+  const nuevos = estado ? plan.avisos.filter(x => x.nivel !== 'info' && !estado.avisos.includes(x.id)) : [];
+  const nivelesNuevos = estado ? plan.niveles.filter(n => Math.abs(n.distancia) <= CERCA && !estado.cerca.includes(`${n.tipo} ${n.ticker}`)) : [];
   const motivos: string[] = [];
   if (forzar) motivos.push('lo pediste');
   if (!estado) motivos.push('es la primera revisión');
@@ -306,8 +242,7 @@ async function main() {
   if (hechos.length) motivos.push('una de tus empresas presentó un hecho relevante');
   if (estado) {
     if (firma.join('|') !== estado.firma.join('|')) motivos.push('cambió el plan');
-    if (cerca.some(c => !estado.cerca.includes(c))) motivos.push('un precio se acercó a un nivel que cambia la decisión');
-    const nuevos = plan.avisos.filter(x => x.nivel !== 'info' && !estado.avisos.includes(x.id));
+    if (nivelesNuevos.length) motivos.push('un precio se acercó a un nivel que cambia la decisión');
     if (nuevos.some(x => x.id.startsWith('rojo:'))) motivos.push('un mercado pasó a zona roja');
     if (nuevos.some(x => x.id.startsWith('cerca:'))) motivos.push('un mercado se acercó a la zona roja');
     if (nuevos.some(x => x.tipo === 'ganancia')) motivos.push('una posición devolvió buena parte de su ganancia');
@@ -319,7 +254,11 @@ async function main() {
   const avisar = motivos.length > 0;
   // Sin el dólar observado se usa el del mercado (Yahoo), que basta para pesar la cartera: no vale un aviso diario
   const avisos = report.avisosDatos.filter(a => !/dólar observado/i.test(a));
-  const texto = mensaje(asesor, motivos.length ? motivos : ['sin novedades'], avisos, verdes, hoy, fmtPrecio, fmtNivel, hechos);
+  const alertas = [
+    ...nuevos.slice(0, 2).map(x => `${x.nivel === 'alerta' ? '🔴' : '🟡'} ${esc(x.titulo)}`),
+    ...nivelesNuevos.slice(0, 2).map(n => `🎯 <b>${sinSufijo(n.ticker)}</b>: ${esc(corto(n.texto, 160))}`),
+  ];
+  const texto = mensaje(asesor, alertas, avisos, verdes, hoy, fmtPrecio, hechos);
 
   if (prueba) {
     decir(texto.replace(/<\/?[bi]>/g, ''));
@@ -330,7 +269,7 @@ async function main() {
   let celular = { enviados: 0, detalle: '' };
   let porTelegram = false;
   if (avisar) {
-    celular = await enviarCelular(db, usuario, asesor, motivos, hechos).catch(() => ({ enviados: 0, detalle: 'falló el envío' }));
+    celular = await enviarCelular(db, usuario, asesor, hechos).catch(() => ({ enviados: 0, detalle: 'falló el envío' }));
     porTelegram = celular.enviados === 0 || (process.env.AGENTE_TELEGRAM ?? '').trim() === 'siempre';
     if (porTelegram) await enviarTelegram(texto);
   }

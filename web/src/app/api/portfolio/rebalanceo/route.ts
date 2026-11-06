@@ -5,7 +5,7 @@ import { buildAdvisorReport } from '@/lib/advisor';
 import { preciosIdeas } from '@/lib/asesor';
 import { ideasDelBot } from '@/lib/ideas';
 import { METAS_CHILE, META_CHILE_DEFECTO, esProteccion, nivelDe, parsePerfil } from '@/lib/perfil';
-import { oportunidadesDelBot, planRebalanceo } from '@/lib/rebalanceo';
+import { oportunidadesDelBot, planRebalanceo, plataNuevaDe } from '@/lib/rebalanceo';
 
 export const maxDuration = 60;
 
@@ -48,7 +48,7 @@ export async function POST(request: Request) {
     return NextResponse.json(planRebalanceo(report, modelo, {
       metaChile, aporteCLP: aporte, fraccionar: body?.fraccionar !== false,
       proteccion: esProteccion(body?.proteccion) ? body.proteccion : 'avisar',
-      nivel, ideas, precios,
+      nivel, ideas, precios, plataNueva: plataNuevaDe(perfil?.aporteMensual, aporte),
     }));
   } catch (err) {
     console.error('Error calculando el rebalanceo:', err);

@@ -74,6 +74,7 @@ export interface Foto {
 }
 
 export interface PlanRebalanceo {
+  sinVender: string | null; // lo que pasa un límite y no se vende porque la plata nueva lo corrige sola
   generado: string;
   usdClp: number;
   valorCLP: number;
@@ -100,6 +101,12 @@ export interface PlanRebalanceo {
   reinversion: 'nucleo_top' | 'paridad';
   evidenciaCompras: PlanAporte['evidencia'] | null;
 }
+
+// Un sector o Chile sobre su límite no se corrige vendiendo si la plata que entra en estos meses lo corrige sola: vender
+// cuesta comisión, cambio de moneda e impuestos, y tus aportes ya van a otra parte. Una empresa sobre su límite sí se vende
+const MESES_PARA_CORREGIR = 6;
+export const plataNuevaDe = (aporteMensual: number | null | undefined, montoHoy?: number | null) =>
+  Math.max(0, montoHoy ?? aporteMensual ?? 0) + (MESES_PARA_CORREGIR - 1) * Math.max(0, aporteMensual ?? 0);
 
 const pct = (x: number, d = 1) => `${(x * 100).toFixed(d)}%`;
 // Un precio con la precisión con que cotiza: centavos bajo $1.000 (fmtMoney redondea los pesos)
@@ -148,9 +155,11 @@ function recortarArriba(valores: { ticker: string; valor: number }[], monto: num
 export function planRebalanceo(
   report: AdvisorReport,
   modelo: RiskModel,
-  { metaChile = META_CHILE_DEFECTO, aporteCLP = 0, fraccionar = true, proteccion = 'avisar', nivel = null, ideas = null, precios = new Map(), frenos = new Map() }:
+  { metaChile = META_CHILE_DEFECTO, aporteCLP = 0, fraccionar = true, proteccion = 'avisar', nivel = null, ideas = null, precios = new Map(), frenos = new Map(), plataNueva = 0, reinvertir = true }:
     {
       metaChile?: number; aporteCLP?: number; fraccionar?: boolean; proteccion?: Proteccion;
+      plataNueva?: number; // lo que entra en los próximos meses (plataNuevaDe)
+      reinvertir?: boolean; // false: solo las ventas, porque quien llama invierte lo vendido junto con el aporte
       frenos?: Map<string, string>; // ticker → por qué no se compra (un hecho relevante grave)
       // Para reinvertir como el aporte del mes: el nivel de riesgo del perfil, las ideas del bot y sus precios
       nivel?: NivelRiesgo | null; ideas?: IdeasDelBot | null; precios?: Map<string, { price: number; name?: string; time?: string }>;
@@ -204,6 +213,8 @@ export function planRebalanceo(
     vender(a, (a.pesoEfectivo - (limite - MARGEN)) * V - vendidoCLP(a.ticker),
       `Pesa ${pct(a.pesoEfectivo)} de tu patrimonio${a.pesoEfectivo > a.peso + 0.005 ? ' contando tus fondos' : ''}, sobre el máximo de ${pct(limite, 0)}`);
   }
+  const conPlataNueva = (peso: number) => (peso * V) / (V + Math.max(0, plataNueva));
+  const corregidos: { nombre: string; despues: number }[] = [];
   // 3. Sectores sobre el límite
   const sectoresAntes = report.exposicion.sectores.filter(s => !SIN_SECTOR.has(s.nombre));
   const sectorTras = (nombre: string) => {
@@ -215,6 +226,10 @@ export function planRebalanceo(
   for (const s of sectoresAntes) {
     if (s.peso <= LIMITE_SECTOR) continue;
     sectoresReducidos.add(s.nombre);
+    if (conPlataNueva(sectorTras(s.nombre)) <= LIMITE_SECTOR) {
+      corregidos.push({ nombre: s.nombre, despues: conPlataNueva(sectorTras(s.nombre)) });
+      continue;
+    }
     const exceso = (sectorTras(s.nombre) - (LIMITE_SECTOR - MARGEN)) * V;
     const del = pos.filter(a => individual(a) && sectorDe(a) === s.nombre);
     const cortes = recortarArriba(del.map(a => ({ ticker: a.ticker, valor: a.valorCLP - vendidoCLP(a.ticker) })), exceso);
@@ -227,7 +242,9 @@ export function planRebalanceo(
   //    diversificada de tener Chile, se mantiene
   const chileAntes = report.exposicion.regiones.find(r => r.nombre === 'Chile')?.peso ?? 0;
   const chileTras = () => chileAntes - pos.filter(a => a.moneda === 'CLP').reduce((acc, a) => acc + vendidoCLP(a.ticker), 0) / V;
-  if (chileAntes > metaChile) {
+  if (chileAntes > metaChile && conPlataNueva(chileTras()) <= metaChile) {
+    corregidos.push({ nombre: 'Chile', despues: conPlataNueva(chileTras()) });
+  } else if (chileAntes > metaChile) {
     const exceso = (chileTras() - (metaChile - MARGEN)) * V;
     const chilenas = pos.filter(a => individual(a) && a.moneda === 'CLP');
     const cortes = recortarArriba(chilenas.map(a => ({ ticker: a.ticker, valor: a.valorCLP - vendidoCLP(a.ticker) })), exceso);
@@ -285,7 +302,7 @@ export function planRebalanceo(
     if (a.accion !== 'AUMENTAR') return `Su señal es ${a.accion}: el rebalanceo solo compra lo que tiene señal AUMENTAR.`;
     return null;
   };
-  const presupuesto = ventasCLP - refugioCLP + Math.max(0, aporteCLP);
+  const presupuesto = reinvertir ? ventasCLP - refugioCLP + Math.max(0, aporteCLP) : 0;
   const porTicker = new Map([...pos, ...report.candidatos].map(a => [a.ticker, a]));
   const totalDespues = V + Math.max(0, aporteCLP);
   const nucleoTop = !!nivel && SATELITE[nivel] > 0 && !!ideas;
@@ -397,6 +414,10 @@ export function planRebalanceo(
 
   // --- Notas ------------------------------------------------------------------------------------------------------
   const notas: string[] = [...notasCompra];
+  const sinVender = corregidos.length
+    ? `No vendas para bajar ${corregidos.map(c => c.nombre).join(' ni ')}: con tu plata nueva ${corregidos.length > 1 ? 'bajan solos a' : 'baja solo a'} ${corregidos.map(c => pct(c.despues, 0)).join(' y ')} en ${MESES_PARA_CORREGIR} meses.`
+    : null;
+  if (sinVender) notas.push(sinVender);
   if (ventas.length || compras.length) {
     notas.push('Usa órdenes límite al precio indicado (0,5% bajo el último para vender y sobre él para comprar): se ejecutan, pero si el precio salta no vendes muy barato ni compras muy caro. La bolsa de Santiago opera de 9:30 a 16:00 y la de Nueva York de 9:30 a 16:00 hora de Nueva York.');
   }
@@ -414,6 +435,7 @@ export function planRebalanceo(
 
   const sinInvertirCLP = Math.max(0, presupuesto - comprasCLP);
   return {
+    sinVender,
     generado: report.generado,
     usdClp,
     valorCLP: V,

@@ -23,7 +23,7 @@ export const NUCLEO: Record<Mercado, { ticker: string; nombre: string }> = {
 };
 const MARGEN = 0.02;
 const MIN_ORDEN = 10000; // bajo $10.000 una orden no vale la comisión
-const MIN_ORDEN_TOP = 30000; // cada idea del Top entra con un monto que importe
+const MIN_ORDEN_TOP = 45000; // pocas órdenes que importen: con $150.000 son el índice y dos ideas, no una lista larga
 const MAX_TOP = 6; // por mercado y por vez
 const HOLGURA_LIMITE = 0.005; // el precio límite queda 0,5% peor que el último: se ejecuta, pero sin regalar el precio
 const DIAS_PRECIO_ESCANEO = 7;
@@ -105,7 +105,7 @@ export function evidenciaTop(mercado: Mercado): string | null {
   if (!ev || !e) return null;
   const regla = mercado === 'Chile'
     ? 'las 5 acciones del IPSA que más subieron en 12 meses (sin el último), pesadas por su volatilidad'
-    : 'las 20 acciones del S&P 500 con la utilidad más respaldada por caja de su sector';
+    : 'las 20 acciones del S&P 500 que ganan plata con la utilidad más respaldada por caja de su sector';
   return `Comprar ${regla} y renovarlas cada mes rindió ${pct(e.retorno_anual)} al año en ${ev.anios}, ${signo(e.exceso_anual)} al año sobre el promedio de su mercado (evidencia ${ev.nivel}). Peor caída: ${pct(e.peor_caida, 0)}.`;
 }
 

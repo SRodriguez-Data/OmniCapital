@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowDownRight, ArrowUpRight, CheckCircle2, ChevronRight, ExternalLink, FileWarning, Loader2, Newspaper, RefreshCw,
-  Sparkles, Target, TrendingUp, Wallet,
+  Sparkles, TrendingUp,
 } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 import { supabase } from '@/lib/supabase';
@@ -12,10 +12,10 @@ import { FormRegistro, useRegistrar, type OrdenRegistro, type Registrar } from '
 import ChatAsesor from './ChatAsesor';
 import AvisosCelular from './AvisosCelular';
 
-// Tu asesor: lo que conviene hacer hoy, en una pantalla. El veredicto, las órdenes de tu aporte del mes (núcleo + Top
-// medido), los ajustes de la cartera, los mercados, los hechos relevantes de tus empresas y todas las oportunidades del
-// escáner con su consenso de analistas y sus titulares. El cálculo es el de lib/asesor.ts (POST /api/asesor), el mismo
-// del agente que avisa cada mañana; aquí solo se muestra. Los tipos se repiten para no llevar código de servidor.
+// Tu asesor: una sola decisión para hoy, con sus pasos en orden. El porqué, los mercados, los hechos relevantes y las
+// oportunidades del escáner quedan plegados más abajo, para quien quiera mirarlos. El cálculo es el de lib/asesor.ts
+// (POST /api/asesor), el mismo del agente que avisa cada mañana; aquí solo se muestra. Los tipos se repiten para no llevar
+// código de servidor.
 
 type Mercado = 'EE.UU.' | 'Chile';
 interface OrdenAporte {
@@ -31,6 +31,10 @@ interface OrdenRebalanceo {
   ticker: string; nombre?: string; lado: 'VENDER' | 'COMPRAR'; moneda: 'USD' | 'CLP'; cantidad: number; todo: boolean;
   precio: number; limite: number; montoCLP: number; pesoAntes: number; pesoDespues: number; motivo: string;
 }
+interface Paso {
+  lado: 'VENDER' | 'COMPRAR'; ticker: string; nombre?: string; moneda: 'USD' | 'CLP'; cantidad: number; todo: boolean;
+  precio: number; limite: number; montoCLP: number; motivo: string;
+}
 interface Semaforo { clave: string; nombre: string; estado: 'verde' | 'rojo'; distancia: number; cambiaEn: number; distanciaCambio: number; caidaDesdeMaximo: number }
 interface Aviso { id: string; nivel: 'alerta' | 'atencion' | 'info'; titulo: string; detalle: string; queHacer: string }
 interface Indicador { nombre: string; ticker: string; valor: number; unidad: string; cambio3m: number | null; tendencia: string | null }
@@ -38,7 +42,7 @@ interface EventoSec { ticker: string; fecha: string; titulo: string; gravedad: '
 interface Respuesta {
   asesor: {
     generado: string; nivel: string | null; aporteMensual: number | null;
-    veredicto: { accion: 'COMPRAR' | 'VENDER Y COMPRAR' | 'VENDER' | 'MANTENER'; titulo: string; detalle: string };
+    veredicto: { accion: 'COMPRAR' | 'VENDER Y COMPRAR' | 'VENDER' | 'MANTENER'; titulo: string; detalle: string; pasos: Paso[] };
     aporte: PlanAporte | null;
     rebalanceo: { ventas: OrdenRebalanceo[]; compras: OrdenRebalanceo[]; ventasCLP: number; comprasCLP: number; semaforos: Semaforo[]; avisos: Aviso[]; antes: { chile: number }; metaChile: number; evidenciaCompras: PlanAporte['evidencia'] | null };
     frenos: { ticker: string; motivo: string }[];
@@ -59,7 +63,6 @@ interface Idea {
 interface Oportunidades { fecha: string | null; ideas: Idea[]; noticias: Record<string, Noticia[]> }
 
 const PERFIL_LOCAL = 'omnicapital_perfil_v1';
-const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const pesos = (n: number) => `$${Math.round(n).toLocaleString('es-CL')}`;
 const pct = (x: number, d = 1) => `${(x * 100).toFixed(d).replace('.', ',')}%`;
 const signo = (x: number, d = 1) => `${x >= 0 ? '+' : '−'}${pct(Math.abs(x), d)}`;
@@ -69,7 +72,6 @@ const precio = (n: number, moneda: 'USD' | 'CLP') => moneda === 'CLP'
 const cant = (n: number) => n.toLocaleString('es-CL', { maximumFractionDigits: 4 });
 const sinSufijo = (t: string) => t.replace(/\.SN$/, '');
 const fecha = (iso: string) => `${iso.slice(8, 10)}-${iso.slice(5, 7)}`;
-const diasHasta = (iso: string) => Math.round((Date.parse(`${iso}T12:00:00Z`) - Date.now()) / 86400000);
 
 const tarjeta = 'bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-[#27272a] rounded';
 const titulo = 'text-sm font-mono uppercase tracking-widest text-zinc-900 dark:text-[#e4e4e7] flex items-center gap-2';
@@ -100,53 +102,26 @@ function Registro({ o, registrar }: { o: OrdenRegistro; registrar: Registrar | n
   );
 }
 
-function TarjetaOrden({ o, registrar }: { o: OrdenAporte; registrar: Registrar | null }) {
-  const pronto = o.proximosResultados && diasHasta(o.proximosResultados) >= 0 && diasHasta(o.proximosResultados) <= 7;
+function FilaPaso({ n, p, registrar }: { n: number; p: Paso; registrar: Registrar | null }) {
+  const venta = p.lado === 'VENDER';
   return (
-    <div className={`${tarjeta} p-4`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-bold text-lg text-zinc-900 dark:text-[#e4e4e7]">{sinSufijo(o.ticker)}</span>
-            <span className={`${chip} ${o.papel === 'nucleo' ? 'bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300' : 'bg-fuchsia-100 dark:bg-fuchsia-900/30 text-fuchsia-700 dark:text-fuchsia-300'}`}>
-              {o.papel === 'nucleo' ? 'Núcleo' : `Top #${o.puesto}`}
-            </span>
-            {o.enRojo && <span className={`${chip} bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300`}>Mercado en rojo: más barato</span>}
-            {pronto && <span className={`${chip} bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300`}>Resultados {fecha(o.proximosResultados!)}</span>}
-          </div>
-          {o.nombre && <p className="text-xs text-zinc-500 dark:text-[#71717a] truncate">{o.nombre}</p>}
-        </div>
-        <div className="text-right shrink-0">
-          <p className="font-mono font-bold text-emerald-600 dark:text-emerald-400">{pesos(o.montoCLP)}</p>
-          <p className="text-[11px] font-mono text-zinc-500 dark:text-[#71717a]">+{cant(o.cantidad)} · hasta {precio(o.limite, o.moneda)}</p>
-        </div>
-      </div>
-      <p className="text-xs text-zinc-600 dark:text-[#a1a1aa] mt-2">{o.motivo}</p>
-      <Registro o={{ ticker: o.ticker, lado: 'COMPRAR', moneda: o.moneda, cantidad: o.cantidad, precio: o.precio }} registrar={registrar} />
-    </div>
-  );
-}
-
-function FilaAjuste({ o, registrar }: { o: OrdenRebalanceo; registrar: Registrar | null }) {
-  const venta = o.lado === 'VENDER';
-  return (
-    <div className="py-3 border-b last:border-b-0 border-zinc-200 dark:border-[#27272a]">
+    <li className={`${tarjeta} p-3`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-bold text-zinc-900 dark:text-[#e4e4e7] flex items-center gap-1.5">
-            {venta ? <ArrowDownRight className="w-4 h-4 text-red-500" /> : <ArrowUpRight className="w-4 h-4 text-emerald-500" />}
-            {sinSufijo(o.ticker)}
-            {o.todo && <span className={`${chip} bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300`}>Todo</span>}
+            <span className="font-mono text-xs text-zinc-500 dark:text-[#71717a]">{n}.</span>
+            {venta ? <ArrowDownRight className="w-4 h-4 text-red-500 shrink-0" /> : <ArrowUpRight className="w-4 h-4 text-emerald-500 shrink-0" />}
+            {venta ? 'Vende' : 'Compra'} {sinSufijo(p.ticker)}{p.todo ? ' (todo)' : ''}
           </p>
-          <p className="text-xs text-zinc-600 dark:text-[#a1a1aa] mt-1">{o.motivo}</p>
+          {p.nombre && <p className="text-xs text-zinc-500 dark:text-[#71717a] truncate">{p.nombre}</p>}
         </div>
         <div className="text-right shrink-0">
-          <p className={`font-mono font-bold ${venta ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{venta ? '−' : '+'}{cant(o.cantidad)}</p>
-          <p className="text-[11px] font-mono text-zinc-500 dark:text-[#71717a]">{venta ? 'no menos de' : 'hasta'} {precio(o.limite, o.moneda)} · {pesos(o.montoCLP)}</p>
+          <p className={`font-mono font-bold ${venta ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{pesos(p.montoCLP)}</p>
+          <p className="text-[11px] font-mono text-zinc-500 dark:text-[#71717a]">{cant(p.cantidad)} · {venta ? 'no menos de' : 'hasta'} {precio(p.limite, p.moneda)}</p>
         </div>
       </div>
-      <Registro o={{ ticker: o.ticker, lado: o.lado, moneda: o.moneda, cantidad: o.cantidad, precio: o.precio }} registrar={registrar} />
-    </div>
+      <Registro o={{ ticker: p.ticker, lado: p.lado, moneda: p.moneda, cantidad: p.cantidad, precio: p.precio }} registrar={registrar} />
+    </li>
   );
 }
 
@@ -297,7 +272,6 @@ export default function AsesorTab({ irA }: { irA: (destino: 'DATA_WAREHOUSE' | '
   const noticiasCartera = principales.flatMap(p => (ops?.noticias[p.ticker] ?? []).slice(0, 2).map(n => ({ ...n, ticker: p.ticker })))
     .sort((x, y) => y.fecha.localeCompare(x.fecha)).slice(0, 8);
   const ideas = (ops?.ideas ?? []).filter(i => filtro === 'todas' || (filtro === 'aporte' ? enAporte.has(i.ticker) : i.mercado === filtro));
-  const mes = MESES[new Date().getMonth()];
 
   // Lo que el chat sabe de esta pantalla (compacto: las cifras finas las pide al motor)
   const contexto = useMemo(() => {
@@ -341,8 +315,7 @@ export default function AsesorTab({ irA }: { irA: (destino: 'DATA_WAREHOUSE' | '
             <p className="text-[11px] font-mono uppercase tracking-[0.2em] opacity-80">Tu asesor · hoy</p>
             {a ? (
               <>
-                <h2 className="text-2xl md:text-3xl font-black mt-1 text-zinc-900 dark:text-white">{a.veredicto.accion === 'VENDER Y COMPRAR' ? 'Vende y compra' : a.veredicto.accion === 'COMPRAR' ? 'Compra' : a.veredicto.accion === 'VENDER' ? 'Vende' : 'Mantén'}: {a.veredicto.titulo.charAt(0).toLowerCase() + a.veredicto.titulo.slice(1)}</h2>
-                <p className="text-sm mt-2 text-zinc-700 dark:text-zinc-300">{a.veredicto.detalle}</p>
+                <h2 className="text-2xl md:text-3xl font-black mt-1 text-zinc-900 dark:text-white">{a.veredicto.titulo}</h2>
               </>
             ) : <p className="text-lg font-bold mt-1 text-zinc-900 dark:text-white flex items-center gap-2">{cargando && <Loader2 className="w-5 h-5 animate-spin" />} Revisando tu cartera, los mercados y las oportunidades…</p>}
           </div>
@@ -350,6 +323,23 @@ export default function AsesorTab({ irA }: { irA: (destino: 'DATA_WAREHOUSE' | '
             <RefreshCw className={`w-4 h-4 ${cargando ? 'animate-spin' : ''}`} />
           </button>
         </div>
+        {a && a.veredicto.pasos.length > 0 && (
+          <ol className="mt-4 space-y-2">
+            {a.veredicto.pasos.map((p, i) => <FilaPaso key={`${p.lado}${p.ticker}`} n={i + 1} p={p} registrar={registrar} />)}
+          </ol>
+        )}
+        {a && <p className="text-sm mt-3 text-zinc-700 dark:text-zinc-300">{a.veredicto.detalle}</p>}
+        <form onSubmit={e => { e.preventDefault(); calcular(monto); }} className="mt-4 flex flex-wrap items-end gap-2">
+          <label className="text-xs text-zinc-600 dark:text-[#a1a1aa]">
+            <span className="block mb-1">¿Cuánto vas a invertir? (pesos)</span>
+            <input
+              value={monto} inputMode="numeric" placeholder="150.000"
+              onChange={e => { const n = e.target.value.replace(/\D/g, ''); setMonto(n ? Number(n).toLocaleString('es-CL') : ''); }}
+              className="w-36 bg-white dark:bg-[#09090b] border border-zinc-300 dark:border-[#3f3f46] rounded px-2 py-1.5 font-mono text-sm text-zinc-900 dark:text-[#e4e4e7] focus:outline-none focus:border-[#60a5fa]"
+            />
+          </label>
+          <button type="submit" disabled={cargando} className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-[#09090b] font-bold font-mono uppercase text-xs px-3 py-2 rounded">Calcular</button>
+        </form>
         {datos && (
           <div className="mt-4 flex flex-wrap gap-x-6 gap-y-1 text-xs font-mono text-zinc-600 dark:text-[#a1a1aa]">
             <span>Cartera {pesos(datos.resumen.valorCLP)}</span>
@@ -369,60 +359,27 @@ export default function AsesorTab({ irA }: { irA: (destino: 'DATA_WAREHOUSE' | '
         </div>
       )}
 
-      {/* Aporte del mes */}
-      <section className="space-y-3">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <h3 className={titulo}><Wallet className="w-4 h-4 text-emerald-500" /> Tu aporte de {mes}</h3>
-          <form onSubmit={e => { e.preventDefault(); calcular(monto); }} className="flex items-end gap-2">
-            <label className="text-xs text-zinc-600 dark:text-[#a1a1aa]">
-              <span className="block mb-1">Monto (pesos)</span>
-              <input
-                value={monto} inputMode="numeric" placeholder="150.000"
-                onChange={e => { const n = e.target.value.replace(/\D/g, ''); setMonto(n ? Number(n).toLocaleString('es-CL') : ''); }}
-                className="w-36 bg-white dark:bg-[#09090b] border border-zinc-300 dark:border-[#3f3f46] rounded px-2 py-1.5 font-mono text-sm text-zinc-900 dark:text-[#e4e4e7] focus:outline-none focus:border-[#60a5fa]"
-              />
-            </label>
-            <button type="submit" disabled={cargando} className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-[#09090b] font-bold font-mono uppercase text-xs px-3 py-2 rounded">Calcular</button>
-          </form>
-        </div>
-        {aporte?.ordenes.length ? (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {aporte.ordenes.map(o => <TarjetaOrden key={o.ticker} o={o} registrar={registrar} />)}
-            </div>
-            <div className={`${tarjeta} p-4 space-y-2 text-xs text-zinc-600 dark:text-[#a1a1aa]`}>
-              <p>
-                <strong className="text-zinc-900 dark:text-[#e4e4e7]">Por qué así:</strong> {Math.round(aporte.satelite * 100)}% va a las ideas del Top, donde el laboratorio midió ventaja,
-                y el resto al índice completo, que se compra todos los meses, caiga o suba. Cada mes el Top entra en las ideas que menos tienes, así en pocos meses tienes la cartera completa del método.
-              </p>
-              {aporte.notas.map(n => <p key={n}>• {n}</p>)}
-              <Medido texto={aporte.evidencia.top['EE.UU.']} etiqueta="Lo medido: Top EE.UU." />
-              <Medido texto={aporte.evidencia.top.Chile} etiqueta="Lo medido: Top Chile" />
-              <Medido texto={aporte.evidencia.nucleo} etiqueta="Lo medido: comprar todos los meses" />
-              {aporte.descartadas.length > 0 && <Medido texto={aporte.descartadas.map(d => `${sinSufijo(d.ticker)}: ${d.motivo}`).join(' · ')} etiqueta="Lo que no se compra hoy y por qué" />}
-              <p className="text-[11px]">Usa órdenes límite al precio indicado: se ejecutan, pero si el precio salta no compras muy caro. Cuando compres, regístralo y tu cartera se actualiza sola.</p>
-            </div>
-          </>
-        ) : datos && (
-          <p className={`${tarjeta} p-4 text-sm text-zinc-600 dark:text-[#a1a1aa]`}>
-            {aporte ? aporte.notas[0] ?? 'Con este monto no hay una compra posible hoy.' : 'Indica cuánto quieres invertir y te digo exactamente qué comprar.'}
-          </p>
-        )}
-      </section>
+      {items.length > 0 && <ChatAsesor contexto={contexto} items={items} perfil={perfil} />}
 
-      {/* Ajustes de la cartera */}
-      {reb && (reb.ventas.length > 0 || reb.compras.length > 0) && (
-        <section className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <h3 className={titulo}><Target className="w-4 h-4 text-sky-500" /> Ajustes de tu cartera</h3>
-            <button onClick={() => irA('CALCULADORA')} className="text-xs font-mono uppercase text-[#60a5fa] inline-flex items-center gap-1">Detalle <ChevronRight className="w-3.5 h-3.5" /></button>
-          </div>
-          <div className={`${tarjeta} px-4`}>
-            {reb.ventas.map(o => <FilaAjuste key={`v${o.ticker}`} o={o} registrar={registrar} />)}
-            {reb.compras.map(o => <FilaAjuste key={`c${o.ticker}`} o={o} registrar={registrar} />)}
-          </div>
-          <p className="text-xs text-zinc-500 dark:text-[#71717a]">Primero vende y después compra. Se vende solo por una señal con evidencia o por pasar un límite (una empresa, un sector o tu máximo en Chile); lo vendido se reinvierte igual que tu aporte.</p>
-        </section>
+      {/* Todo lo que respalda la decisión, para quien quiera mirarlo */}
+      <details className="space-y-6">
+        <summary className="cursor-pointer text-sm font-mono uppercase tracking-widest text-zinc-600 dark:text-[#a1a1aa]">Ver el detalle: por qué, mercados, noticias y oportunidades</summary>
+
+      {aporte && aporte.ordenes.length > 0 && (
+        <div className={`${tarjeta} p-4 mt-4 space-y-2 text-xs text-zinc-600 dark:text-[#a1a1aa]`}>
+          <p>
+            <strong className="text-zinc-900 dark:text-[#e4e4e7]">Por qué así:</strong> {Math.round(aporte.satelite * 100)}% va a las ideas del Top, donde el laboratorio midió ventaja,
+            y el resto al índice completo, que se compra todos los meses, caiga o suba. Cada mes el Top entra en las ideas que menos tienes, así con el tiempo tienes la cartera completa del método.
+          </p>
+          {aporte.ordenes.map(o => <p key={o.ticker}>• <strong>{sinSufijo(o.ticker)}</strong>: {o.motivo}</p>)}
+          {aporte.notas.map(n => <p key={n}>• {n}</p>)}
+          <Medido texto={aporte.evidencia.top['EE.UU.']} etiqueta="Lo medido: Top EE.UU." />
+          <Medido texto={aporte.evidencia.top.Chile} etiqueta="Lo medido: Top Chile" />
+          <Medido texto={aporte.evidencia.nucleo} etiqueta="Lo medido: comprar todos los meses" />
+          {aporte.descartadas.length > 0 && <Medido texto={aporte.descartadas.map(d => `${sinSufijo(d.ticker)}: ${d.motivo}`).join(' · ')} etiqueta="Lo que no se compra hoy y por qué" />}
+          <p className="text-[11px]">Usa órdenes límite al precio indicado: se ejecutan, pero si el precio salta no compras muy caro. Cuando compres, regístralo y tu cartera se actualiza sola.</p>
+          <button onClick={() => irA('CALCULADORA')} className="text-xs font-mono uppercase text-[#60a5fa] inline-flex items-center gap-1">Ver el rebalanceo completo <ChevronRight className="w-3.5 h-3.5" /></button>
+        </div>
       )}
 
       {/* Mercados */}
@@ -495,7 +452,7 @@ export default function AsesorTab({ irA }: { irA: (destino: 'DATA_WAREHOUSE' | '
             </div>
           </div>
           <p className="text-xs text-zinc-600 dark:text-[#a1a1aa]">
-            Lo que el escáner encontró en todo el S&P 500 y el IPSA con los dos métodos que tienen ventaja medida: en EE.UU., la utilidad más respaldada por caja de cada sector;
+            Lo que el escáner encontró en todo el S&P 500 y el IPSA con los dos métodos que tienen ventaja medida: en EE.UU., la utilidad más respaldada por caja de cada sector entre las que ganan plata;
             en Chile, las de mayor alza de 12 meses. Junto a cada una, el consenso de los analistas, sus hechos relevantes y sus titulares.
           </p>
           {cargandoOps && !ops && <div className="flex items-center gap-2 py-10 justify-center text-sm text-zinc-500"><Loader2 className="w-5 h-5 animate-spin" /> Juntando precios, analistas y noticias…</div>}
@@ -511,7 +468,7 @@ export default function AsesorTab({ irA }: { irA: (destino: 'DATA_WAREHOUSE' | '
         </section>
       )}
 
-      {items.length > 0 && <ChatAsesor contexto={contexto} items={items} perfil={perfil} />}
+      </details>
 
       {datos && datos.avisosDatos.length > 0 && (
         <details className="text-[11px] text-zinc-500 dark:text-[#71717a]">

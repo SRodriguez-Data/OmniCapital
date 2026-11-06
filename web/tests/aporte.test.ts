@@ -6,7 +6,8 @@ import type { AdvisorReport, AssetReport, RiskModel } from '../src/lib/advisor';
 import { planAporte, type EntradaAporte } from '../src/lib/aporte';
 import type { IdeaTop, IdeasDelBot } from '../src/lib/ideas';
 import type { Semaforo } from '../src/lib/proteccion';
-import { planRebalanceo } from '../src/lib/rebalanceo';
+import { veredictoDe } from '../src/lib/asesor';
+import { planRebalanceo, plataNuevaDe } from '../src/lib/rebalanceo';
 
 const HOY = '2026-11-02';
 const idea = (ticker: string, puesto: number, x: Partial<IdeaTop> = {}): IdeaTop => {
@@ -37,11 +38,11 @@ function entrada(x: Partial<EntradaAporte> = {}): EntradaAporte {
 }
 const monto = (p: ReturnType<typeof planAporte>, t: string) => p.ordenes.find(o => o.ticker === t)?.montoCLP ?? 0;
 
-test('agresivo con Chile sobre su máximo: todo a EE.UU., 60% al Top (de a $30.000) y el resto al S&P 500', () => {
+test('agresivo con Chile sobre su máximo: todo a EE.UU., 60% al Top en dos ideas y el resto al S&P 500', () => {
   const p = planAporte(entrada());
   assert.equal(p.chileCLP, 0);
-  assert.deepEqual(p.ordenes.filter(o => o.papel === 'top').map(o => o.ticker), ['AAA', 'BBB', 'CCC']);
-  for (const t of ['AAA', 'BBB', 'CCC']) assert.ok(Math.abs(monto(p, t) - 30000) < 1, `${t}: ${monto(p, t)}`);
+  assert.deepEqual(p.ordenes.filter(o => o.papel === 'top').map(o => o.ticker), ['AAA', 'BBB']);
+  for (const t of ['AAA', 'BBB']) assert.ok(Math.abs(monto(p, t) - 45000) < 1, `${t}: ${monto(p, t)}`);
   assert.ok(Math.abs(monto(p, 'VOO') - 60000) < 1);
   assert.ok(p.sinInvertirCLP < 1, 'se invierte todo (fracciones en EE.UU.)');
   assert.ok(p.ordenes.every(o => o.limite > o.precio));
@@ -50,7 +51,7 @@ test('agresivo con Chile sobre su máximo: todo a EE.UU., 60% al Top (de a $30.0
 
 test('el Top rota: primero las ideas que no tienes, a igualdad la primera de la lista', () => {
   const p = planAporte(entrada({ posiciones: [{ ticker: 'AAA', valorCLP: 50000 }, { ticker: 'BBB', valorCLP: 10000 }] }));
-  assert.deepEqual(p.ordenes.filter(o => o.papel === 'top').map(o => o.ticker).sort(), ['CCC', 'DDD', 'EEE']);
+  assert.deepEqual(p.ordenes.filter(o => o.papel === 'top').map(o => o.ticker).sort(), ['CCC', 'DDD']);
 });
 
 test('no compra lo que tiene una razón con base: venta con evidencia, sector lleno, bloqueado', () => {
@@ -79,7 +80,7 @@ test('con espacio en Chile: su parte va en acciones enteras y la acción más ca
 test('mercado en rojo, solo avisar: se compra igual y se dice; con protección no se compra ahí', () => {
   const rojo = entrada({ semaforos: [luz('eeuu', 'rojo'), luz('chile', 'verde')] });
   const p = planAporte(rojo);
-  assert.ok(p.ordenes.length === 4 && p.ordenes.every(o => o.enRojo));
+  assert.ok(p.ordenes.length === 3 && p.ordenes.every(o => o.enRojo));
   assert.ok(p.notas.some(n => /Se compra igual/.test(n)));
   const q = planAporte({ ...rojo, proteccion: 'todo' });
   assert.equal(q.ordenes.length, 0);
@@ -135,4 +136,61 @@ test('rebalanceo agresivo: lo vendido va a núcleo + Top, nunca de vuelta a Chil
   const top = plan.compras.filter(o => o.ticker !== 'VOO').reduce((s, o) => s + o.montoCLP, 0);
   assert.ok(Math.abs(top / plan.comprasCLP - 0.6) < 0.02, `Top recibe ${top / plan.comprasCLP}`);
   assert.ok(plan.evidenciaCompras?.top['EE.UU.']);
+});
+
+// --- Una sola decisión ----------------------------------------------------------------------------------------------
+
+function carteraSobreElLimite(accion: AssetReport['accion'] = 'MANTENER') {
+  const posiciones = [
+    activo('BANCO.SN', 0.3, { sector: 'Financiero' }),
+    activo('MALA.SN', 0.05, { sector: 'Industrial', accion, motivos: ['Con evidencia en contra: tendencia y momentum en contra (sólida).'] }),
+    activo('IPSA.SN', 0.33, { tipo: 'etf', diversificado: true }),
+    activo('VOO', 0.32, { tipo: 'etf', diversificado: true }),
+  ];
+  const report = {
+    generado: `${HOY}T12:00:00Z`, usdClp: 1000, tasaLibreRiesgo: 0.05, resumen: { valorCLP: V } as AdvisorReport['resumen'],
+    mercado: { semaforos: [luz('chile', 'verde'), luz('eeuu', 'verde')] } as AdvisorReport['mercado'],
+    exposicion: { regiones: [{ nombre: 'Chile', peso: 0.68 }], sectores: [{ nombre: 'Financiero', peso: 0.4, via: [] }], empresas: [], notas: [] },
+    estrategia: [], hallazgos: [], posiciones, candidatos: [], avisosDatos: [], perfilInversionista: null,
+  } as AdvisorReport;
+  const modelo: RiskModel = { tickers: posiciones.map(a => a.ticker), cov: posiciones.map((_, i) => posiciones.map((__, j) => (i === j ? 0.04 : 0.01))) };
+  return { report, modelo };
+}
+
+test('la plata nueva cuenta: los límites que corrige sola no se venden; sin ella, sí', () => {
+  const { report, modelo } = carteraSobreElLimite();
+  const sinAporte = planRebalanceo(report, modelo, { metaChile: 0.6 });
+  assert.ok(sinAporte.ventas.some(o => o.ticker === 'BANCO.SN'));
+  assert.equal(sinAporte.sinVender, null);
+  const poca = planRebalanceo(report, modelo, { metaChile: 0.6, plataNueva: plataNuevaDe(50000) });
+  assert.ok(poca.ventas.length > 0, 'seis meses de un aporte chico no corrigen el límite');
+  const conAporte = planRebalanceo(report, modelo, { metaChile: 0.6, plataNueva: plataNuevaDe(500000) });
+  assert.equal(conAporte.ventas.length, 0);
+  assert.ok(/No vendas para bajar Financiero ni Chile/.test(conAporte.sinVender ?? ''), conAporte.sinVender ?? '');
+});
+
+test('la señal de venta con evidencia se vende igual, aunque haya plata nueva', () => {
+  const { report, modelo } = carteraSobreElLimite('REDUCIR');
+  const plan = planRebalanceo(report, modelo, { metaChile: 0.6, plataNueva: plataNuevaDe(500000), reinvertir: false });
+  assert.deepEqual(plan.ventas.map(o => o.ticker), ['MALA.SN']);
+  assert.equal(plan.compras.length, 0, 'lo vendido lo invierte quien llama, junto con el aporte');
+});
+
+test('el veredicto es una sola decisión: primero vender, después comprar, con título y porqué', () => {
+  const { report, modelo } = carteraSobreElLimite('REDUCIR');
+  const plan = planRebalanceo(report, modelo, { metaChile: 0.6, plataNueva: plataNuevaDe(500000), reinvertir: false });
+  const aporte = planAporte(entrada({ montoCLP: 150000 + plan.ventasCLP }));
+  const v = veredictoDe(aporte, plan);
+  assert.equal(v.accion, 'VENDER Y COMPRAR');
+  assert.equal(v.pasos[0].lado, 'VENDER');
+  assert.ok(v.pasos.slice(1).every(p => p.lado === 'COMPRAR') && v.pasos.length === 1 + aporte.ordenes.length);
+  assert.ok(v.titulo.startsWith('Vende MALA y compra VOO'), v.titulo);
+  assert.ok(/MALA se vende: tendencia y momentum en contra/.test(v.detalle), v.detalle);
+  assert.ok(/No vendas para bajar/.test(v.detalle), v.detalle);
+
+  const limpio = { ...plan, ventas: [], ventasCLP: 0, sinVender: null };
+  const compra = veredictoDe(planAporte(entrada()), limpio);
+  assert.equal(compra.accion, 'COMPRAR');
+  assert.equal(compra.pasos.length, 3, 'con $150.000 son el índice y dos ideas');
+  assert.equal(veredictoDe(null, limpio).accion, 'MANTENER');
 });
