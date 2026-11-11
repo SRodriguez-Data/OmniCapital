@@ -121,10 +121,12 @@ def _diarias(con: Conexion, ticker: str, barras: int, ajuste: str, segundos: flo
             pass
 
 
-def diarias(tickers: list[str], barras: int = 300, ajuste: str = "splits", segundos: float = 30) -> dict[str, pd.DataFrame]:
+def diarias(tickers: list[str], barras: int = 300, ajuste: str = "splits", segundos: float = 30,
+            fallidos: set[str] | None = None) -> dict[str, pd.DataFrame]:
     """Velas diarias de cada ticker chileno de Yahoo (SQM-B.SN), las últimas `barras` sesiones con transacciones.
     `ajuste`: "splits" (splits y aumentos de capital, como el cierre de Yahoo), "dividends" (además dividendos, para
-    medir retornos totales) o "none". Los tickers que la bolsa no reconoce o que fallan dos veces no vienen."""
+    medir retornos totales) o "none". Los tickers que la bolsa no reconoce o que fallan dos veces no vienen; los que
+    fallaron (el feed no respondió, a diferencia de un símbolo que la bolsa no tiene) se anotan en `fallidos`."""
     salida: dict[str, pd.DataFrame] = {}
     con = None
     for t in tickers:
@@ -142,6 +144,8 @@ def diarias(tickers: list[str], barras: int = 300, ajuste: str = "splits", segun
                 con = None
                 if intento:
                     logging.warning(f"{t}: la Bolsa de Santiago no entregó su historial ({str(e)[:100]})")
+                    if fallidos is not None:
+                        fallidos.add(t)
     if con is not None:
         con.cerrar()
     return salida

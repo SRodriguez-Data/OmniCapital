@@ -148,6 +148,7 @@ def get_fundamentals(ticker):
 METODO_TOP = "v2"
 IDEAS_EEUU = 20
 IDEAS_CHILE = 5
+MINIMO_EVALUADAS_EEUU = 250
 
 def ideas_calidad_eeuu(filas):
     """Las acciones del S&P 500 con la utilidad más respaldada por caja frente a su sector: el método
@@ -159,7 +160,7 @@ def ideas_calidad_eeuu(filas):
     import fundamentales_sec
     sp = evidencia.tabla_sp500()
     if sp is None:
-        return [], {}
+        raise RuntimeError("no se pudo leer la lista del S&P 500")
     sector_de = dict(zip(sp["ticker"], sp["GICS Sector"]))
     sec = fundamentales_sec.Sec()
     hoy = pd.Timestamp.now().normalize()
@@ -186,8 +187,10 @@ def ideas_calidad_eeuu(filas):
                      "payout_alto": bool(es_numero(div) and f["utilidad"] > 0 and div / f["utilidad"] > 1),
                      "con_utilidad": bool(f["utilidad"] > 0),
                      "cierre_fiscal": f["cierre"].strftime("%Y-%m-%d")})
-    if not regs:
-        return [], {}
+    # Lo normal son unas 380. Con muchas menos, faltó una cifra de la SEC o los precios del día: la lista saldría de
+    # una muestra parcial y no sería la del método que se midió
+    if len(regs) < MINIMO_EVALUADAS_EEUU:
+        raise RuntimeError(f"solo {len(regs)} acciones con precio y fundamentales al día (se exigen {MINIMO_EVALUADAS_EEUU})")
     df = pd.DataFrame(regs)
     df["percentil_sector"] = df.groupby("sector_gics")["calidad"].rank(pct=True)
     tabla = {r.ticker: {"c": round(float(r.calidad), 4), "p": round(float(r.percentil_sector), 3), "pa": r.payout_alto, "u": r.con_utilidad}
@@ -469,8 +472,10 @@ def run_serverless_screener():
     try:
         top_us, calidad_us = ideas_calidad_eeuu({t: r for t, r in liquidos.items() if not t.endswith('.SN') and t in frescos})
     except Exception as e:
-        logging.error(f"No se calcularon las ideas de EE.UU.: {str(e)[:200]}")
-        top_us = []
+        # No se guarda un escaneo con la lista vacía: la web y la simulación la leerían como "todas salieron de la lista".
+        # Queda vigente el escaneo anterior y la corrida falla a la vista
+        logging.error(f"❌ No se calcularon las ideas de EE.UU.: {str(e)[:200]}. No se guarda el escaneo de hoy.")
+        sys.exit(1)
     # El monto transado mínimo ya exige volumen hoy: el último precio chileno es real aunque haya huecos antes
     top_cl, ranking_cl = ideas_momentum_chile({t: r for t, r in liquidos.items() if t.endswith('.SN')})
     if not top_us and not top_cl:

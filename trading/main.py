@@ -211,6 +211,14 @@ class Corrida:
                 if preparar := getattr(self.broker, 'preparar', None):
                     preparar(sorted(set(objetivo.pesos) | objetivo.mantener))
                 fuera = sorted(s for s in objetivo.pesos if s in detenidas or not self.broker.activo(s)[0])
+                # Una o dos acciones suspendidas es normal; que no se pueda operar buena parte de la lista es una falla del
+                # corredor o de los precios, y vender por eso sería vender por un error
+                sin_operar = [s for s in fuera if s not in detenidas]
+                if len(sin_operar) > max(1, len(objetivo.pesos) // 3):
+                    objetivo.problema = (f'{len(sin_operar)} de las {len(objetivo.pesos)} acciones de la lista no se pueden operar ahora: '
+                                         'parece una falla del corredor o de los precios, no de las acciones')
+                    logging.warning(f'Sin {"rebalanceo" if mensual else "cambios por la lista"}: {objetivo.problema}')
+            if not objetivo.problema:
                 if fuera:
                     logging.warning(f'Quedan fuera (stop este mes o no se pueden operar): {", ".join(fuera)}')
                 lista = {s: w for s, w in objetivo.pesos.items() if s not in fuera}

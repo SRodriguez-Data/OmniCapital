@@ -39,16 +39,25 @@ def covarianza(x: np.ndarray) -> np.ndarray:
 
 def acotar(w: np.ndarray, minimo: float, maximo: float) -> np.ndarray:
     """Lleva los pesos a [minimo, maximo] sumando 1, repartiendo lo recortado en proporción entre los demás."""
+    w = np.asarray(w, dtype=float)
     w = w / w.sum()
-    for _ in range(50):
-        fijo = (w <= minimo) | (w >= maximo)
-        w = np.clip(w, minimo, maximo)
-        resto = 1 - w[fijo].sum()
+    fijo = np.zeros(len(w), dtype=bool)
+    for _ in range(2 * len(w) + 1):
         libres = ~fijo
-        if not libres.any() or abs(w.sum() - 1) < 1e-12:
+        if not libres.any():
             break
-        w[libres] = w[libres] / w[libres].sum() * resto
-    return w / w.sum()
+        w[libres] = w[libres] / w[libres].sum() * (1 - w[fijo].sum())
+        sobre = libres & (w > maximo + 1e-12)
+        bajo = libres & (w < minimo - 1e-12)
+        if not sobre.any() and not bajo.any():
+            return w
+        # Se fija un solo lado por vuelta (el que más se pasa): fijar ambos a la vez puede dejar una suma distinta de 1
+        if (w[sobre] - maximo).sum() >= (minimo - w[bajo]).sum():
+            w[sobre], fijo = maximo, fijo | sobre
+        else:
+            w[bajo], fijo = minimo, fijo | bajo
+    # Sin solución dentro de los límites (no debería ocurrir con minimo * n <= 1 <= maximo * n): partes iguales
+    return np.full(len(w), 1 / len(w))
 
 
 def pesos(retornos: pd.DataFrame, metodo: str) -> pd.Series:

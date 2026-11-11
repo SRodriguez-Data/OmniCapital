@@ -68,13 +68,17 @@ class Sec:
             r = self.sesion.get(url, timeout=60)
             time.sleep(0.12)  # la SEC permite hasta 10 consultas por segundo
             if r.status_code == 404:
-                break
+                break   # ese dato no existe (un año que todavía no se informa): vacío
             if r.status_code == 429 or r.status_code >= 500:
                 time.sleep(2 * (intento + 1))
                 continue
             r.raise_for_status()
             datos = r.json()
             break
+        else:
+            # Sin respuesta tras los reintentos: seguir con un dato vacío dejaría a cientos de empresas sin esa cifra y
+            # la lista saldría de las pocas que quedan, sin que nada lo avise
+            raise RuntimeError(f"La SEC no respondió ({r.status_code}) tras 4 intentos: {nombre}")
         if ruta:
             ruta.write_text(json.dumps(datos), encoding="utf-8")
         return datos

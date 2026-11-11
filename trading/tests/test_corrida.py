@@ -159,6 +159,27 @@ class CorridaCompleta(unittest.TestCase):
         self.assertEqual(sorted((o.symbol, o.side.value) for o in b.enviadas), [('AAA', 'sell'), ('ZZZ', 'buy')])
 
 
+class FallaDelCorredor(unittest.TestCase):
+    def test_si_no_se_puede_operar_la_lista_no_vende_por_eso(self):
+        b, sb = BrokerFalso(), SupabaseFalso()
+        correr(b, sb)
+        tenia, enviadas = set(b.pos), len(b.enviadas)
+        b.activo = lambda simbolo: (False, False)   # el corredor responde mal por toda la lista
+        sb.guardadas[-1]['datos']['rebalanceo']['mes'] = '2026-09'   # y toca el rebalanceo del mes
+        codigo, _ = correr(b, sb)
+        self.assertEqual(codigo, 0)
+        self.assertEqual(len(b.enviadas), enviadas)
+        self.assertEqual(set(b.pos), tenia)
+        self.assertEqual(sb.guardadas[-1]['datos']['rebalanceo']['mes'], '2026-09')   # el rebalanceo queda pendiente
+
+    def test_una_sola_accion_suspendida_si_queda_fuera(self):
+        b, sb = BrokerFalso(), SupabaseFalso()
+        b.activo = lambda simbolo: (simbolo != 'BRK.B', True)
+        correr(b, sb)
+        self.assertNotIn('BRK.B', b.pos)
+        self.assertEqual(len(b.pos), 19)
+
+
 class EntreRebalanceos(unittest.TestCase):
     """La simulación opera cuando el bot quiere: no espera al mes siguiente para seguir la lista."""
     @staticmethod

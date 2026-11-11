@@ -259,21 +259,30 @@ def descargar(tickers: list[str], periodo: str) -> dict[str, pd.DataFrame]:
 
 # Acciones chilenas cuyos precios de esta corrida vienen de la Bolsa de Santiago y no de Yahoo
 DE_LA_BOLSA: set[str] = set()
+# Acciones que la bolsa sí tiene pero cuyo feed no respondió en esta corrida: no se actualizan (ver usar_bolsa)
+SIN_FEED: set[str] = set()
 
 def usar_bolsa(descargas: dict[str, pd.DataFrame], tickers: list[str], periodo: str) -> None:
     """Reemplaza los precios de Yahoo de las acciones chilenas por los de la Bolsa de Santiago. Yahoo congela semanas
-    y guarda días a medio cerrar; la bolsa trae el cierre y el volumen completos. Las que la bolsa no entrega (o si
-    su feed falla) se quedan con Yahoo y sus reparaciones. Los dividendos siguen saliendo de Yahoo: se guardan antes."""
+    y guarda días a medio cerrar; la bolsa trae el cierre y el volumen completos. Las que la bolsa no tiene se quedan con
+    Yahoo y sus reparaciones. Si el feed falla, esas acciones no se tocan en esta corrida: comparar lo guardado (de la
+    bolsa) con Yahoo haría "corregir" precios buenos con los de Yahoo, que llegan a diferir varios puntos.
+    Los dividendos siguen saliendo de Yahoo: se guardan antes."""
     chilenos = [t for t in tickers if t.endswith(".SN")]
     if not chilenos:
         return
-    bolsa = bolsa_chile.diarias(chilenos, barras=BARRAS_BOLSA.get(periodo, 1300))
+    fallidos: set[str] = set()
+    bolsa = bolsa_chile.diarias(chilenos, barras=BARRAS_BOLSA.get(periodo, 1300), fallidos=fallidos)
     for t, df in bolsa.items():
         descargas[t] = df
         DE_LA_BOLSA.add(t)
-    faltan = sorted(set(chilenos) - set(bolsa))
+    for t in fallidos - set(bolsa):
+        descargas.pop(t, None)
+        SIN_FEED.add(t)
+    faltan = sorted(set(chilenos) - set(bolsa) - fallidos)
     logging.info(f"🇨🇱 {len(bolsa)} acciones chilenas con precios de la Bolsa de Santiago"
-                 + (f"; con Yahoo: {', '.join(faltan)}" if faltan else "."))
+                 + (f"; con Yahoo: {', '.join(faltan)}" if faltan else ".")
+                 + (f" Sin respuesta del feed (no se actualizan hoy): {', '.join(sorted(fallidos))}." if fallidos else ""))
 
 DIAS_BARRAS_HORA = 725   # Yahoo guarda barras por hora de los últimos 730 días
 
@@ -460,6 +469,15 @@ def cargar_completo(ticker: str) -> bool:
     if df is None:
         return False
     df = df[df["date"] <= ultimo_dia_cerrado(ticker)].reset_index(drop=True)
+    # Reescribir borra lo guardado: una descarga a medias (la fuente respondió con un trozo) no reemplaza años de historia
+    # (se compara en la misma ventana: lo guardado puede tener más años que los que se bajan)
+    corte = (pd.Timestamp.now() - pd.Timedelta(days=4 * 365)).strftime("%Y-%m-%d")
+    ya = (supabase.table("precios_historicos").select("date", count="exact").eq("ticker", ticker).gte("date", corte)
+          .limit(1).execute().count or 0)
+    bajados = int((df["date"] >= corte).sum())
+    if bajados < 0.8 * ya:
+        logging.warning(f"{ticker}: la descarga completa trae {bajados} días desde {corte} y hay {ya} guardados; no se reescribe.")
+        return False
     indicadores = compute_indicators(df[["date"] + COLUMNAS_PRECIO])
     # Una acción poco transada puede repetir el precio varios días en la bolsa: eso no es un historial congelado
     if ticker in DE_LA_BOLSA or not historial_congelado(df):
@@ -565,7 +583,7 @@ def run_miner():
             df = df[df["date"] <= limite].reset_index(drop=True) if df is not None else None
             if df is None or df.empty:
                 fallos += 1
-                logging.warning(f"{ticker}: Yahoo no entregó datos.")
+                logging.warning(f"{ticker}: {'la Bolsa de Santiago no respondió' if ticker in SIN_FEED else 'Yahoo no entregó datos'}.")
             elif g.empty:
                 completos.append(ticker)
             elif ticker not in DE_LA_BOLSA and historial_congelado(df):
@@ -629,6 +647,11 @@ def run_miner():
 
     if fallos > len(TICKERS_A_MINAR) * 0.3:
         logging.error("❌ Fallaron demasiados activos: Yahoo podría estar bloqueando las descargas.")
+        sys.exit(1)
+    chilenos = [t for t in TICKERS_A_MINAR if t.endswith(".SN")]
+    if len(SIN_FEED) > len(chilenos) / 2:
+        logging.error(f"❌ La Bolsa de Santiago no respondió por {len(SIN_FEED)} de {len(chilenos)} acciones chilenas: "
+                      "sus precios quedan como estaban y no se hace el escaneo de hoy.")
         sys.exit(1)
 
 def recargar_chile():

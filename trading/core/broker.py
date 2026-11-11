@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
 from alpaca.common.enums import BaseURL, Sort
+from alpaca.common.exceptions import APIError
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, QueryOrderStatus, TimeInForce
 from alpaca.trading.requests import GetOrdersRequest, GetPortfolioHistoryRequest, MarketOrderRequest
@@ -129,7 +130,11 @@ class Broker:
             try:
                 a = self.cliente.get_asset(simbolo)
                 self._activos[simbolo] = (bool(a.tradable) and str(getattr(a.status, 'value', a.status)) == 'active', bool(a.fractionable))
-            except Exception as e:
+            except APIError as e:
+                # Solo "no existe" (404) significa que no se puede operar. Un error pasajero (límite de consultas, caída
+                # del servidor) corta la corrida: tratarlo como no operable haría vender la posición por "salió de la lista"
+                if getattr(e, 'status_code', None) != 404:
+                    raise
                 logging.warning(f'{simbolo}: Alpaca no lo reconoce ({str(e)[:80]})')
                 self._activos[simbolo] = (False, False)
         return self._activos[simbolo]
