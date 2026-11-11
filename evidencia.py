@@ -44,6 +44,18 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 HORIZONTES = {"1m": 21, "3m": 63, "6m": 126}
 LOTE = 100
+# La señal se calcula con el cierre de un día y se compra al cierre del siguiente: quien recibe la idea no puede
+# comprar al precio con que se calculó
+ESPERA = 1
+# Costo de cada compra o venta al renovar la cartera del Top, sobre el monto transado. Chile: comisión de un corredor
+# online con IVA más el desliz de la punta (como la cuenta simulada, trading/core/simulado.py). EE.UU.: sin comisión,
+# solo la punta y el cambio de moneda
+COSTO_POR_LADO = {"Chile": 0.005, "EE.UU.": 0.001}
+# Fondos chilenos que el minero sigue pero no son acciones que el método pueda elegir
+FONDOS_CHILE = ("CFI", "CFM")
+# Lo mínimo para que la medición valga: con menos, una fuente falló y medir igual daría evidencia sobre otro universo
+MINIMO_COBERTURA = 0.95
+MINIMO_CHILE_BOLSA = 20
 
 
 def universo() -> list[str]:
@@ -80,6 +92,13 @@ def descargar(tickers: list[str]) -> pd.DataFrame:
     columnas = [c for c in columnas if c.name not in bolsa]
     columnas += [df.set_index(pd.to_datetime(df["date"]))["close"].rename(t) for t, df in bolsa.items()]
     logging.info(f"Chile: {len(bolsa)} acciones con precios de la Bolsa de Santiago.")
+    if len(bolsa) < MINIMO_CHILE_BOLSA:
+        raise RuntimeError(f"La Bolsa de Santiago entregó solo {len(bolsa)} acciones (se exigen {MINIMO_CHILE_BOLSA}): "
+                           "no se mide con los precios chilenos de Yahoo, que vienen congelados.")
+    con_datos = sum(1 for c in columnas if c.notna().sum() > 252)
+    if con_datos < MINIMO_COBERTURA * len(tickers):
+        raise RuntimeError(f"Solo {con_datos} de {len(tickers)} activos con historia: una descarga falló y la "
+                           "medición saldría de un universo incompleto.")
     precios = pd.concat(columnas, axis=1)
     precios.index = pd.to_datetime(precios.index).tz_localize(None)
     return precios.sort_index()
@@ -317,13 +336,17 @@ VARIANTES_CHILE = {
 }
 
 
-def medir_ponderaciones(puntaje: pd.DataFrame, n: int, fechas, precios: pd.DataFrame, valido: pd.DataFrame) -> dict:
+def medir_ponderaciones(puntaje: pd.DataFrame, n: int, fechas, precios: pd.DataFrame, valido: pd.DataFrame,
+                        costo: float = 0.0) -> dict:
     """Cada mes, las N elegidas del método con cada ponderación de cartera.py (pesos con el año anterior, nada del
-    futuro) y su retorno del mes siguiente. Mide la razón retorno/riesgo de la cartera (Sharpe sin tasa libre, anual),
-    su volatilidad, su peor caída y su exceso frente al promedio del mercado, en total y en cada mitad."""
+    futuro) y su retorno del mes siguiente, comprando al cierre del día siguiente a la señal y descontando `costo` por
+    cada peso que cambia de manos al renovar la cartera. Mide la razón retorno/riesgo de la cartera (Sharpe sin tasa
+    libre, anual), su volatilidad, su peor caída y su exceso frente al promedio del mercado (que no paga costos, como
+    un fondo del índice), en total y en cada mitad."""
     diarios = precios.pct_change(fill_method=None)
-    adelante = precios.shift(-21) / precios - 1
+    adelante = precios.shift(-21 - ESPERA) / precios.shift(-ESPERA) - 1
     series = {m: {} for m in cartera.PONDERACIONES}
+    previos: dict[str, pd.Series] = {}
     mercado = {}
     for d in fechas:
         el = puntaje.loc[d].dropna().sort_values(ascending=False).index[:n]
@@ -336,7 +359,11 @@ def medir_ponderaciones(puntaje: pd.DataFrame, n: int, fechas, precios: pd.DataF
         mercado[d] = todos.mean()
         for m in cartera.PONDERACIONES:
             w = cartera.pesos(historia, m)
-            series[m][d] = float((w * futuro[el]).sum())
+            # Lo que cambia de manos: lo que sale, lo que entra y lo que se reajusta (la primera vez, toda la cartera)
+            antes = previos.get(m, pd.Series(dtype=float))
+            rotacion = float(w.sub(antes, fill_value=0).abs().sum())
+            previos[m] = w
+            series[m][d] = float((w * futuro[el]).sum()) - costo * rotacion
     if len(mercado) < 24:
         return {}
     base = pd.Series(mercado)
@@ -423,6 +450,10 @@ def evaluar(crudos: pd.DataFrame, sec: "fundamentales_sec.Sec | None" = None) ->
     salida = {"base": {}, "factores": {}, "reglas": {}, "top5": {}, "metodos": {}, "variantes_chile": {}, "muestra": {}}
 
     sp500 = tabla_sp500()
+    if sp500 is None:
+        raise RuntimeError("Sin la lista del S&P 500 no se puede medir EE.UU.: el universo, los sectores y la fecha de "
+                           "ingreso al índice salen de ahí.")
+    mercados["Chile"] = [t for t in mercados["Chile"] if not t.startswith(FONDOS_CHILE)]
     for mercado, cols in mercados.items():
         miembro = None
         if mercado == "EE.UU." and sp500 is not None:
@@ -437,17 +468,20 @@ def evaluar(crudos: pd.DataFrame, sec: "fundamentales_sec.Sec | None" = None) ->
         if mercado == "EE.UU." and sec is not None:
             anios = list(range(precios.index[0].year - 2, precios.index[-1].year + 1))
             F = fundamentales_sec.panel(sec, precios, anios)
+            # Los percentiles por sector y la mediana del PER se calculan solo entre las que ya estaban en el índice
+            if miembro is not None:
+                F = {k: v.where(miembro.reindex(index=v.index, columns=v.columns, fill_value=False)) for k, v in F.items()}
             financieras = set(sp500.loc[sp500["GICS Sector"] == "Financials", "ticker"]) if sp500 is not None else set()
             sector_de = dict(zip(sp500["ticker"], sp500["GICS Sector"])) if sp500 is not None else {}
             s.update(senales_fundamentales(F, financieras, sector_de))
-        fwd = {h: precios.shift(-n) / precios - 1 for h, n in HORIZONTES.items()}
-        fechas = fechas_mensuales(precios.index, max(HORIZONTES.values()))
+        fwd = {h: precios.shift(-n - ESPERA) / precios.shift(-ESPERA) - 1 for h, n in HORIZONTES.items()}
+        fechas = fechas_mensuales(precios.index, max(HORIZONTES.values()) + ESPERA)
         valido = (~s["congelado"][cols]) & precios[cols].notna()
         if miembro is not None:
             valido &= miembro
         exceso = {}
         for h, n in HORIZONTES.items():
-            futuro_ok = valido & (~s["congelado"][cols].shift(-n).fillna(True).astype(bool))
+            futuro_ok = valido & (~s["congelado"][cols].shift(-n - ESPERA).fillna(True).astype(bool))
             f = fwd[h][cols].where(futuro_ok)
             exceso[h] = f.sub(f.mean(axis=1), axis=0)
 
@@ -494,18 +528,22 @@ def evaluar(crudos: pd.DataFrame, sec: "fundamentales_sec.Sec | None" = None) ->
                 continue
             res = {}
             for h, n in HORIZONTES.items():
-                por_mes, eventos = [], []
+                por_mes, eventos = {}, []
                 for d in fechas:
                     e = exceso[h].loc[d][m.loc[d]].dropna()
                     if len(e):
-                        por_mes.append(e.mean()); eventos.append(e)
+                        por_mes[d] = e.mean(); eventos.append(e)
                 if len(por_mes) < 12:
                     continue
                 todos = pd.concat(eventos)
                 serie = pd.Series(por_mes)
+                # Con decenas de reglas medidas, alguna pasa el umbral por azar: una regla que decide debe apuntar al
+                # mismo lado en cada mitad de la historia
+                mitades = {k: r(v.mean()) for k, v in (("antes", serie[serie.index < CORTE_MITADES]),
+                                                       ("despues", serie[serie.index >= CORTE_MITADES])) if len(v) >= 12}
                 res[h] = {"exceso_promedio": r(serie.mean()), "t": r(t_ajustado(serie, n), 2),
                           "acierto": r((todos > 0).mean(), 3), "mediana": r(todos.median()),
-                          "casos": int(len(todos)), "meses": len(por_mes)}
+                          "casos": int(len(todos)), "meses": len(por_mes), "mitades": mitades}
             salida["reglas"].setdefault(clave, {"nombre": nombre})[mercado] = res
 
         # El Top 5 tal como lo arma el bot: filtro, los 5 de mayor puntaje del mes, y su exceso promedio
@@ -537,16 +575,20 @@ def evaluar(crudos: pd.DataFrame, sec: "fundamentales_sec.Sec | None" = None) ->
                 continue
             salida["metodos"][clave] = {"nombre": m["nombre"], "mercado": mercado, "n": m["n"],
                                         **medir_metodo(puntaje, m["n"], fechas, exceso),
-                                        "cartera": medir_ponderaciones(puntaje, m["n"], fechas, precios[cols], valido)}
+                                        "cartera": medir_ponderaciones(puntaje, m["n"], fechas, precios[cols], valido,
+                                                                       COSTO_POR_LADO[mercado])}
         if mercado == "Chile":
             for clave, (nombre, fn) in VARIANTES_CHILE.items():
                 puntaje = fn(s)[cols].where(valido)
                 salida["variantes_chile"][clave] = {"nombre": nombre, **medir_metodo(puntaje, 5, fechas, exceso),
-                                                    "cartera": medir_ponderaciones(puntaje, 5, fechas, precios[cols], valido)}
+                                                    "cartera": medir_ponderaciones(puntaje, 5, fechas, precios[cols], valido,
+                                                                                   COSTO_POR_LADO[mercado])}
         salida["muestra"][mercado] = {
             "desde": precios.index[0].strftime("%Y-%m-%d"), "hasta": precios.index[-1].strftime("%Y-%m-%d"),
             "fechas_evaluadas": len(fechas), "acciones": len(cols),
-            "universo": "S&P 500 en la fecha (miembros actuales desde su ingreso)" if miembro is not None else "IPSA actual",
+            "universo": "S&P 500 en la fecha (miembros actuales desde su ingreso)" if miembro is not None
+                        else "Acciones chilenas que sigue el minero (el IPSA actual y las de la cartera), sin fondos",
+            "costo_por_lado": COSTO_POR_LADO[mercado],
         }
     salida["sesgos"] = [
         "Supervivencia: en EE.UU. cada fecha usa solo las empresas del S&P 500 actual que ya estaban en el índice; "
@@ -555,7 +597,9 @@ def evaluar(crudos: pd.DataFrame, sec: "fundamentales_sec.Sec | None" = None) ->
         "Fundamentales solo de EE.UU. (SEC EDGAR, cada cifra 90 días después del cierre de su año fiscal); el valor de "
         "mercado se estima con el valor en manos del público, así que las empresas con controlador grande salen algo "
         "más baratas. Para Chile no hay fundamentales históricos gratuitos.",
-        "Exceso frente al promedio simple de cada mercado, antes de comisiones e impuestos.",
+        "Exceso frente al promedio simple de cada mercado, comprando al cierre del día siguiente a la señal. La cartera "
+        f"de cada método descuenta el costo de renovarla cada mes ({COSTO_POR_LADO['Chile']:.1%} por lado en Chile, "
+        f"{COSTO_POR_LADO['EE.UU.']:.1%} en EE.UU.); las reglas sueltas, no. Todo antes de impuestos.",
         f"Se probaron {len(VARIANTES_CHILE)} variantes del método chileno y {len(cartera.PONDERACIONES)} formas de "
         "ponderar cada cartera: elegir la mejor de varias infla su fuerza estadística, por eso la elegida debe ganar "
         "también en cada mitad de la historia.",
@@ -567,7 +611,7 @@ def evaluar(crudos: pd.DataFrame, sec: "fundamentales_sec.Sec | None" = None) ->
 def para_web(res: dict) -> tuple[dict, dict]:
     """Lo que usa la web, en dos archivos: las reglas (solo el servidor, para el asesor) y los métodos del Top (lo
     único que descarga el navegador). Los factores continuos quedan solo en el resultado completo."""
-    corto = lambda m: {k: m[k] for k in ("exceso_promedio", "t", "acierto", "casos") if k in m}
+    corto = lambda m: {k: m[k] for k in ("exceso_promedio", "t", "acierto", "casos", "mitades") if k in m}
     reglas = {
         "calculado": res["calculado"], "muestra": res["muestra"],
         "base": {mk: {"3m": {"acierto": v["3m"]["acierto"]}} for mk, v in res["base"].items()},

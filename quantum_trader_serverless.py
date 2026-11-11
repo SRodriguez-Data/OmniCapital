@@ -277,6 +277,26 @@ def cierres(tickers, desde):
     df['date'] = df['date'].str[:10]
     return {t: g.set_index('date')['close'].sort_index() for t, g in df.groupby('ticker')}
 
+def monto_transado_mediano(tickers, hasta, sesiones=20):
+    """Mediana del monto transado (volumen x cierre) de las últimas `sesiones` ruedas de cada ticker. Con un solo día,
+    una acción que transa justo bajo el mínimo en una rueda tranquila sale de la lista y vuelve al día siguiente."""
+    desde = (pd.Timestamp(hasta) - pd.Timedelta(days=sesiones * 2)).strftime("%Y-%m-%d")
+    filas = []
+    for i in range(0, len(tickers), 20):
+        inicio = 0
+        while True:
+            lote = (supabase.table("precios_historicos").select("ticker, date, close, volume").in_("ticker", tickers[i:i + 20])
+                    .gte("date", desde).order("date").order("ticker").range(inicio, inicio + 999).execute().data or [])
+            filas += lote
+            if len(lote) < 1000:
+                break
+            inicio += 1000
+    if not filas:
+        return {}
+    df = pd.DataFrame(filas)
+    df["monto"] = df["close"].fillna(0) * df["volume"].fillna(0)
+    return {t: float(g.sort_values("date")["monto"].tail(sesiones).median()) for t, g in df.groupby("ticker")}
+
 # Lo que midió el laboratorio (evidencia.py --web): qué ponderación tuvo mejor razón retorno/riesgo en cada método
 EVIDENCIA_METODOS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "src", "data", "evidencia_metodos.json")
 
@@ -300,7 +320,8 @@ def evidencia_significativa(metodo):
         mitades = [m["exceso_anual"] for m in x["mitades"].values()]
     except Exception as e:
         return False, f"no hay medición del laboratorio para {metodo} ({str(e)[:60]})"
-    if x["exceso_t"] is None or x["exceso_t"] < 2 or not mitades or min(mitades) <= 0:
+    # Las dos mitades de la historia, cada una con su medición: con una sola no hay cómo saber si se repite
+    if x["exceso_t"] is None or x["exceso_t"] < 2 or len(mitades) < 2 or any(m is None or m <= 0 for m in mitades):
         return False, (f"su cartera rindió {x['exceso_anual']:+.1%} al año sobre su mercado con t = {x['exceso_t']}, "
                        "sin evidencia significativa en ambas mitades de la historia")
     return True, ""
@@ -450,14 +471,23 @@ def run_serverless_screener():
 
     liquidos = {}
 
-    # 2. Liquidez: montos transados mínimos (en Chile en pesos). Índices y monedas son referencias, no ideas
+    # 2. Liquidez: montos transados mínimos (en Chile en pesos). Índices y monedas son referencias, no ideas.
+    #    En Chile se mira la mediana de 20 ruedas (y que haya transado hoy): un día flojo no saca a una acción de la lista
+    try:
+        mediano_cl = monto_transado_mediano(sorted(r['ticker'] for r in activos_hoy if r['ticker'].endswith('.SN')), max_date)
+    except Exception as e:
+        logging.error(f"Error consultando los montos transados: {e}")
+        sys.exit(1)
     for row in activos_hoy:
         ticker = row['ticker']
         close = row.get('close') or 0
         volumen_nominal = (row.get('volume') or 0) * close
         if ticker.startswith('^') or '=' in ticker or close <= 0:
             continue
-        if volumen_nominal < (450_000_000 if ticker.endswith(".SN") else 500_000):
+        if ticker.endswith(".SN"):
+            if volumen_nominal <= 0 or mediano_cl.get(ticker, 0) < 450_000_000:
+                continue
+        elif volumen_nominal < 500_000:
             continue
         liquidos[ticker] = row
 

@@ -151,7 +151,10 @@ class Corrida:
                                                         detalle=o.detalle))
             except Exception as e:
                 self.errores += 1
-                logging.error(f'  {o.lado} {o.simbolo}: rechazada ({str(e)[:160]})')
+                # El registro de GitHub es público: en la cuenta real el rechazo del corredor puede traer montos de la
+                # cuenta, así que ahí va solo el tipo de error (el detalle queda en el evento, que es privado)
+                publico = f'{type(e).__name__} {getattr(e, "status_code", "") or ""}'.strip() if self.real else str(e)[:160]
+                logging.error(f'  {o.lado} {o.simbolo}: rechazada ({publico})')
                 self.evento('error', f'No se pudo {"vender" if o.lado == "venta" else "comprar"} {o.simbolo}: {str(e)[:120]}')
         return self.broker.esperar(enviadas, segundos=180) if enviadas else []
 
@@ -307,9 +310,10 @@ class Corrida:
                     f'se avisaron por Telegram {len(compradas)} compras.' if self.manual else f'{n_v} ventas y {len(compradas)} compras.'))
             elif texto := cambios(ventas + compras, hechas):
                 self.evento('cambio', texto)
-        if not self.guardar(rebalanceo) and self.chile:
-            # El libro de la cuenta simulada vive en esa fila: sin guardarla, lo operado en esta corrida no queda
-            logging.error('❌ No se guardó el libro de la cuenta simulada.')
+        if not self.guardar(rebalanceo):
+            # En Chile el libro de la cuenta vive en esa fila; en EE.UU., el mes ya rebalanceado: sin guardarla la
+            # próxima corrida repetiría el rebalanceo, y la corrida no puede quedar en verde
+            logging.error('❌ No se guardó el registro de la corrida.')
             return 1
         return 1 if self.errores else 0
 
@@ -364,7 +368,8 @@ def main(enviar: bool, real: bool, mercado: str = 'eeuu') -> int:
         logging.error(f'❌ {e}')
         return 1
     except APIError as e:
-        logging.error(f'❌ Alpaca rechazó la consulta ({e.status_code}): {str(e)[:160]}. '
+        detalle = '' if real else f': {str(e)[:160]}'   # en la cuenta real, sin el cuerpo de la respuesta
+        logging.error(f'❌ Alpaca rechazó la consulta ({getattr(e, "status_code", "?")}){detalle}. '
                       f'Con 401 o 403, revisa {" y ".join(CLAVES[real])}.')
         return 1
 

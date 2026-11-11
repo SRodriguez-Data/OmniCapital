@@ -74,7 +74,11 @@ def guardar(supabase, tabla: str, broker: Broker, prefijo: str, titulo: str, hoy
     try:
         # El libro de la cuenta simulada anota primero el patrimonio de hoy: la curva lo incluye
         libro = broker.libro() if hasattr(broker, 'libro') else None
-        previo = ultimo_estado(supabase, tabla) or {}
+        previo = ultimo_estado(supabase, tabla)
+        if previo is None:
+            # Sin poder leer lo anterior no se guarda encima: se perderían el mes rebalanceado y la bitácora
+            logging.error(f'No se guardó el registro en {tabla}: no se pudo leer el anterior.')
+            return False
         # Las órdenes salen de Alpaca, no de esta corrida: con varias corridas al día ninguna borra lo de otra
         propias = broker.ordenes(cuenta.creada or datetime.now(timezone.utc) - timedelta(days=400), prefijo)
         inicio = min((_orden(o)['fecha'] for o in propias if float(o.filled_qty or 0) > 0), default=None)

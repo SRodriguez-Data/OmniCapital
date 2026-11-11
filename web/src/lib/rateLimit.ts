@@ -1,19 +1,26 @@
 // Límite simple de solicitudes por IP, en memoria de cada instancia (Node o Edge).
 // No es un rate limiter distribuido, pero frena el abuso básico de las rutas que gastan cuota de Gemini.
 const hits = new Map<string, number[]>();
+const TOPE_GLOBAL = 4;
 
 export function rateLimit(req: Request, scope: string, limit: number, windowMs = 10 * 60 * 1000): boolean {
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || req.headers.get('x-real-ip') || 'anon';
   const key = `${scope}:${ip}`;
   const now = Date.now();
   const recent = (hits.get(key) || []).filter(t => now - t < windowMs);
+  // Tope de la ruta completa, sume quien sume: cambiar de IP no deja pasar más que unas pocas veces el límite de uno
+  const todosKey = `${scope}:*`;
+  const todos = (hits.get(todosKey) || []).filter(t => now - t < windowMs);
 
-  if (recent.length >= limit) {
+  if (recent.length >= limit || todos.length >= limit * TOPE_GLOBAL) {
     hits.set(key, recent);
+    hits.set(todosKey, todos);
     return false;
   }
   recent.push(now);
+  todos.push(now);
   hits.set(key, recent);
+  hits.set(todosKey, todos);
 
   // Limpieza ocasional para que el mapa no crezca sin límite
   if (hits.size > 5000) {

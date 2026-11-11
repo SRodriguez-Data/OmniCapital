@@ -128,6 +128,8 @@ class BrokerSimulado:
         if ref:
             fecha = ref.hora.date().isoformat()
             patrimonio = round(self.datos['efectivo'] + sum(p['cantidad'] * p['precio'] for p in self.datos['posiciones'].values()), 2)
+            # Un aporte o retiro posterior a ese día ya está en el efectivo, pero no era parte del patrimonio de ese día
+            patrimonio -= sum(m for f, m in self.datos.get('aportes', []) if f > fecha)
             historial = [h for h in self.datos['historial'] if h[0] != fecha] + [[fecha, patrimonio]]
             self.datos['historial'] = sorted(historial)
         return self.datos

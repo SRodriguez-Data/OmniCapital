@@ -69,7 +69,9 @@ def dentro(p: pd.Series, media: int, banda: float) -> pd.Series:
     return pd.Series(salida, index=p.index, dtype=float)
 
 
-def metricas(r: pd.Series) -> dict:
+def metricas(r: pd.Series, tasa: pd.Series) -> dict:
+    """`tasa`: retorno diario de la caja. El Sharpe se mide sobre ella: si no, el tiempo que la regla pasa en caja
+    contaría como rentabilidad sin riesgo y la haría ver mejor de lo que es."""
     valor = (1 + r).cumprod()
     anios = len(r) / 252
     anual = (1 + r).groupby(r.index.year).prod() - 1
@@ -77,7 +79,7 @@ def metricas(r: pd.Series) -> dict:
     return {"retorno_anual": round(float(valor.iloc[-1] ** (1 / anios) - 1), 4),
             "peor_caida": round(float((valor / valor.cummax() - 1).min()), 4),
             "peor_anio": round(float(anual.min()), 4),
-            "sharpe": round(float(r.mean() * 252 / vol), 2) if vol else None}
+            "sharpe": round(float((r - tasa.reindex(r.index).fillna(0)).mean() * 252 / vol), 2) if vol else None}
 
 
 def medir(p: pd.Series, dividendo: float, caja: pd.Series, media: int = MEDIA, banda: float = BANDA) -> dict:
@@ -89,10 +91,10 @@ def medir(p: pd.Series, dividendo: float, caja: pd.Series, media: int = MEDIA, b
     regla, mantener, w = (w * r + (1 - w) * tasa)[inicio:], r[inicio:], w[inicio:]
     mitad = regla.index[len(regla) // 2]
     tramo = lambda a, b: {"desde": f"{a.index[0]:%Y-%m-%d}", "hasta": f"{a.index[-1]:%Y-%m-%d}",
-                          "mantener": metricas(b), "regla": metricas(a)}
+                          "mantener": metricas(b, tasa), "regla": metricas(a, tasa)}
     return {
         "desde": f"{regla.index[0]:%Y-%m-%d}", "hasta": f"{regla.index[-1]:%Y-%m-%d}",
-        "mantener": metricas(mantener), "regla": metricas(regla),
+        "mantener": metricas(mantener, tasa), "regla": metricas(regla, tasa),
         "cambios_por_anio": round(float((w.diff().abs() > 0).sum() / (len(w) / 252)), 1),
         "tiempo_invertido": round(float(w.mean()), 3),
         "mitades": [tramo(regla[:mitad], mantener[:mitad]), tramo(regla[mitad:], mantener[mitad:])],

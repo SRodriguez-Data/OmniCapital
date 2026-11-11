@@ -98,7 +98,8 @@ export async function responderChat(
   perfil: PerfilInversionista | null,
   signal?: AbortSignal,
 ): Promise<{ texto: string; modelo: string; usadas: string[] }> {
-  const ctx = JSON.stringify(contexto ?? {}).slice(0, 30000);
+  // El contexto que arma la app pesa unos miles de caracteres: mucho más que eso no es la app
+  const ctx = JSON.stringify(contexto ?? {}).slice(0, 20000);
   const medido = [evidenciaTop('EE.UU.'), evidenciaTop('Chile'), evidenciaNucleo(), MOMENTO_DE_COMPRA].filter(Boolean).join('\n');
   const historial: Content[] = [
     { role: 'user', parts: [{ text: `CONTEXTO (datos de la app de hoy, en JSON):\n${ctx}\n\nLO MEDIDO POR EL LABORATORIO:\n${medido}` }] },

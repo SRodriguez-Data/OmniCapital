@@ -15,6 +15,10 @@ export async function registrarEjecucion(db: SupabaseClient, userId: string, e: 
     .eq('user_id', userId);
   if (errLectura) return { ok: false, error: 'No se pudo leer tu cartera. Intenta de nuevo.', estado: 502 };
   const filas = (lotes ?? []).map(l => ({ ...l, id: String(l.id), cantidad: Number(l.cantidad), precio_compra: Number(l.precio_compra) })) as Lote[];
+  // Un doble toque o un reintento tras un corte no anota la misma compra dos veces
+  if (e.lado === 'COMPRAR' && filas.some(l => l.purchase_date === e.fecha && Math.abs(l.cantidad - e.cantidad) < 1e-8 && Math.abs(l.precio_compra - e.precio) < 1e-8)) {
+    return { ok: false, error: `Esa compra de ${e.ticker} ya está registrada (misma cantidad, precio y fecha). Si de verdad hiciste dos iguales, agrégala en la pestaña Portafolio.`, estado: 409 };
+  }
   const cambios = cambiosPorEjecucion(filas, e);
   if ('error' in cambios) return { ok: false, error: cambios.error, estado: 400 };
 

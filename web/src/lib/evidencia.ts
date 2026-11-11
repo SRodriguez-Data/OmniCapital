@@ -3,7 +3,8 @@ import { anioEvidencia as anios, type Mercado, type Nivel } from './evidenciaMet
 
 // Lo que midió el laboratorio de evidencia (evidencia.py en la raíz del repo): cuánto rindieron frente a su
 // mercado, en los 3 meses siguientes, las acciones en que se cumplía cada regla del asesor durante 10 años.
-// Una regla solo decide si su evidencia es significativa (t de 2 o más) y va en la dirección que la regla supone;
+// Una regla solo decide si su evidencia es significativa (t de 2 o más), se repite en cada mitad de la historia y va
+// en la dirección que la regla supone;
 // si no, se muestra como dato.
 // Solo lo usa el servidor (el asesor); el navegador descarga nada más evidenciaMetodos.ts.
 
@@ -14,7 +15,10 @@ export type ClaveRegla =
   | 'calidad_alta' | 'calidad_baja' | 'payout_alto' | 'fundamental_favorable' | 'fundamental_debil'
   | 'maximo_52s' | 'devolvio_mitad';
 
-interface Medicion { exceso_promedio: number | null; t: number | null; acierto: number | null; casos: number }
+interface Medicion {
+  exceso_promedio: number | null; t: number | null; acierto: number | null; casos: number;
+  mitades?: Record<string, number | null>; // exceso promedio en cada mitad de la historia
+}
 type PorHorizonte = Partial<Record<'3m' | '6m', Medicion>>;
 interface Datos {
   calculado: string;
@@ -58,7 +62,10 @@ export function evidencia(regla: ClaveRegla, mercado: Mercado, signo: 1 | -1, de
   const dir = Math.sign(m3.exceso_promedio);
   // El promedio, el plazo de 6 meses y la tasa de acierto deben apuntar al mismo lado: un promedio inflado por
   // unos pocos rebotes enormes (con aciertos bajo lo normal) no cuenta como evidencia
-  const coherente = (m6?.exceso_promedio == null || Math.sign(m6.exceso_promedio) === dir) && Math.sign(m3.acierto - base) === dir;
+  // Y en cada mitad de la historia: con decenas de reglas medidas, alguna pasa el umbral por azar en el total
+  const mitades = Object.values(m3.mitades ?? {}).filter((x): x is number => x != null);
+  const coherente = (m6?.exceso_promedio == null || Math.sign(m6.exceso_promedio) === dir) && Math.sign(m3.acierto - base) === dir
+    && mitades.every(x => Math.sign(x) === dir);
   const fuerza = Math.abs(m3.t);
   const medida: Nivel = !coherente || fuerza < 1 ? 'sin evidencia' : fuerza >= 2 ? 'sólida' : 'débil';
   const nivel: Nivel = medida !== 'sin evidencia' && dir !== signo ? 'en contra' : medida;

@@ -70,8 +70,12 @@ def pesos(retornos: pd.DataFrame, metodo: str) -> pd.Series:
     x = datos.fillna(0).to_numpy()
     minimo, maximo = LIMITES[0] / n, LIMITES[1] / n
     if metodo == "inversa_volatilidad":
-        vol = x.std(axis=0)
-        if (vol <= 0).any():
+        # Solo con los días que cada acción transó: rellenar con ceros le bajaría la volatilidad a la que tiene poca
+        # historia y le daría más peso justo a la menos conocida
+        if (datos.notna().sum() < MINIMO_DIAS).any():
+            return igual
+        vol = datos.std(axis=0, ddof=0).to_numpy()
+        if not np.isfinite(vol).all() or (vol <= 0).any():
             return igual
         return pd.Series(acotar(1 / vol, minimo, maximo), index=retornos.columns)
     if metodo == "minima_varianza":
