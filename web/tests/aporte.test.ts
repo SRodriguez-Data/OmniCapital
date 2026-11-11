@@ -169,6 +169,19 @@ test('la plata nueva cuenta: los límites que corrige sola no se venden; sin ell
   assert.ok(/No vendas para bajar Financiero ni Chile/.test(conAporte.sinVender ?? ''), conAporte.sinVender ?? '');
 });
 
+test('la plata nueva que va al índice trae sus sectores: no cuenta como si fuera toda a otra parte', () => {
+  const { report, modelo } = carteraSobreElLimite();
+  // Un índice cargado al mismo sector que sobra no lo corrige: ese sector se vende; Chile sí se corrige solo
+  const cargado = { ...report, sectoresIndice: { 'EE.UU.': { Financiero: 0.9, Salud: 0.1 }, Chile: {} } };
+  const plan = planRebalanceo(cargado, modelo, { metaChile: 0.6, nivel: 'moderado', plataNueva: plataNuevaDe(500000) });
+  assert.ok(plan.ventas.some(o => o.ticker === 'BANCO.SN'), 'el sector no baja solo si lo nuevo también es de ese sector');
+  assert.ok(/No vendas para bajar Chile:/.test(plan.sinVender ?? ''), plan.sinVender ?? '');
+  // Con un índice repartido como el S&P 500 (13% financiero) sí lo corrige
+  const repartido = { ...report, sectoresIndice: { 'EE.UU.': { Financiero: 0.13, Tecnología: 0.87 }, Chile: {} } };
+  const sinVentas = planRebalanceo(repartido, modelo, { metaChile: 0.6, nivel: 'moderado', plataNueva: plataNuevaDe(500000) });
+  assert.equal(sinVentas.ventas.length, 0);
+});
+
 test('la señal de venta con evidencia se vende igual, aunque haya plata nueva', () => {
   const { report, modelo } = carteraSobreElLimite('REDUCIR');
   const plan = planRebalanceo(report, modelo, { metaChile: 0.6, plataNueva: plataNuevaDe(500000), reinvertir: false });

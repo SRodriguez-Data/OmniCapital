@@ -4,7 +4,7 @@ import { supabase } from './supabase';
 
 // Las ideas del último escaneo del bot (quantum_trader_serverless.py, método v2), tal como las guarda en analisis_ia:
 // las 20 acciones de EE.UU. que ganan plata con la utilidad más respaldada por caja de su sector y las 5 chilenas de mayor momentum,
-// cada una con el peso que le da el método medido (igual en EE.UU., inverso a la volatilidad en Chile).
+// cada una con el peso que le da la ponderación que eligió el laboratorio para su método (cartera.py).
 
 export interface IdeaTop {
   ticker: string;

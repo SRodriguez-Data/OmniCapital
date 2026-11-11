@@ -1,7 +1,7 @@
 import mercadoMedido from '@/data/evidencia_mercado.json';
 import { LIMITE_ACCION, LIMITE_SECTOR, fmtMoney, type Accion } from './advisor';
 import { semaforoRojoDe } from './avisos';
-import { evidenciaMetodo, type Mercado } from './evidenciaMetodos';
+import { evidenciaMetodo, type Mercado, type Ponderacion } from './evidenciaMetodos';
 import type { IdeaTop, IdeasDelBot } from './ideas';
 import type { NivelRiesgo, Proteccion } from './perfil';
 import type { Semaforo } from './proteccion';
@@ -97,6 +97,11 @@ const sinSufijo = (t: string) => t.replace(/\.SN$/, '');
 interface IndiceMedido { nombre: string; desde: string; mantener: { retorno_anual: number; peor_caida: number }; regla: { retorno_anual: number; peor_caida: number } }
 const MEDIDO = mercadoMedido as unknown as { indices: Partial<Record<'eeuu' | 'tecnologia' | 'chile', IndiceMedido>> };
 
+// Cómo se reparte la cartera del método: la ponderación que eligió la última medición del laboratorio
+const COMO_PESA: Record<Ponderacion, string> = {
+  igual: 'en partes iguales', inversa_volatilidad: 'pesadas por su volatilidad', minima_varianza: 'pesadas para la menor varianza',
+};
+
 /** Lo que midió el laboratorio de cada método del Top, en una frase. */
 export function evidenciaTop(mercado: Mercado): string | null {
   const ev = evidenciaMetodo(mercado === 'Chile' ? 'momentum_chile' : 'calidad_eeuu');
@@ -104,8 +109,8 @@ export function evidenciaTop(mercado: Mercado): string | null {
   const e = c?.ponderaciones[c.elegida];
   if (!ev || !e) return null;
   const regla = mercado === 'Chile'
-    ? 'las 5 acciones del IPSA que más subieron en 12 meses (sin el último), pesadas por su volatilidad'
-    : 'las 20 acciones del S&P 500 que ganan plata con la utilidad más respaldada por caja de su sector';
+    ? `las 5 acciones del IPSA que más subieron en 12 meses (sin el último), ${COMO_PESA[c.elegida]}`
+    : `las 20 acciones del S&P 500 que ganan plata con la utilidad más respaldada por caja de su sector, ${COMO_PESA[c.elegida]}`;
   return `Comprar ${regla} y renovarlas cada mes rindió ${pct(e.retorno_anual)} al año en ${ev.anios}, ${signo(e.exceso_anual)} al año sobre el promedio de su mercado (evidencia ${ev.nivel}). Peor caída: ${pct(e.peor_caida, 0)}.`;
 }
 

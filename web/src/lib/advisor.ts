@@ -134,6 +134,8 @@ export interface AdvisorReport {
   posiciones: AssetReport[];
   candidatos: AssetReport[];
   avisosDatos: string[];
+  // Sectores del índice de cada mercado (suman 1): la plata nueva que va al índice trae esos sectores
+  sectoresIndice?: { 'EE.UU.': Record<string, number> | null; Chile: Record<string, number> };
   perfilInversionista: (Adecuacion & { perfil: PerfilInversionista }) | null;
 }
 
@@ -829,9 +831,15 @@ export async function buildAdvisorReport(
     posiciones,
     candidatos: evaluados,
     avisosDatos,
+    sectoresIndice: { 'EE.UU.': normalizar(fund.get('VOO')?.sectores), Chile: IPSA_SECTORES },
     perfilInversionista: inversionista && ajuste ? { ...ajuste, perfil: inversionista } : null,
     modelo,
   };
+}
+
+function normalizar(pesos?: Record<string, number>): Record<string, number> | null {
+  const total = Object.values(pesos ?? {}).reduce((s, w) => s + w, 0);
+  return pesos && total > 0 ? Object.fromEntries(Object.entries(pesos).map(([k, w]) => [k, w / total])) : null;
 }
 
 function addDays(date: string, days: number): string {
@@ -926,7 +934,7 @@ function planEstrategico(
       ? 'Contexto favorable: mantén tu exposición y aprovecha los retrocesos para aportar en lo que tiene señal AUMENTAR.'
       : mercado.regimen === 'defensivo'
         ? 'Contexto defensivo: prioriza proteger. No sumes activos de alto riesgo, respeta los stops y aporta de a poco, preferentemente en fondos diversificados.'
-        : 'Contexto mixto: sé selectivo. Aporta en partes (por ejemplo, en 2 o 3 meses) y prioriza fondos diversificados y empresas con buenos fundamentales.');
+        : 'Contexto mixto: las tendencias no están alineadas. Tu aporte del mes entra igual (no se midió que esperar un mejor momento mejore el resultado); sé selectivo con las acciones individuales.');
   }
   const reducir = pos.filter(a => a.accion === 'REDUCIR');
   if (reducir.length) plan.push(`Revisa primero ${reducir.map(a => `${a.ticker} (${a.motivos[0]?.replace(/(:|\.(\s|$))[\s\S]*$/, '').toLowerCase()})`).join('; ')}: ${reducir.length > 1 ? 'tienen' : 'tiene'} señal REDUCIR.`);
@@ -945,7 +953,11 @@ function planEstrategico(
   if (aumentar.length) plan.push(`Para tus próximos aportes, en orden de convicción: ${aumentar.slice(0, 5).map(a => `${a.ticker} (${a.conviccion})`).join(', ')}.`);
   if (perfil?.aporteMensual && aumentar.length) {
     const destinos = aumentar.slice(0, 3);
-    plan.push(`${antesDeComprar ? 'Una vez resuelto lo anterior, tu' : 'Tu'} aporte de ${fmtMoney(perfil.aporteMensual, 'CLP')} al mes puede ir a ${destinos.map(a => a.ticker).join(', ')}${destinos.length > 1 ? ` (unos ${fmtMoney(perfil.aporteMensual / destinos.length, 'CLP')} en cada uno, o uno distinto cada mes para pagar menos comisiones)` : ''}. El plan de compra con nuevo capital lo calcula en detalle.`);
+    // Con un perfil moderado o agresivo el aporte se reparte entre el índice y el Top medido (lib/aporte.ts): la
+    // decisión exacta es una sola y está en la pestaña Asesor, no en esta lista
+    plan.push(ajuste && ajuste.nivel !== 'conservador'
+      ? `Qué comprar con tu aporte de ${fmtMoney(perfil.aporteMensual, 'CLP')} de este mes (el índice más las ideas del Top medido) está, con cantidades y precios, en la pestaña Asesor.`
+      : `${antesDeComprar ? 'Una vez resuelto lo anterior, tu' : 'Tu'} aporte de ${fmtMoney(perfil.aporteMensual, 'CLP')} al mes puede ir a ${destinos.map(a => a.ticker).join(', ')}${destinos.length > 1 ? ` (unos ${fmtMoney(perfil.aporteMensual / destinos.length, 'CLP')} en cada uno, o uno distinto cada mes para pagar menos comisiones)` : ''}. El plan de compra con nuevo capital lo calcula en detalle.`);
   }
   if (gemelos.length) {
     const top = [...gemelos].sort((a, b) => b.corr - a.corr).slice(0, 3);

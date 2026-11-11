@@ -213,7 +213,13 @@ export function planRebalanceo(
     vender(a, (a.pesoEfectivo - (limite - MARGEN)) * V - vendidoCLP(a.ticker),
       `Pesa ${pct(a.pesoEfectivo)} de tu patrimonio${a.pesoEfectivo > a.peso + 0.005 ? ' contando tus fondos' : ''}, sobre el máximo de ${pct(limite, 0)}`);
   }
-  const conPlataNueva = (peso: number) => (peso * V) / (V + Math.max(0, plataNueva));
+  // La plata nueva no es neutra: la parte que va al índice trae sus sectores (un quinto del S&P 500 es tecnología y
+  // un cuarto del IPSA son bancos), así que baja el peso de un sector menos que si fuera toda a otra parte. Del Top no
+  // entra nada a un sector lleno, y a Chile no entra nada mientras esté sobre su meta
+  const aChile = (report.exposicion.regiones.find(r => r.nombre === 'Chile')?.peso ?? 0) >= metaChile - MARGEN ? 0 : metaChile;
+  const entraAlSector = (nombre: string) => (nivel ? 1 - SATELITE[nivel] : 0)
+    * ((1 - aChile) * (report.sectoresIndice?.['EE.UU.']?.[nombre] ?? 0) + aChile * (report.sectoresIndice?.Chile[nombre] ?? 0));
+  const conPlataNueva = (peso: number, entra = 0) => (peso * V + entra * Math.max(0, plataNueva)) / (V + Math.max(0, plataNueva));
   const corregidos: { nombre: string; despues: number }[] = [];
   // 3. Sectores sobre el límite
   const sectoresAntes = report.exposicion.sectores.filter(s => !SIN_SECTOR.has(s.nombre));
@@ -226,8 +232,9 @@ export function planRebalanceo(
   for (const s of sectoresAntes) {
     if (s.peso <= LIMITE_SECTOR) continue;
     sectoresReducidos.add(s.nombre);
-    if (conPlataNueva(sectorTras(s.nombre)) <= LIMITE_SECTOR) {
-      corregidos.push({ nombre: s.nombre, despues: conPlataNueva(sectorTras(s.nombre)) });
+    const conLoNuevo = conPlataNueva(sectorTras(s.nombre), entraAlSector(s.nombre));
+    if (conLoNuevo <= LIMITE_SECTOR) {
+      corregidos.push({ nombre: s.nombre, despues: conLoNuevo });
       continue;
     }
     const exceso = (sectorTras(s.nombre) - (LIMITE_SECTOR - MARGEN)) * V;
