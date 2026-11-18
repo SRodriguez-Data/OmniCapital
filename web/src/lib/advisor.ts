@@ -760,7 +760,7 @@ export async function buildAdvisorReport(
     const sector = !a.diversificado ? a.sector : sectoresFondo[0] && sectoresFondo[0][1] > 0.6 ? sectoresFondo[0][0] : undefined;
     const ps = sector ? pesoSector.get(sector) ?? 0 : 0;
     if (sector && ps > LIMITE_SECTOR) frenar(a, `El sector ${sector} ya pesa ${pct(ps, 0)} de tu patrimonio contando tus fondos: aumentar aquí concentra más el riesgo.`);
-    if (a.moneda === 'CLP' && pesoChile > 0.6) frenar(a, `Ya tienes ${pct(pesoChile, 0)} de tu patrimonio en Chile: los próximos aportes rinden más en diversificación fuera de Chile.`);
+    if (a.moneda === 'CLP' && pesoChile > metaChileDe(inversionista)) frenar(a, `Ya tienes ${pct(pesoChile, 0)} de tu patrimonio en Chile: los próximos aportes rinden más en diversificación fuera de Chile.`);
   }
   // De dos posiciones que se mueven casi igual, solo se aumenta la más grande
   for (const p of pares) {

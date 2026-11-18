@@ -102,7 +102,8 @@ export default function ChatAsesor({ contexto, items, perfil }: { contexto: unkn
                 <div className={`max-w-[90%] rounded-lg px-3 py-2 text-sm ${m.rol === 'usuario' ? 'bg-emerald-500 text-[#09090b]' : 'bg-zinc-100 dark:bg-[#27272a] text-zinc-800 dark:text-zinc-200'}`}>
                   {m.rol === 'usuario' ? m.texto : (
                     <div className="space-y-2 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_strong]:font-bold [&_a]:underline">
-                      <ReactMarkdown>{m.texto}</ReactMarkdown>
+                      {/* Sin imágenes: una respuesta manipulada por un titular podría cargar una URL externa con datos de la cartera */}
+                      <ReactMarkdown disallowedElements={['img']}>{m.texto}</ReactMarkdown>
                     </div>
                   )}
                 </div>

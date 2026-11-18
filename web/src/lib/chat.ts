@@ -69,7 +69,7 @@ function herramientas(items: HoldingInput[], perfil: PerfilInversionista | null)
         const t = String(args.ticker ?? '').trim().toUpperCase();
         if (!/^[A-Z0-9.\-]{1,15}$/.test(t)) return { error: 'Ticker inválido.' };
         const [q, f, r, n] = await Promise.all([
-          liveQuotes([t]), fundamentales([t]).catch(() => new Map()), lugarEnRanking(t).catch(() => null), noticias([{ ticker: t }]).catch(() => ({} as Record<string, never[]>)),
+          liveQuotes([t]), fundamentales([t]).catch(() => new Map()), lugarEnRanking(t).catch(() => 'sin_dato' as const), noticias([{ ticker: t }]).catch(() => ({} as Record<string, never[]>)),
         ]);
         const fu = f.get(t);
         const tengo = items.filter(i => i.ticker.toUpperCase() === t).reduce((s, i) => s + i.cantidad, 0);
@@ -77,7 +77,7 @@ function herramientas(items: HoldingInput[], perfil: PerfilInversionista | null)
           ticker: t, nombre: q.get(t)?.name ?? fu?.nombre, precio: q.get(t)?.price ?? null, moneda: q.get(t)?.currency ?? null,
           tipo: fu?.tipo, sector: fu?.sector, per: fu?.per, per_esperado: fu?.perForward, dividendo: fu?.dividendYield, roe: fu?.roe,
           crecimiento_ventas: fu?.crecimientoVentas, costo_anual_fondo: fu?.gastoAnual, analistas: fu?.analistas ?? null,
-          ranking_medido: r ? {
+          ranking_medido: r === 'sin_dato' ? { error: 'No se pudo leer el ranking ahora: no afirmes si está o no en el Top.' } : r ? {
             ...r,
             lectura: r.mercado === 'EE.UU.'
               ? `${r.enTop ? 'Está en el Top de este mes. ' : 'No está en el Top. '}${typeof r.percentilSector === 'number' ? `Su utilidad respaldada por caja está mejor que el ${Math.round(r.percentilSector * 100)}% de su sector (100% = la mejor; el Top toma las mejores de cada sector).` : ''}${r.repartoAlto ? ' Reparte en dividendos más que su utilidad.' : ''}`

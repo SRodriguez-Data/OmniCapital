@@ -57,6 +57,12 @@ function leer(lista: unknown, mercado: Mercado): IdeaTop[] {
 
 let cache: { at: number; datos: IdeasDelBot | null } | null = null;
 
+export const DIAS_MAXIMOS_ESCANEO = 7;
+export function vigente(fecha: string, hoy: Date = new Date()): boolean {
+  const t = Date.parse(`${fecha}T00:00:00Z`);
+  return Number.isFinite(t) && hoy.getTime() - t <= DIAS_MAXIMOS_ESCANEO * 86_400_000;
+}
+
 export async function ideasDelBot(): Promise<IdeasDelBot | null> {
   if (cache && Date.now() - cache.at < 30 * 60 * 1000) return cache.datos;
   const { data, error } = await supabase
@@ -66,7 +72,13 @@ export async function ideasDelBot(): Promise<IdeasDelBot | null> {
     .limit(1);
   if (error) throw new Error(`No se pudieron leer las ideas del bot: ${error.message}`);
   const fila = data?.[0] as { fecha?: string; us?: unknown; cl?: unknown } | undefined;
-  const datos = fila ? { fecha: String(fila.fecha ?? '').slice(0, 10), us: leer(fila.us, 'EE.UU.'), cl: leer(fila.cl, 'Chile') } : null;
+  let datos = fila ? { fecha: String(fila.fecha ?? '').slice(0, 10), us: leer(fila.us, 'EE.UU.'), cl: leer(fila.cl, 'Chile') } : null;
+  // Un escaneo viejo no es el Top de hoy: si el bot dejó de correr, no se recomienda comprar con un ranking vencido
+  // (un precio en vivo no lo vuelve vigente). El bot escanea cada día hábil; el margen cubre feriados largos
+  if (datos && !vigente(datos.fecha)) {
+    console.warn(`El último escaneo del Top es del ${datos.fecha}: se trata como si no hubiera ideas al día.`);
+    datos = null;
+  }
   cache = { at: Date.now(), datos };
   return datos;
 }
@@ -87,13 +99,15 @@ export interface LugarEnRanking {
 export async function lugarEnRanking(ticker: string): Promise<LugarEnRanking | null> {
   const t = ticker.toUpperCase();
   const chile = t.endsWith('.SN');
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('analisis_ia')
     .select(chile ? 'r:candidatos_json->ranking_cl' : 'r:candidatos_json->calidad_us')
     .order('fecha', { ascending: false })
     .limit(1);
+  // Una lectura fallida no es "no está en el Top": se avisa el error y quien pregunta sabe que no hay dato
+  if (error) throw new Error(`No se pudo leer el ranking: ${error.message}`);
   const r = (data?.[0] as { r?: unknown } | undefined)?.r;
-  const ideas = await ideasDelBot().catch(() => null);
+  const ideas = await ideasDelBot();
   const enTop = !!(chile ? ideas?.cl : ideas?.us)?.some(i => i.ticker === t);
   if (chile) {
     const lista = Array.isArray(r) ? r as { ticker: string; momentum: number }[] : [];

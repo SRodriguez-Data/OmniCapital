@@ -56,6 +56,15 @@ export function veredictoDe(aporte: PlanAporte | null, plan: PlanRebalanceo): Ve
     ...ventas.map(o => ({ lado: 'VENDER' as const, ticker: o.ticker, nombre: o.nombre, moneda: o.moneda, cantidad: o.cantidad, todo: o.todo, precio: o.precio, limite: o.limite, montoCLP: o.montoCLP, motivo: o.motivo })),
     ...compras.map(o => ({ lado: 'COMPRAR' as const, ticker: o.ticker, nombre: o.nombre, moneda: o.moneda, cantidad: o.cantidad, todo: false, precio: o.precio, limite: o.limite, montoCLP: o.montoCLP, motivo: o.motivo })),
   ];
+  if (!pasos.length && aporte && aporte.montoCLP > 0) {
+    // Había plata para invertir y no salió ninguna orden: es un problema de datos, no un "no hagas nada"
+    const causa = aporte.descartadas[0];
+    return {
+      accion: 'MANTENER', titulo: 'Hoy no pude calcular tu compra', pasos,
+      detalle: `Tienes ${fmtMoney(aporte.montoCLP, 'CLP')} para invertir, pero no hay una compra que pueda recomendar con los datos de hoy`
+        + `${causa ? ` (${sinSufijo(causa.ticker)}: ${minuscula(causa.motivo)})` : ''}. No es una señal de esperar: vuelve a revisar más tarde.`,
+    };
+  }
   if (!pasos.length) {
     return {
       accion: 'MANTENER', titulo: 'No hagas nada hoy', pasos,
@@ -102,11 +111,18 @@ export async function asesorDelDia(
   { montoCLP, fraccionar = true, eventos = null }: { montoCLP?: number | null; fraccionar?: boolean; eventos?: Record<string, EventoSec[]> | null } = {},
 ): Promise<{ asesor: AsesorDelDia; report: AdvisorReport }> {
   const nivel = nivelDe(perfil);
+  let ideasFallaron = false;
   const [ideas, oportunidades] = await Promise.all([
-    ideasDelBot().catch(() => null),
+    ideasDelBot().catch(() => { ideasFallaron = true; return null; }),
     oportunidadesDelBot().catch(() => [] as string[]),
   ]);
   const { modelo, ...report } = await buildAdvisorReport(items, oportunidades, perfil);
+  // Sin el Top la compra sale 100% al índice: se dice, para que no parezca la recomendación normal
+  if (nivel && !ideas) {
+    report.avisosDatos.push(ideasFallaron
+      ? 'No se pudieron leer las ideas del Top: la compra de hoy va solo al índice. Revisa de nuevo más tarde.'
+      : 'El Top no está al día (el escaneo diario no ha corrido): la compra de hoy va solo al índice.');
+  }
   const precios = await preciosIdeas(ideas, report);
   const metaChile = metaChileDe(perfil);
   const proteccion = proteccionDe(perfil);

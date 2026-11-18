@@ -48,7 +48,9 @@ export async function POST(request: Request) {
     return NextResponse.json(planRebalanceo(report, modelo, {
       metaChile, aporteCLP: aporte, fraccionar: body?.fraccionar !== false,
       proteccion: esProteccion(body?.proteccion) ? body.proteccion : 'avisar',
-      nivel, ideas, precios, plataNueva: plataNuevaDe(perfil?.aporteMensual, aporte),
+      nivel, ideas, precios,
+      // Sin un monto escrito, la plata nueva es la del perfil (6 meses de aporte), igual que en la pestaña Asesor
+      plataNueva: plataNuevaDe(perfil?.aporteMensual, body?.aporte === undefined || body?.aporte === '' ? null : aporte),
     }));
   } catch (err) {
     console.error('Error calculando el rebalanceo:', err);
