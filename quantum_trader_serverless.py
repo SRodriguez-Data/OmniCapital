@@ -9,6 +9,7 @@ from datetime import datetime
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
+import bolsa_chile
 import cartera
 
 load_dotenv()
@@ -149,6 +150,8 @@ METODO_TOP = "v2"
 IDEAS_EEUU = 20
 IDEAS_CHILE = 5
 MINIMO_EVALUADAS_EEUU = 250
+# De las acciones evaluadas de EE.UU., las que deben traer el cierre de la última rueda de Nueva York
+MINIMO_AL_DIA_EEUU = 0.9
 # El ranking chileno normal tiene entre 20 y 28 acciones (las del IPSA con monto transado suficiente)
 MINIMO_EVALUADAS_CHILE = 15
 
@@ -167,8 +170,8 @@ def ideas_calidad_eeuu(filas):
     sec = fundamentales_sec.Sec()
     hoy = pd.Timestamp.now().normalize()
     anual = fundamentales_sec.anuales(sec, [hoy.year - 2, hoy.year - 1, hoy.year])
-    # La última cifra anual ya conocida de cada empresa, si no tiene más de 15 meses
-    vigente = (anual[(anual["conocido"] <= hoy) & (anual["cierre"] >= hoy - pd.Timedelta(days=455))]
+    # La última cifra anual ya conocida de cada empresa, si no tiene más de 15 meses (el mismo plazo del laboratorio)
+    vigente = (anual[(anual["conocido"] <= hoy) & (anual["cierre"] >= hoy - fundamentales_sec.VIGENCIA_ANUAL)]
                .sort_values("cierre").groupby("cik").tail(1).set_index("cik"))
     ciks = sec.ciks()
     regs = []
@@ -193,6 +196,13 @@ def ideas_calidad_eeuu(filas):
     # una muestra parcial y no sería la del método que se midió
     if len(regs) < MINIMO_EVALUADAS_EEUU:
         raise RuntimeError(f"solo {len(regs)} acciones con precio y fundamentales al día (se exigen {MINIMO_EVALUADAS_EEUU})")
+    # Si el minero no actualizó el S&P 500 (no pudo leer la lista o Yahoo no entregó un lote), las filas siguen ahí
+    # pero con precios de días atrás: la lista, sus pesos y sus precios saldrían de datos viejos sin que nada lo avise
+    fechas = [filas[x["ticker"]]["date"][:10] for x in regs]
+    al_dia = sum(1 for f in fechas if f == max(fechas))
+    if al_dia < MINIMO_AL_DIA_EEUU * len(regs):
+        raise RuntimeError(f"solo {al_dia} de {len(regs)} acciones traen el cierre del {max(fechas)} "
+                           f"(se exige el {MINIMO_AL_DIA_EEUU:.0%})")
     df = pd.DataFrame(regs)
     df["percentil_sector"] = df.groupby("sector_gics")["calidad"].rank(pct=True)
     tabla = {r.ticker: {"c": round(float(r.calidad), 4), "p": round(float(r.percentil_sector), 3), "pa": r.payout_alto, "u": r.con_utilidad}
@@ -208,34 +218,35 @@ def ideas_calidad_eeuu(filas):
                       "cierre_fiscal": r.cierre_fiscal, **get_fundamentals(r.ticker)})
     return ideas, tabla
 
-def dividendos_desde(tickers, desde):
-    filas = []
-    for i in range(0, len(tickers), 50):
-        filas += (supabase.table("dividendos").select("ticker, fecha, monto").in_("ticker", tickers[i:i + 50])
-                  .gte("fecha", desde).execute().data or [])
-    por = {}
-    for f in filas:
-        por.setdefault(f["ticker"], []).append((f["fecha"][:10], f["monto"]))
-    return por
-
 def ideas_momentum_chile(filas):
     """Las acciones chilenas con mayor retorno (con dividendos) entre hace 12 meses y hace 1 mes: el método
-    momentum_chile de evidencia.py. `filas`: ticker -> última fila con volumen (precio de hoy
+    momentum_chile de evidencia.py, con la misma serie que mide el laboratorio (la de la Bolsa de Santiago ajustada por
+    dividendos, en las ruedas del mercado). `filas`: ticker -> fila de la última rueda, con volumen (precio de hoy
     real). Devuelve (ideas, ranking de todas las evaluadas): la simulación mantiene una acción mientras siga cerca
     de la cabeza del ranking, aunque salga de las 5."""
     tickers = sorted(filas)
     if not tickers:
         return [], []
-    desde = (pd.Timestamp.now() - pd.Timedelta(days=420)).strftime("%Y-%m-%d")
-    precios = cierres(tickers, desde)
-    divs = dividendos_desde(tickers, desde)
-    candidatos = []
-    for t, serie in precios.items():
-        if len(serie) < 253 or serie.iloc[-253:].nunique() < 0.5 * 253:
-            continue
-        inicio, fin = serie.index[-253], serie.index[-22]
-        pagado = sum(m for f, m in divs.get(t, []) if inicio < f <= fin)
-        candidatos.append((t, (serie.iloc[-22] + pagado) / serie.iloc[-253] - 1))
+    sesion = max(f["date"][:10] for f in filas.values())
+    fallidos: set[str] = set()
+    bolsa = bolsa_chile.diarias(tickers, barras=300, ajuste="dividends", fallidos=fallidos)
+    if fallidos:
+        # Un ranking sin ellas las daría por salidas de la lista: mejor no publicar el de hoy
+        raise RuntimeError(f"la Bolsa de Santiago no respondió por {len(fallidos)} de {len(tickers)} acciones")
+    sin_feed = len(tickers) - len(bolsa)
+    if sin_feed:
+        logging.warning(f"{sin_feed} acciones chilenas no están en el feed de la bolsa: no se evalúan (el laboratorio tampoco las mide).")
+    # Hasta la rueda guardada (una corrida con la bolsa abierta no usa la vela a medio hacer), en las ruedas del mercado
+    # y con los huecos sueltos rellenos, como evidencia.calendario
+    p = pd.DataFrame({t: df.set_index("date")["close"] for t, df in bolsa.items()}).sort_index()
+    p = p[p.index <= sesion]
+    con_datos = p.notna().sum(axis=1)
+    p = p[con_datos >= 0.5 * con_datos.max()].ffill(limit=5)
+    if len(p) < 253 or p.index[-1] != sesion:
+        raise RuntimeError(f"la Bolsa de Santiago entregó {len(p)} ruedas hasta el {p.index[-1] if len(p) else 'nunca'} "
+                           f"(se exigen 253 hasta el {sesion})")
+    momentum = (p.iloc[-22] / p.iloc[-253] - 1).dropna()
+    candidatos = [(t, float(m)) for t, m in momentum.items() if p[t].iloc[-253:].nunique() >= 0.5 * 253]
     candidatos.sort(key=lambda x: -x[1])
     ideas = []
     for t, mom in candidatos[:IDEAS_CHILE]:
@@ -279,10 +290,14 @@ def cierres(tickers, desde):
     df['date'] = df['date'].str[:10]
     return {t: g.set_index('date')['close'].sort_index() for t, g in df.groupby('ticker')}
 
-def monto_transado_mediano(tickers, hasta, sesiones=20):
-    """Mediana del monto transado (volumen x cierre) de las últimas `sesiones` ruedas de cada ticker. Con un solo día,
-    una acción que transa justo bajo el mínimo en una rueda tranquila sale de la lista y vuelve al día siguiente."""
-    desde = (pd.Timestamp(hasta) - pd.Timedelta(days=sesiones * 2)).strftime("%Y-%m-%d")
+def operables_chile(tickers, hasta):
+    """Las acciones chilenas que el Top puede elegir hoy, con la misma regla que mide el laboratorio
+    (bolsa_chile.operables): mediana del monto transado de 20 ruedas sobre el mínimo y con transacciones en la última
+    rueda de Santiago (no en "su" última fila, que puede ser de días atrás). Con un solo día de monto, una acción que
+    transa justo bajo el mínimo en una rueda tranquila saldría de la lista y volvería al día siguiente.
+    Devuelve (las operables, la última rueda, cuántas con monto suficiente no traen esa rueda)."""
+    tickers = [t for t in tickers if bolsa_chile.es_accion(t)]
+    desde = (pd.Timestamp(hasta) - pd.Timedelta(days=bolsa_chile.SESIONES_MONTO * 3)).strftime("%Y-%m-%d")
     filas = []
     for i in range(0, len(tickers), 20):
         inicio = 0
@@ -294,10 +309,17 @@ def monto_transado_mediano(tickers, hasta, sesiones=20):
                 break
             inicio += 1000
     if not filas:
-        return {}
+        return set(), None, 0
     df = pd.DataFrame(filas)
     df["monto"] = df["close"].fillna(0) * df["volume"].fillna(0)
-    return {t: float(g.sort_values("date")["monto"].tail(sesiones).median()) for t, g in df.groupby("ticker")}
+    df["date"] = df["date"].str[:10]
+    monto = df.pivot_table(index="date", columns="ticker", values="monto", aggfunc="last").sort_index()
+    # Las ruedas de la bolsa: los días en que transó la mayoría
+    con_datos = (monto.fillna(0) > 0).sum(axis=1)
+    monto = monto[con_datos >= 0.5 * con_datos.max()]
+    con_monto = bolsa_chile.monto_mediano(monto).iloc[-1] >= bolsa_chile.MONTO_MINIMO
+    operables = bolsa_chile.operables(monto).iloc[-1]
+    return set(operables[operables].index), monto.index[-1], int((con_monto & ~operables).sum())
 
 # Lo que midió el laboratorio (evidencia.py --web): qué ponderación tuvo mejor razón retorno/riesgo en cada método
 EVIDENCIA_METODOS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "src", "data", "evidencia_metodos.json")
@@ -310,6 +332,24 @@ def ponderacion_medida(metodo):
     except Exception as e:
         logging.warning(f"Sin la ponderación medida de {metodo} ({str(e)[:80]}): partes iguales.")
         return "igual"
+
+MAXIMO_DIAS_EVIDENCIA = 45
+
+def exigir_evidencia_vigente():
+    """El laboratorio mide cada mes (evidencia.yml). Si su última medición tiene más de 45 días es que falló más de una
+    vez: no se sigue publicando sobre una evidencia vieja ni se vacían las listas (eso vendería las carteras). La
+    corrida falla a la vista y queda vigente el escaneo anterior."""
+    try:
+        with open(EVIDENCIA_METODOS, encoding="utf-8") as f:
+            calculado = pd.Timestamp(json.load(f)["calculado"])
+        dias = (pd.Timestamp.now(tz="UTC") - (calculado if calculado.tzinfo else calculado.tz_localize("UTC"))).days
+    except Exception as e:
+        logging.error(f"❌ No se pudo leer la evidencia del laboratorio ({str(e)[:120]}). No se guarda el escaneo de hoy.")
+        sys.exit(1)
+    if dias > MAXIMO_DIAS_EVIDENCIA:
+        logging.error(f"❌ La evidencia del laboratorio tiene {dias} días (máximo {MAXIMO_DIAS_EVIDENCIA}): hay que "
+                      "volver a medir (evidencia.yml). No se guarda el escaneo de hoy.")
+        sys.exit(1)
 
 def evidencia_significativa(metodo):
     """(sí o no, motivo): el método publica ideas solo si el laboratorio midió que su cartera, tal como se opera
@@ -418,13 +458,15 @@ def historial_de(es_del_metodo):
         "un_mes_total": resumen_excesos(un_mes['EE.UU.'] + un_mes['Chile']),
     }
 
-def avisar_cambios(top_us, top_cl, liquidos):
+def avisos_de_cambios(top_us, top_cl, liquidos):
     """Avisos de la campana (alertas_mercado): una acción que entra o sale de las ideas con evidencia frente al
-    último escaneo del mismo método. Un escaneo repetido con los mismos precios da las mismas listas: sin avisos."""
+    último escaneo del mismo método. Un escaneo repetido con los mismos precios da las mismas listas: sin avisos.
+    Solo los arma (hay que llamarla antes de guardar el escaneo de hoy, que pasa a ser el último); se envían con
+    enviar_avisos cuando el escaneo ya quedó guardado."""
     previo = (supabase.table("analisis_ia").select("us:candidatos_json->us, cl:candidatos_json->cl, metodo:candidatos_json->metodo")
               .order("fecha", desc=True).limit(1).execute().data or [])
     if not previo or previo[0].get("metodo") != METODO_TOP:
-        return  # primer escaneo del método: no hay contra qué comparar
+        return []  # primer escaneo del método: no hay contra qué comparar
     antes = {c["ticker"] for c in (previo[0].get("us") or []) + (previo[0].get("cl") or [])}
     ahora = {c["ticker"]: c for c in top_us + top_cl}
     lista = lambda t: "Chile, mayor alza de 12 meses" if t.endswith(".SN") else "EE.UU., utilidad respaldada por caja"
@@ -433,6 +475,9 @@ def avisar_cambios(top_us, top_cl, liquidos):
               "mensaje": f"{t} entró a las ideas con evidencia ({lista(t)})."} for t in ahora if t not in antes]
     filas += [{"ticker": t, "tipo": "SALE_LISTA", "precio_actual": precio(t),
                "mensaje": f"{t} salió de las ideas con evidencia ({lista(t)}): ya no cumple el criterio."} for t in sorted(antes - set(ahora))]
+    return filas
+
+def enviar_avisos(filas):
     if filas:
         supabase.table("alertas_mercado").insert(filas).execute()
         logging.info(f"🔔 {len(filas)} avisos: {', '.join(f['ticker'] + (' entra' if f['tipo'] == 'ENTRA_LISTA' else ' sale') for f in filas)}")
@@ -474,12 +519,21 @@ def run_serverless_screener():
     liquidos = {}
 
     # 2. Liquidez: montos transados mínimos (en Chile en pesos). Índices y monedas son referencias, no ideas.
-    #    En Chile se mira la mediana de 20 ruedas (y que haya transado hoy): un día flojo no saca a una acción de la lista
+    #    En Chile se mira la mediana de 20 ruedas (y que haya transado en la última rueda de Santiago): un día flojo
+    #    no saca a una acción de la lista. Los fondos chilenos no son ideas
     try:
-        mediano_cl = monto_transado_mediano(sorted(r['ticker'] for r in activos_hoy if r['ticker'].endswith('.SN')), max_date)
+        operables_cl, sesion_cl, atrasadas_cl = operables_chile(sorted(r['ticker'] for r in activos_hoy if r['ticker'].endswith('.SN')), max_date)
     except Exception as e:
         logging.error(f"Error consultando los montos transados: {e}")
         sys.exit(1)
+    # Una acción con monto de sobra que no trae la última rueda casi siempre es un precio que no llegó, no una que no
+    # transó: con varias así el ranking saldría de datos a medias y las daría por salidas de la lista
+    if atrasadas_cl > 0.1 * (len(operables_cl) + atrasadas_cl):
+        logging.error(f"❌ {atrasadas_cl} acciones chilenas con monto suficiente no traen la rueda del {sesion_cl} "
+                      f"({len(operables_cl)} sí). No se guarda el escaneo de hoy.")
+        sys.exit(1)
+    if atrasadas_cl:
+        logging.warning(f"{atrasadas_cl} acciones chilenas no transaron el {sesion_cl}: hoy no se evalúan.")
     for row in activos_hoy:
         ticker = row['ticker']
         close = row.get('close') or 0
@@ -487,7 +541,7 @@ def run_serverless_screener():
         if ticker.startswith('^') or '=' in ticker or close <= 0:
             continue
         if ticker.endswith(".SN"):
-            if volumen_nominal <= 0 or mediano_cl.get(ticker, 0) < 450_000_000:
+            if ticker not in operables_cl or row['date'][:10] != sesion_cl:
                 continue
         elif volumen_nominal < 500_000:
             continue
@@ -497,7 +551,10 @@ def run_serverless_screener():
     frescos = tickers_con_datos_frescos(list(liquidos), max_date)
     congelados = [t for t in liquidos if t not in frescos]
     if congelados:
-        logging.warning(f"{len(congelados)} tickers con precios congelados en Yahoo: {', '.join(congelados[:30])}")
+        # Sin nombres: pueden ser acciones de los portafolios de los usuarios y este registro es público
+        logging.warning(f"{len(congelados)} tickers con precios congelados en Yahoo.")
+
+    exigir_evidencia_vigente()
 
     # Ideas con evidencia medida (evidencia.py, METODOS)
     calidad_us = {}
@@ -508,8 +565,12 @@ def run_serverless_screener():
         # Queda vigente el escaneo anterior y la corrida falla a la vista
         logging.error(f"❌ No se calcularon las ideas de EE.UU.: {str(e)[:200]}. No se guarda el escaneo de hoy.")
         sys.exit(1)
-    # El monto transado mínimo ya exige volumen hoy: el último precio chileno es real aunque haya huecos antes
-    top_cl, ranking_cl = ideas_momentum_chile({t: r for t, r in liquidos.items() if t.endswith('.SN')})
+    # El monto transado mínimo ya exige volumen en la última rueda: el último precio chileno es real
+    try:
+        top_cl, ranking_cl = ideas_momentum_chile({t: r for t, r in liquidos.items() if t.endswith('.SN')})
+    except Exception as e:
+        logging.error(f"❌ No se calcularon las ideas de Chile: {str(e)[:200]}. No se guarda el escaneo de hoy.")
+        sys.exit(1)
     if not top_us and not top_cl:
         logging.error("❌ Ningún método entregó ideas.")
         sys.exit(1)
@@ -537,8 +598,11 @@ def run_serverless_screener():
         except Exception as e:
             logging.warning(f"No se calcularon los pesos de {metodo}: {str(e)[:160]}")
 
+    # Se arman ahora (contra el último escaneo guardado) y se envían cuando el de hoy ya quedó guardado: si guardar
+    # falla, la corrida siguiente los repetiría
+    avisos = []
     try:
-        avisar_cambios(top_us, top_cl, liquidos)
+        avisos = avisos_de_cambios(top_us, top_cl, liquidos)
     except Exception as e:
         logging.warning(f"No se generaron los avisos de la campana: {str(e)[:160]}")
 
@@ -572,6 +636,11 @@ def run_serverless_screener():
         logging.error(f"Error guardando el escaneo en Supabase: {e}")
         sys.exit(1)
             
+    try:
+        enviar_avisos(avisos)
+    except Exception as e:
+        logging.warning(f"No se enviaron los avisos de la campana: {str(e)[:160]}")
+
     logging.info("✅ Pipeline Institucional Finalizado.")
 
 if __name__ == "__main__":

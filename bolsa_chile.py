@@ -23,6 +23,36 @@ URL = "wss://data.tradingview.com/socket.io/websocket"
 ZONA = "America/Santiago"
 # Transa todos los días: su último precio dice si la bolsa ya abrió hoy
 REFERENCIA = "CHILE.SN"
+# Las acciones y fondos chilenos que el minero sigue siempre. El feed los entregó todos (revisado el 2026-11-18): si
+# para uno de ellos responde "símbolo desconocido" es una falla del feed, no un motivo para volver a los precios de Yahoo
+CONOCIDOS = frozenset({
+    "CHILE.SN", "BSANTANDER.SN", "ENELCHILE.SN", "CMPC.SN", "SQM-B.SN", "LTM.SN", "COPEC.SN", "CENCOSUD.SN",
+    "EMBONOR-B.SN", "ANDINA-B.SN", "SMU.SN", "ENTEL.SN", "VAPORES.SN", "ITAUCL.SN", "AGUAS-A.SN", "IAM.SN", "CAP.SN",
+    "COLBUN.SN", "ECL.SN", "PARAUCO.SN", "MALLPLAZA.SN", "RIPLEY.SN", "FALABELLA.SN", "SONDA.SN", "CONCHATORO.SN",
+    "CCU.SN", "ILC.SN", "QUINENCO.SN", "CFINRENTAS.SN", "CFMITNIPSA.SN",
+})
+
+# El universo chileno del Top, el mismo para el laboratorio (evidencia.py) y para el bot (quantum_trader_serverless.py):
+# acciones (no fondos) cuya mediana de monto transado en 20 ruedas llega al mínimo y que transaron en la última rueda
+FONDOS = ("CFI", "CFM")
+MONTO_MINIMO = 450_000_000   # pesos
+SESIONES_MONTO = 20
+
+
+def es_accion(ticker: str) -> bool:
+    """Acción chilena que el método puede elegir: los fondos (CFI, CFM) se siguen, pero no se eligen."""
+    return ticker.endswith(".SN") and not ticker.startswith(FONDOS)
+
+
+def monto_mediano(monto: pd.DataFrame) -> pd.DataFrame:
+    """Mediana del monto transado (cierre x volumen) de las últimas 20 ruedas, cada día. `monto`: ruedas de la bolsa x
+    tickers; una rueda sin transacciones (vacía) cuenta como cero. Solo mira hacia atrás."""
+    return monto.fillna(0).rolling(SESIONES_MONTO, min_periods=SESIONES_MONTO).median()
+
+
+def operables(monto: pd.DataFrame) -> pd.DataFrame:
+    """Qué acciones se pueden elegir cada día: monto mediano suficiente y con transacciones en esa rueda."""
+    return (monto_mediano(monto) >= MONTO_MINIMO) & (monto.fillna(0) > 0)
 
 
 def simbolo(ticker: str) -> str:
@@ -108,6 +138,10 @@ def _diarias(con: Conexion, ticker: str, barras: int, ajuste: str, segundos: flo
                     for v in ((p[1] or {}).get("serie") or {}).get("s", []):
                         velas[v["i"]] = v["v"]
                 elif m.get("m") == "symbol_error":
+                    # Un símbolo que el feed ya entregó no deja de existir: es una falla y se trata como tal (reintento
+                    # y `fallidos`), para que nadie lo reemplace por Yahoo
+                    if ticker in CONOCIDOS:
+                        raise RuntimeError(f"{ticker}: el feed no reconoció un símbolo que sí tiene")
                     return None
                 elif m.get("m") == "series_completed":
                     return tabla(velas) if velas else None

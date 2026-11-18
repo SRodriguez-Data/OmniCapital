@@ -14,7 +14,8 @@ Sesgos que no se pueden quitar con datos gratis, y que el informe declara:
 - Supervivencia: en EE.UU. cada fecha usa solo las empresas del S&P 500 de hoy que ya estaban en el índice ese día
   (fecha de ingreso de Wikipedia): así no cuentan las que entraron después de subir mucho. Las que salieron del
   índice siguen sin estar (la mayoría por caer), lo que todavía favorece a las señales que compran caídas. En Chile
-  el universo es el IPSA de hoy.
+  el universo es el IPSA de hoy con toda su historia, y eso favorece justo al método que se mide ahí (momentum): las
+  que subieron mucho y después se hundieron hasta salir del índice no están entre las perdedoras de la cartera.
 - Fundamentales: solo EE.UU., con los estados financieros de la SEC tal como se conocían en cada fecha
   (fundamentales_sec.py). Para Chile no hay una fuente histórica gratuita: ahí solo se miden señales de precio.
 
@@ -52,8 +53,16 @@ ESPERA = 1
 # online con IVA más el desliz de la punta (como la cuenta simulada, trading/core/simulado.py). EE.UU.: sin comisión,
 # solo la punta y el cambio de moneda
 COSTO_POR_LADO = {"Chile": 0.005, "EE.UU.": 0.001}
-# Fondos chilenos que el minero sigue pero no son acciones que el método pueda elegir
-FONDOS_CHILE = ("CFI", "CFM")
+# Entre rebalanceos mensuales la cartera real mantiene una acción que salió de la lista mientras siga entre las primeras
+# MARGEN x N del ranking del día (trading/strategies/base.py MARGEN); si sale de ahí, se vende y entra la primera de la
+# lista que no se tiene (trading/main.py cartera)
+MARGEN_MANTENER = 1.5
+# Qué cartera opera también entre rebalanceos (trading/main.py OPERA_ENTRE_REBALANCEOS). En Chile no: medido el
+# 2026-11-18, los cambios entre rebalanceos rotaban la cartera unas 11 veces al año y su costo dejaba al método en
+# t 1,78 (+7,8% al año); solo con el rebalanceo mensual, t 2,38 (+10,2%). En EE.UU. da lo mismo (t 3,09 y 3,11)
+OPERA_ENTRE_REBALANCEOS = {"EE.UU.": True, "Chile": False}
+# El monto transado de cada acción chilena viaja junto a los precios (y en su caché) en columnas con este sufijo
+SUFIJO_MONTO = "#monto"
 # Lo mínimo para que la medición valga: con menos, una fuente falló y medir igual daría evidencia sobre otro universo
 MINIMO_COBERTURA = 0.95
 MINIMO_CHILE_BOLSA = 20
@@ -88,19 +97,29 @@ def descargar(tickers: list[str]) -> pd.DataFrame:
             if t in df.columns.get_level_values(0):
                 columnas.append(df[t]["Close"].rename(t))
         logging.info(f"Descargados {min(i + LOTE, len(tickers))}/{len(tickers)}")
-    # 10 años de sesiones de la Bolsa de Santiago, ajustadas por dividendos como el cierre de Yahoo
-    bolsa = bolsa_chile.diarias([t for t in tickers if t.endswith(".SN")], barras=2600, ajuste="dividends")
-    columnas = [c for c in columnas if c.name not in bolsa]
-    columnas += [df.set_index(pd.to_datetime(df["date"]))["close"].rename(t) for t, df in bolsa.items()]
+    # 10 años de sesiones de la Bolsa de Santiago, ajustadas por dividendos como el cierre de Yahoo. Y las mismas sin
+    # ajustar por dividendos, para el monto que de verdad se transó cada día (el filtro de liquidez del bot)
+    chilenas = [t for t in tickers if bolsa_chile.es_accion(t)]
+    fallidos: set[str] = set()
+    bolsa = bolsa_chile.diarias(chilenas, barras=2600, ajuste="dividends", fallidos=fallidos)
+    sin_ajuste = bolsa_chile.diarias(sorted(bolsa), barras=2600, ajuste="splits", fallidos=fallidos)
     logging.info(f"Chile: {len(bolsa)} acciones con precios de la Bolsa de Santiago.")
     if len(bolsa) < MINIMO_CHILE_BOLSA:
         raise RuntimeError(f"La Bolsa de Santiago entregó solo {len(bolsa)} acciones (se exigen {MINIMO_CHILE_BOLSA}): "
                            "no se mide con los precios chilenos de Yahoo, que vienen congelados.")
+    if fallidos or set(sin_ajuste) != set(bolsa):
+        raise RuntimeError(f"La Bolsa de Santiago no respondió por {len(fallidos | (set(bolsa) - set(sin_ajuste)))} "
+                           "acciones: no se completan con Yahoo ni se mide Chile con un universo a medias.")
+    # Las acciones chilenas se miden solo con la bolsa: las que el feed no tiene no entran con precios de Yahoo
+    columnas = [c for c in columnas if not bolsa_chile.es_accion(c.name)]
+    columnas += [df.set_index(pd.to_datetime(df["date"]))["close"].rename(t) for t, df in bolsa.items()]
+    montos = [(df["close"] * df["volume"]).set_axis(pd.to_datetime(df["date"])).rename(t + SUFIJO_MONTO)
+              for t, df in sin_ajuste.items()]
     con_datos = sum(1 for c in columnas if c.notna().sum() > 252)
     if con_datos < MINIMO_COBERTURA * len(tickers):
         raise RuntimeError(f"Solo {con_datos} de {len(tickers)} activos con historia: una descarga falló y la "
                            "medición saldría de un universo incompleto.")
-    precios = pd.concat(columnas, axis=1)
+    precios = pd.concat(columnas + montos, axis=1)
     precios.index = pd.to_datetime(precios.index).tz_localize(None)
     return precios.sort_index()
 
@@ -337,21 +356,45 @@ VARIANTES_CHILE = {
 }
 
 
+def cambios_entre_rebalanceos(puntaje: pd.DataFrame, n: int, d, pesos: pd.Series) -> tuple[pd.Series, float]:
+    """Lo que la cartera real cambia entre un rebalanceo mensual y el siguiente, con el ranking de cada día: una acción
+    que sale de las primeras MARGEN_MANTENER x N se vende y su peso pasa a la primera de la lista del día que no se
+    tiene. Devuelve (la cartera al final del mes, lo que cambió de manos: venta más compra)."""
+    tenencia = dict(pesos)
+    rotacion = 0.0
+    i = puntaje.index.get_loc(d)
+    for _, fila in puntaje.iloc[i + 1:i + 22].iterrows():
+        orden = fila.dropna().sort_values(ascending=False).index
+        if len(orden) < n:
+            continue  # un día sin ranking completo es de datos incompletos: la cartera real tampoco opera
+        cerca = set(orden[:int(n * MARGEN_MANTENER)])
+        for sale in [s for s in tenencia if s not in cerca]:
+            entra = next((s for s in orden[:n] if s not in tenencia), None)
+            if entra is None:
+                break
+            tenencia[entra] = tenencia.pop(sale)
+            rotacion += 2 * tenencia[entra]
+    return pd.Series(tenencia, dtype=float), rotacion
+
+
 def medir_ponderaciones(puntaje: pd.DataFrame, n: int, fechas, precios: pd.DataFrame, valido: pd.DataFrame,
-                        costo: float = 0.0) -> dict:
+                        costo: float, adelante: pd.DataFrame, entre_rebalanceos: bool = True) -> dict:
     """Cada mes, las N elegidas del método con cada ponderación de cartera.py (pesos con el año anterior, nada del
-    futuro) y su retorno del mes siguiente, comprando al cierre del día siguiente a la señal y descontando `costo` por
-    cada peso que cambia de manos al renovar la cartera. Mide la razón retorno/riesgo de la cartera (Sharpe sin tasa
-    libre, anual), su volatilidad, su peor caída y su exceso frente al promedio del mercado (que no paga costos, como
-    un fondo del índice), en total y en cada mitad."""
+    futuro) y su retorno del mes siguiente (`adelante`: comprando al cierre del día siguiente a la señal), descontando
+    `costo` por cada peso que cambia de manos: al renovar la cartera cada mes y, entre rebalanceos, por los cambios que
+    hace la cartera real con el ranking de cada día (cambios_entre_rebalanceos). El retorno del mes es el de la cartera
+    del rebalanceo; de los cambios intermedios se cobra su costo, medido, y no se simula su retorno. Mide la razón
+    retorno/riesgo de la cartera (Sharpe sin tasa libre, anual), su volatilidad, su peor caída y su exceso frente al
+    promedio del mercado (que no paga costos, como un fondo del índice), en total y en cada mitad."""
     diarios = precios.pct_change(fill_method=None)
-    adelante = precios.shift(-21 - ESPERA) / precios.shift(-ESPERA) - 1
     series = {m: {} for m in cartera.PONDERACIONES}
+    rotaciones = {m: {} for m in cartera.PONDERACIONES}
     previos: dict[str, pd.Series] = {}
     mercado = {}
     for d in fechas:
         el = puntaje.loc[d].dropna().sort_values(ascending=False).index[:n]
         futuro = adelante.loc[d, el]
+        # Sin retorno solo quedan las que no se pudieron comprar (no transaron en los días siguientes a la señal)
         el = [t for t in el if pd.notna(futuro[t])]
         if len(el) < 2:
             continue
@@ -360,10 +403,12 @@ def medir_ponderaciones(puntaje: pd.DataFrame, n: int, fechas, precios: pd.DataF
         mercado[d] = todos.mean()
         for m in cartera.PONDERACIONES:
             w = cartera.pesos(historia, m)
-            # Lo que cambia de manos: lo que sale, lo que entra y lo que se reajusta (la primera vez, toda la cartera)
+            # Lo que cambia de manos: lo que sale, lo que entra y lo que se reajusta (la primera vez, toda la cartera),
+            # más los cambios del mes. La cartera con que se llega al rebalanceo siguiente es la que dejaron esos cambios
             antes = previos.get(m, pd.Series(dtype=float))
-            rotacion = float(w.sub(antes, fill_value=0).abs().sum())
-            previos[m] = w
+            previos[m], entre = cambios_entre_rebalanceos(puntaje, n, d, w) if entre_rebalanceos else (w, 0.0)
+            rotacion = float(w.sub(antes, fill_value=0).abs().sum()) + entre
+            rotaciones[m][d] = rotacion
             series[m][d] = float((w * futuro[el]).sum()) - costo * rotacion
     if len(mercado) < 24:
         return {}
@@ -382,7 +427,10 @@ def medir_ponderaciones(puntaje: pd.DataFrame, n: int, fechas, precios: pd.DataF
         x = pd.Series(v)
         res[m] = {**resumen(x), "mitades": {k: resumen(parte) for k, parte in
                                            (("antes", x[x.index < CORTE_MITADES]), ("despues", x[x.index >= CORTE_MITADES]))
-                                           if len(parte) >= 12}}
+                                           if len(parte) >= 12},
+                  # Veces que la cartera cambia de manos al año (compras más ventas sobre el patrimonio), con los
+                  # cambios entre rebalanceos: es lo que paga el costo
+                  "rotacion_anual": r(pd.Series(rotaciones[m]).mean() * 12, 2)}
     # La que tuvo mejor razón retorno/riesgo, si además no fue peor que partes iguales en ninguna mitad
     igual = res["igual"]
     candidatas = [m for m in res if all((res[m]["mitades"].get(k) or {}).get("sharpe", -9) >= (igual["mitades"].get(k) or {}).get("sharpe", 9) - 1e-9
@@ -437,31 +485,50 @@ def r(x, d=4):
     return None if x is None or not np.isfinite(x) else round(float(x), d)
 
 
-def calendario(precios: pd.DataFrame) -> pd.DataFrame:
-    """Los días en que operó ese mercado (la mayoría de sus acciones tiene cierre). Las dos bolsas tienen
-    feriados distintos: mezclarlas deja huecos que vacían las medias móviles. Los huecos sueltos de una acción
-    (hasta 5 días) se rellenan con su último cierre."""
+def dias_del_mercado(precios: pd.DataFrame) -> pd.DataFrame:
+    """Los días en que operó ese mercado (la mayoría de sus acciones tiene cierre), con los cierres tal como vienen.
+    Las dos bolsas tienen feriados distintos: mezclarlas deja huecos que vacían las medias móviles."""
     con_datos = precios.notna().sum(axis=1)
-    return precios[con_datos >= 0.5 * con_datos.max()].ffill(limit=5)
+    return precios[con_datos >= 0.5 * con_datos.max()]
+
+
+def calendario(precios: pd.DataFrame) -> pd.DataFrame:
+    """Los días del mercado con los huecos sueltos de una acción (hasta 5 días) rellenos con su último cierre."""
+    return dias_del_mercado(precios).ffill(limit=5)
+
+
+def retorno_adelante(reales: pd.DataFrame, dias: int) -> pd.DataFrame:
+    """Retorno de comprar al día siguiente de la señal y vender `dias` después, con precios que existieron. Se entra
+    al primer cierre real desde el día siguiente (una acción que no transó ese día se compra cuando vuelve a transar,
+    hasta 5 días después; si no, no se compró) y se sale al último precio transado: una acción que dejó de transar
+    después de elegirla sigue contando, con su último precio. `reales`: cierres sin rellenar."""
+    return reales.ffill().shift(-dias - ESPERA) / reales.bfill(limit=5).shift(-ESPERA) - 1
 
 
 def evaluar(crudos: pd.DataFrame, sec: "fundamentales_sec.Sec | None" = None) -> dict:
+    montos = crudos[[c for c in crudos.columns if c.endswith(SUFIJO_MONTO)]].rename(columns=lambda c: c[:-len(SUFIJO_MONTO)])
+    crudos = crudos[[c for c in crudos.columns if not c.endswith(SUFIJO_MONTO)]]
+    # Chile: el mismo universo que elige el bot (bolsa_chile.es_accion y operables)
     mercados = {"EE.UU.": [t for t in crudos.columns if not t.endswith(".SN")],
-                "Chile": [t for t in crudos.columns if t.endswith(".SN")]}
+                "Chile": [t for t in crudos.columns if bolsa_chile.es_accion(t)]}
+    sin_monto = sorted(set(mercados["Chile"]) - set(montos.columns))
+    if sin_monto:
+        raise RuntimeError(f"{len(sin_monto)} acciones chilenas sin su monto transado (un caché de precios anterior al "
+                           "filtro de liquidez): hay que descargar de nuevo.")
     salida = {"base": {}, "factores": {}, "reglas": {}, "top5": {}, "metodos": {}, "variantes_chile": {}, "muestra": {}}
 
     sp500 = tabla_sp500()
     if sp500 is None:
         raise RuntimeError("Sin la lista del S&P 500 no se puede medir EE.UU.: el universo, los sectores y la fecha de "
                            "ingreso al índice salen de ahí.")
-    mercados["Chile"] = [t for t in mercados["Chile"] if not t.startswith(FONDOS_CHILE)]
     for mercado, cols in mercados.items():
         miembro = None
         if mercado == "EE.UU." and sp500 is not None:
             # Solo el S&P 500, y cada empresa desde que entró al índice (fecha de ingreso desconocida: desde siempre)
             ingreso = dict(zip(sp500["ticker"], sp500["ingreso"]))
             cols = [c for c in cols if c in ingreso]
-        precios = calendario(crudos[cols])
+        reales = dias_del_mercado(crudos[cols])
+        precios = reales.ffill(limit=5)
         if mercado == "EE.UU." and sp500 is not None:
             miembro = pd.DataFrame({c: precios.index >= (ingreso[c] if pd.notna(ingreso[c]) else pd.Timestamp.min)
                                     for c in cols}, index=precios.index)
@@ -475,15 +542,19 @@ def evaluar(crudos: pd.DataFrame, sec: "fundamentales_sec.Sec | None" = None) ->
             financieras = set(sp500.loc[sp500["GICS Sector"] == "Financials", "ticker"]) if sp500 is not None else set()
             sector_de = dict(zip(sp500["ticker"], sp500["GICS Sector"])) if sp500 is not None else {}
             s.update(senales_fundamentales(F, financieras, sector_de))
-        fwd = {h: precios.shift(-n - ESPERA) / precios.shift(-ESPERA) - 1 for h, n in HORIZONTES.items()}
+        fwd = {h: retorno_adelante(reales, n) for h, n in HORIZONTES.items()}
         fechas = fechas_mensuales(precios.index, max(HORIZONTES.values()) + ESPERA)
         valido = (~s["congelado"][cols]) & precios[cols].notna()
         if miembro is not None:
             valido &= miembro
+        if mercado == "Chile":
+            # Con lo transado hasta ese día (nada del futuro): las que el bot habría podido elegir
+            valido &= bolsa_chile.operables(montos[cols].reindex(precios.index))
         exceso = {}
         for h, n in HORIZONTES.items():
-            futuro_ok = valido & (~s["congelado"][cols].shift(-n - ESPERA).fillna(True).astype(bool))
-            f = fwd[h][cols].where(futuro_ok)
+            # Solo se filtra con lo que se sabía el día de la señal: lo que le pase después a la acción (que se
+            # congele o deje de transar) es parte del resultado
+            f = fwd[h][cols].where(valido)
             exceso[h] = f.sub(f.mean(axis=1), axis=0)
 
         # Lo normal: una acción cualquiera supera al promedio de su mercado menos de la mitad de las veces, porque
@@ -577,33 +648,46 @@ def evaluar(crudos: pd.DataFrame, sec: "fundamentales_sec.Sec | None" = None) ->
             salida["metodos"][clave] = {"nombre": m["nombre"], "mercado": mercado, "n": m["n"],
                                         **medir_metodo(puntaje, m["n"], fechas, exceso),
                                         "cartera": medir_ponderaciones(puntaje, m["n"], fechas, precios[cols], valido,
-                                                                       COSTO_POR_LADO[mercado])}
+                                                                       COSTO_POR_LADO[mercado], fwd["1m"][cols],
+                                                                       OPERA_ENTRE_REBALANCEOS[mercado]),
+                                        # Cuántas formas de elegir y de ponderar se midieron antes de quedarse con
+                                        # esta: con más pruebas, el mismo t vale menos
+                                        "probadas": {"variantes": len(VARIANTES_CHILE) if mercado == "Chile" else 1,
+                                                     "ponderaciones": len(cartera.PONDERACIONES)}}
         if mercado == "Chile":
             for clave, (nombre, fn) in VARIANTES_CHILE.items():
                 puntaje = fn(s)[cols].where(valido)
                 salida["variantes_chile"][clave] = {"nombre": nombre, **medir_metodo(puntaje, 5, fechas, exceso),
                                                     "cartera": medir_ponderaciones(puntaje, 5, fechas, precios[cols], valido,
-                                                                                   COSTO_POR_LADO[mercado])}
+                                                                                   COSTO_POR_LADO[mercado], fwd["1m"][cols],
+                                                                                   OPERA_ENTRE_REBALANCEOS[mercado])}
         salida["muestra"][mercado] = {
             "desde": precios.index[0].strftime("%Y-%m-%d"), "hasta": precios.index[-1].strftime("%Y-%m-%d"),
             "fechas_evaluadas": len(fechas), "acciones": len(cols),
             "universo": "S&P 500 en la fecha (miembros actuales desde su ingreso)" if miembro is not None
-                        else "Acciones chilenas que sigue el minero (el IPSA actual y las de la cartera), sin fondos",
+                        else "Acciones chilenas que sigue el minero (el IPSA actual y las de la cartera), sin fondos, "
+                             f"con mediana de monto transado de {bolsa_chile.SESIONES_MONTO} ruedas de al menos "
+                             f"{bolsa_chile.MONTO_MINIMO / 1e6:.0f} millones de pesos en cada fecha",
             "costo_por_lado": COSTO_POR_LADO[mercado],
         }
     salida["sesgos"] = [
         "Supervivencia: en EE.UU. cada fecha usa solo las empresas del S&P 500 actual que ya estaban en el índice; "
-        "las que salieron (la mayoría por caer) no están, lo que favorece a las señales que compran caídas. En "
-        "Chile se usa el IPSA actual con toda su historia.",
+        "las que salieron (la mayoría por caer) no están, lo que favorece a las señales que compran caídas.",
+        "Supervivencia en Chile: se usa el IPSA actual con toda su historia, y eso favorece al método que se mide ahí. "
+        "Las acciones que subieron mucho y después cayeron hasta salir del índice no están, así que a la cartera de "
+        "mayor alza le faltan parte de sus perdedoras: su ventaja medida es un techo, no una estimación.",
         "Fundamentales solo de EE.UU. (SEC EDGAR, cada cifra 90 días después del cierre de su año fiscal); el valor de "
         "mercado se estima con el valor en manos del público, así que las empresas con controlador grande salen algo "
         "más baratas. Para Chile no hay fundamentales históricos gratuitos.",
         "Exceso frente al promedio simple de cada mercado, comprando al cierre del día siguiente a la señal. La cartera "
         f"de cada método descuenta el costo de renovarla cada mes ({COSTO_POR_LADO['Chile']:.1%} por lado en Chile, "
-        f"{COSTO_POR_LADO['EE.UU.']:.1%} en EE.UU.); las reglas sueltas, no. Todo antes de impuestos.",
+        f"{COSTO_POR_LADO['EE.UU.']:.1%} en EE.UU.) y, en EE.UU., el de los cambios que hace entre rebalanceos (una "
+        f"acción que sale de las primeras {MARGEN_MANTENER:g} veces N del ranking del día); la de Chile solo cambia en el "
+        "rebalanceo mensual. Las reglas sueltas no descuentan costos. Todo antes de impuestos.",
         f"Se probaron {len(VARIANTES_CHILE)} variantes del método chileno y {len(cartera.PONDERACIONES)} formas de "
-        "ponderar cada cartera: elegir la mejor de varias infla su fuerza estadística, por eso la elegida debe ganar "
-        "también en cada mitad de la historia.",
+        f"ponderar cada cartera ({len(VARIANTES_CHILE) * len(cartera.PONDERACIONES)} combinaciones en Chile, "
+        f"{len(cartera.PONDERACIONES)} en EE.UU.): elegir la mejor de varias infla su fuerza estadística, por eso la "
+        "elegida debe ganar también en cada mitad de la historia y su t se lee junto al número de pruebas.",
     ]
     salida["calculado"] = datetime.now(timezone.utc).isoformat()
     return salida
@@ -621,14 +705,15 @@ def para_web(res: dict) -> tuple[dict, dict]:
     }
     resumen = lambda x: {k: x[k] for k in ("retorno_anual", "volatilidad_anual", "sharpe", "peor_caida", "exceso_anual", "exceso_t")}
     cartera_web = lambda c: {"elegida": c["elegida"], "meses": c["meses"],
-                             "ponderaciones": {w: {**resumen(x), "mitades": {k: resumen(v) for k, v in x["mitades"].items()}}
+                             "ponderaciones": {w: {**resumen(x), "rotacion_anual": x.get("rotacion_anual"),
+                                                   "mitades": {k: resumen(v) for k, v in x["mitades"].items()}}
                                                for w, x in c["ponderaciones"].items()}} if c else None
     metodos = {
         "calculado": res["calculado"], "muestra": res["muestra"], "sesgos": res["sesgos"],
         "base": reglas["base"],
         "metodos": {k: {"nombre": m["nombre"], "mercado": m["mercado"], "n": m["n"],
                         "3m": {**corto(m["3m"]), "meses_positivos": m["3m"]["meses_positivos"], "mitades": m["3m"]["mitades"]},
-                        "cartera": cartera_web(m.get("cartera"))}
+                        "cartera": cartera_web(m.get("cartera")), "probadas": m.get("probadas")}
                     for k, m in res["metodos"].items() if "3m" in m},
         # Las variantes del método chileno que se midieron junto a él (cuántas se probaron importa para leer el t)
         "variantes_chile": {k: {"nombre": v["nombre"], "t": (v.get("3m") or {}).get("t"),

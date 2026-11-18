@@ -21,12 +21,16 @@ import os
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import requests
 
 BASE = "https://data.sec.gov/api/xbrl/frames"
 REZAGO_ANUAL = pd.Timedelta(days=90)      # del cierre fiscal al 10-K
 REZAGO_FLOTANTE = pd.Timedelta(days=270)  # el valor en manos del público (2.º trimestre) también sale en el 10-K
+# Un año fiscal sirve hasta 15 meses después de su cierre (el plazo del 10-K siguiente). El laboratorio y el bot usan el
+# mismo plazo: con otro, medirían carteras distintas
+VIGENCIA_ANUAL = pd.Timedelta(days=455)
 
 # Conceptos de flujo (un año fiscal); el primero de cada lista que la empresa reporte es el que vale
 DURACION = {
@@ -175,6 +179,33 @@ def a_diario(registros: pd.DataFrame, columna: str, indice: pd.DatetimeIndex, li
     return tabla.reindex(union).ffill(limit=limite).reindex(indice)
 
 
+def anual_vigente(registros: pd.DataFrame, columnas: list[str], indice: pd.DatetimeIndex) -> dict[str, pd.DataFrame]:
+    """El año fiscal vigente cada día (fechas x tickers), completo: todas las cifras salen del mismo año, el último
+    conocido, hasta que caduca (VIGENCIA_ANUAL). Si a ese año le falta una cifra queda vacía, igual que en el bot: no se
+    mezcla la utilidad de un año con el flujo de caja de otro."""
+    reg = (registros.sort_values(["conocido", "cierre"]).drop_duplicates(["ticker", "conocido"], keep="last")
+           .reset_index(drop=True))
+    if reg.empty:
+        return {c: pd.DataFrame(index=indice) for c in columnas}
+    reg["fila"] = np.arange(len(reg), dtype=float)
+    tabla = reg.pivot(index="conocido", columns="ticker", values="fila")
+    vigente = tabla.reindex(tabla.index.union(indice)).ffill().reindex(indice)
+    filas = vigente.to_numpy()
+    hay = ~np.isnan(filas)
+    cierres = np.full(filas.shape, np.datetime64("NaT"), dtype="datetime64[ns]")
+    cierres[hay] = reg["cierre"].to_numpy(dtype="datetime64[ns]")[filas[hay].astype(int)]
+    with np.errstate(invalid="ignore"):
+        hay &= (indice.to_numpy(dtype="datetime64[ns]")[:, None] - cierres) <= VIGENCIA_ANUAL.to_timedelta64()
+    k = filas[hay].astype(int)
+    salida = {}
+    for c in columnas:
+        x = np.full(filas.shape, np.nan)
+        if c in reg:
+            x[hay] = pd.to_numeric(reg[c], errors="coerce").to_numpy(dtype=float)[k]
+        salida[c] = pd.DataFrame(x, index=indice, columns=vigente.columns)
+    return salida
+
+
 def panel(sec: Sec, precios: pd.DataFrame, anios: list[int]) -> dict[str, pd.DataFrame]:
     """Fundamentales vigentes cada día para los tickers de `precios` (fechas x tickers) y su valor de mercado."""
     mapa = sec.ciks()
@@ -192,7 +223,7 @@ def panel(sec: Sec, precios: pd.DataFrame, anios: list[int]) -> dict[str, pd.Dat
     columnas = ["utilidad", "utilidad_previa", "ventas", "margen_bruto", "costo_ventas", "flujo_operacional",
                 "pago_en_acciones", "dividendos",
                 "patrimonio", "activos", "activos_previos", "deuda"]
-    salida = {c: a_diario(anual, c, precios.index).reindex(columns=precios.columns) for c in columnas}
+    salida = {c: x.reindex(columns=precios.columns) for c, x in anual_vigente(anual, columnas, precios.index).items()}
 
     flot = flotantes(sec, anios)
     flot = flot[flot["cik"].isin(por_cik)]

@@ -3,8 +3,8 @@ y el de Chile en una cuenta simulada con los precios de la Bolsa de Santiago (Al
 con --real, en la cuenta del dueño en su corredora, a la que el bot le avisa cada orden por Telegram (core/manual.py).
 
 Cada corrida revisa los stops y aplica el freno diario. Una vez al mes lleva la cartera a las ideas del último
-escaneo del Top, con el peso que el escaneo le da a cada una (cartera.py). Entre rebalanceos el bot opera cuando
-quiere, en cualquier corrida: vende la acción que sale de la lista (y de su margen en el ranking), compra la que entra
+escaneo del Top, con el peso que el escaneo le da a cada una (cartera.py). En EE.UU., entre rebalanceos el bot opera
+cuando quiere, en cualquier corrida (en Chile no: ver OPERA_ENTRE_REBALANCEOS): vende la acción que sale de la lista (y de su margen en el ranking), compra la que entra
 el mismo día y corrige un peso muy desviado (si una acción cae y queda muy bajo su peso, compra más). Correrla varias
 veces el mismo día no duplica órdenes: si una corrida se corta a la mitad, la siguiente termina lo pendiente.
 
@@ -44,6 +44,10 @@ logging.getLogger('httpx').setLevel(logging.WARNING)  # cada consulta a Supabase
 BANDA_MENSUAL = 0.005           # del patrimonio: en el rebalanceo, una diferencia menor no se opera
 BANDA_ENTRE_REBALANCEOS = 0.25  # del peso objetivo: entre rebalanceos solo se corrige un peso muy desviado
 MONEDA = {'USD': 'US$', 'CLP': '$'}
+# Qué cuentas siguen la lista también entre rebalanceos mensuales (lo mismo que mide evidencia.py, OPERA_ENTRE_REBALANCEOS).
+# Chile no: medido el 2026-11-18, esos cambios rotaban su cartera unas 11 veces al año y su costo (0,5% por lado) le
+# quitaba la evidencia al método (t 1,78); solo con el rebalanceo mensual la tiene (t 2,38). Los stops siguen cada día
+OPERA_ENTRE_REBALANCEOS = {'eeuu': True, 'chile': False}
 
 
 def motivo(orden) -> str:
@@ -372,14 +376,15 @@ def main(enviar: bool, real: bool, mercado: str = 'eeuu') -> int:
             if previo is None:
                 raise ErrorConfiguracion(f'Falta la tabla {tabla}: ejecuta supabase/{tabla}.sql en el SQL Editor de Supabase.')
             if not real:
-                return Corrida(BrokerSimulado(previo.get('libro')), supabase, enviar, mercado='chile').correr()
+                return Corrida(BrokerSimulado(previo.get('libro')), supabase, enviar, mercado='chile',
+                               continuo=OPERA_ENTRE_REBALANCEOS['chile']).correr()
             # Ninguna corredora chilena tiene API: el bot avisa cada orden por Telegram y anota lo que le confirmas
             broker = BrokerManual(previo.get('libro'), capital_chile(), Telegram())
             if enviar and (n := broker.procesar_respuestas()):
                 logging.info(f'Respuestas de Telegram anotadas: {n}.')
-            return Corrida(broker, supabase, enviar, dueno=dueno, mercado='chile').correr()
+            return Corrida(broker, supabase, enviar, dueno=dueno, mercado='chile', continuo=OPERA_ENTRE_REBALANCEOS['chile']).correr()
         tope = tope_real() if real else None
-        return Corrida(Broker(real=real), supabase, enviar, tope=tope, dueno=dueno).correr()
+        return Corrida(Broker(real=real), supabase, enviar, tope=tope, dueno=dueno, continuo=OPERA_ENTRE_REBALANCEOS['eeuu']).correr()
     except ErrorConfiguracion as e:
         logging.error(f'❌ {e}')
         return 1

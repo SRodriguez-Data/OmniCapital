@@ -5,6 +5,7 @@ import sys
 import time
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 import requests
 from io import StringIO
@@ -29,6 +30,36 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 # Sin el detalle de cada consulta HTTP: los registros de GitHub Actions quedan más legibles
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
+# Menos que esto no es el S&P 500: Wikipedia respondió otra cosa o la tabla vino cortada
+MINIMO_SP500 = 480
+# Los tickers de los portafolios los escriben los usuarios en la web: solo entran los que tienen forma de ticker, y
+# hasta un tope (cada uno es una descarga más en cada corrida)
+TICKER_VALIDO = re.compile(r"^[A-Z0-9^][A-Z0-9.\-=]{0,14}$")
+MAXIMO_DE_PORTAFOLIOS = 200
+
+
+class OcultarPrivados(logging.Filter):
+    """Tapa en los registros los tickers que solo están en los portafolios de los usuarios (no en el universo público):
+    el repositorio y los registros de GitHub Actions son públicos y dirían qué tiene cada uno. Como `privados` en
+    web/scripts/agente-cartera.ts."""
+
+    def __init__(self, tickers):
+        super().__init__()
+        nombres = sorted({n for t in tickers for n in (t, t.removesuffix(".SN"))}, key=len, reverse=True)
+        self.patron = (re.compile("(?<![A-Za-z0-9])(" + "|".join(map(re.escape, nombres)) + ")(?![A-Za-z0-9])")
+                       if nombres else None)
+
+    def filter(self, record):
+        if self.patron:
+            record.msg, record.args = self.patron.sub("***", record.getMessage()), None
+        return True
+
+
+def ocultar_privados(tickers) -> None:
+    filtro = OcultarPrivados(tickers)
+    for h in logging.getLogger().handlers:
+        h.addFilter(filtro)
+
 
 def obtener_universo_masivo() -> tuple[list[str], list[str]]:
     """Extrae S&P 500, Nasdaq 100, activos personalizados y los de los portafolios de la web.
@@ -39,21 +70,28 @@ def obtener_universo_masivo() -> tuple[list[str], list[str]]:
     # El disfraz para que Wikipedia no nos bloquee
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
-    # 1. S&P 500
+    # 1. S&P 500. Sin él no se sigue: el minero terminaría "bien" sin actualizar las acciones de EE.UU. y el Top se
+    #    armaría con precios de días atrás
     try:
-        r = requests.get('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies', headers=headers)
+        r = requests.get('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies', headers=headers, timeout=30)
+        r.raise_for_status()
         # StringIO convierte el texto web en un formato que Pandas ama leer
         df_sp = pd.read_html(StringIO(r.text))[0]
-        sp500 = df_sp['Symbol'].str.replace('.', '-').tolist()
-        tickers_finales.extend(sp500)
-        logging.info(f"✅ S&P 500 cargado ({len(sp500)} activos).")
-    except Exception as e: 
-        logging.error(f"Error S&P 500: {e}")
+        sp500 = df_sp['Symbol'].str.replace('.', '-', regex=False).tolist()
+    except Exception as e:
+        logging.error(f"❌ No se pudo leer la lista del S&P 500: {str(e)[:160]}")
+        sys.exit(1)
+    if len(sp500) < MINIMO_SP500:
+        logging.error(f"❌ La lista del S&P 500 trae {len(sp500)} activos (se exigen {MINIMO_SP500}).")
+        sys.exit(1)
+    tickers_finales.extend(sp500)
+    logging.info(f"✅ S&P 500 cargado ({len(sp500)} activos).")
 
     # 2. Nasdaq 100
     try:
         # La tabla de componentes se movió de la página 'Nasdaq-100' a esta lista
-        r = requests.get('https://en.wikipedia.org/wiki/List_of_NASDAQ-100_companies', headers=headers)
+        r = requests.get('https://en.wikipedia.org/wiki/List_of_NASDAQ-100_companies', headers=headers, timeout=30)
+        r.raise_for_status()
         tablas = pd.read_html(StringIO(r.text))
         for t in tablas:
             if 'Ticker' in t.columns:
@@ -68,12 +106,8 @@ def obtener_universo_masivo() -> tuple[list[str], list[str]]:
 
     # 3. Tus Activos Fijos (Globales y Chilenos)
     activos_fijos = [
-        "CHILE.SN", "BSANTANDER.SN", "ENELCHILE.SN", "CMPC.SN", "SQM-B.SN", 
-        "LTM.SN", "COPEC.SN", "CENCOSUD.SN", "EMBONOR-B.SN", "ANDINA-B.SN", 
-        "SMU.SN", "ENTEL.SN", "VAPORES.SN", "ITAUCL.SN", "AGUAS-A.SN", 
-        "IAM.SN", "CAP.SN", "COLBUN.SN", "ECL.SN", "PARAUCO.SN", "MALLPLAZA.SN",
-        "RIPLEY.SN", "FALABELLA.SN", "SONDA.SN", "CONCHATORO.SN", "CCU.SN",
-        "ILC.SN", "QUINENCO.SN", "CFINRENTAS.SN", "CFMITNIPSA.SN",
+        # Los chilenos están en bolsa_chile.CONOCIDOS: son los que el feed de la bolsa tiene que entregar siempre
+        *sorted(bolsa_chile.CONOCIDOS),
         "TSM", "SONY", "TM", "HMC", "KEP", "BABA", "JD", "MUFG", "INFY", "WIT",
         "NTTYY", "BUD", "SFTBY", "BHP", "BIDU", "PDD", "LI", "NIO", 
         "NVO", "SAP", "SHEL", "UL", "SNY", "BP", "DEO", "BTI", "GSK", "SAN", 
@@ -91,6 +125,8 @@ def obtener_universo_masivo() -> tuple[list[str], list[str]]:
     # Lo que tienen los usuarios en la web, para que el asesor lea todo desde la base. Solo se registra
     # cuántos son: los registros de GitHub Actions de un repositorio público los puede ver cualquiera.
     de_portafolios = tickers_de_portafolios()
+    # Desde aquí ningún registro nombra a los que solo están en un portafolio
+    ocultar_privados(set(de_portafolios) - set(tickers_finales))
     tickers_finales.extend(de_portafolios)
     logging.info(f"✅ Activos de los portafolios de la web: {len(de_portafolios)}.")
 
@@ -105,7 +141,13 @@ def tickers_de_portafolios() -> list[str]:
         return []
     try:
         filas = supabase.table("mi_portafolio").select("ticker").execute().data or []
-        return sorted({f["ticker"].strip().upper() for f in filas if f.get("ticker")})
+        escritos = {str(f["ticker"]).strip().upper() for f in filas if f.get("ticker")}
+        validos = sorted(t for t in escritos if TICKER_VALIDO.match(t))
+        if len(validos) < len(escritos):
+            logging.warning(f"{len(escritos) - len(validos)} tickers de los portafolios no tienen forma de ticker: no se siguen.")
+        if len(validos) > MAXIMO_DE_PORTAFOLIOS:
+            logging.warning(f"Los portafolios traen {len(validos)} tickers: se siguen los primeros {MAXIMO_DE_PORTAFOLIOS}.")
+        return validos[:MAXIMO_DE_PORTAFOLIOS]
     except Exception as e:
         logging.warning(f"No se pudieron leer los portafolios: {e}")
         return []
@@ -450,13 +492,38 @@ def fila_desde_cotizacion(ticker: str, yahoo: pd.DataFrame, guardado: pd.DataFra
     return filas[0] if filas else None
 
 def reescribir_historial(ticker: str, filas: list[dict], hasta: str | None = None):
-    """Borra y vuelve a escribir el historial del ticker (o solo lo anterior a `hasta`)."""
-    borrar = supabase.table("precios_historicos").delete().eq("ticker", ticker)
-    if hasta:
-        borrar = borrar.lt("date", hasta)
-    borrar.execute()
-    for i in range(0, len(filas), 500):
-        supabase.table("precios_historicos").insert(filas[i:i + 500]).execute()
+    """Vuelve a escribir el historial del ticker (o solo lo anterior a `hasta`). Primero se escribe lo nuevo y recién
+    después se borra lo que había (las filas con id hasta el último que existía): si la escritura falla a medias no se
+    pierde el historial guardado. Si algo falla se quita lo recién escrito; si ni eso se puede, quedan días repetidos y
+    la corrida siguiente lo detecta y reescribe el activo (run_miner)."""
+    tabla = lambda: supabase.table("precios_historicos")
+    ultimo = tabla().select("id").eq("ticker", ticker).order("id", desc=True).limit(1).execute().data
+    tope = ultimo[0]["id"] if ultimo else None
+    try:
+        for i in range(0, len(filas), 500):
+            tabla().insert(filas[i:i + 500]).execute()
+        if tope is not None:
+            borrar = tabla().delete().eq("ticker", ticker).lte("id", tope)
+            if hasta:
+                borrar = borrar.lt("date", hasta)
+            borrar.execute()
+    except Exception as e:
+        try:
+            deshacer = tabla().delete().eq("ticker", ticker)
+            (deshacer.gt("id", tope) if tope is not None else deshacer).execute()
+        except Exception as e2:
+            logging.error(f"{ticker}: no se pudo deshacer una reescritura a medias ({str(e2)[:120]}); quedan días repetidos.")
+            raise e
+        # Si la tabla no admite dos filas del mismo día (restricción única), escribir antes de borrar no es posible:
+        # se vuelve a la forma anterior, borrar y escribir
+        if "23505" not in str(e) and "duplicate key" not in str(e).lower():
+            raise
+        borrar = tabla().delete().eq("ticker", ticker)
+        if hasta:
+            borrar = borrar.lt("date", hasta)
+        borrar.execute()
+        for i in range(0, len(filas), 500):
+            tabla().insert(filas[i:i + 500]).execute()
 
 def cargar_completo(ticker: str) -> bool:
     """Activo nuevo, sin datos recientes o cuyo historial guardado ya no calza: se baja completo y se reescribe."""
@@ -576,6 +643,10 @@ def run_miner():
         try:
             limite = ultimo_dia_cerrado(ticker)
             g = guardado[ticker]
+            # Días repetidos: una reescritura que quedó a medias (reescribir_historial). Se rehace completa
+            if g["date"].duplicated().any():
+                completos.append(ticker)
+                continue
             # Días guardados con la bolsa todavía abierta: su "cierre" era el precio de ese momento
             reemplazar = g.loc[g["date"] > limite, "date"].tolist()
             g = g[g["date"] <= limite].reset_index(drop=True)
