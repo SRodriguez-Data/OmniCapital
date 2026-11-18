@@ -64,3 +64,14 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: python -m trading.main --mercado chile ${{ (github.event_name == 'schedule' || inputs.enviar) && '--enviar' || '' }}
+
+      # Una corrida en rojo sin aviso pasa inadvertida: el asesor seguiría con datos de ayer sin que nadie lo sepa
+      - name: Alert by Telegram if the run failed
+        if: failure()
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CORRIDA: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          TEXTO="⚠️ La simulación (EE.UU. o Chile) falló en esta corrida: no operó o no guardó su estado. Detalle: ${CORRIDA}"
+          curl -s -o /dev/null --max-time 30 "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage"             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}"             --data-urlencode "text=${TEXTO}"

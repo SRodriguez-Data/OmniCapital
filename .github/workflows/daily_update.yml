@@ -30,6 +30,9 @@ concurrency:
   group: pipeline-diario
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
@@ -68,3 +71,14 @@ jobs:
           FORZAR_ANALISIS: ${{ github.event_name != 'schedule' && '1' || '' }}
         run: |
           python quantum_trader_serverless.py
+
+      # Una corrida en rojo sin aviso pasa inadvertida: el asesor seguiría con datos de ayer sin que nadie lo sepa
+      - name: Alert by Telegram if the run failed
+        if: failure()
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CORRIDA: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          TEXTO="⚠️ La actualización diaria de precios y del Top falló: la app sigue con los datos del día anterior. Detalle: ${CORRIDA}"
+          curl -s -o /dev/null --max-time 30 "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage"             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}"             --data-urlencode "text=${TEXTO}"

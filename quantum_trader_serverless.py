@@ -149,6 +149,8 @@ METODO_TOP = "v2"
 IDEAS_EEUU = 20
 IDEAS_CHILE = 5
 MINIMO_EVALUADAS_EEUU = 250
+# El ranking chileno normal tiene entre 20 y 28 acciones (las del IPSA con monto transado suficiente)
+MINIMO_EVALUADAS_CHILE = 15
 
 def ideas_calidad_eeuu(filas):
     """Las acciones del S&P 500 con la utilidad más respaldada por caja frente a su sector: el método
@@ -510,6 +512,12 @@ def run_serverless_screener():
     top_cl, ranking_cl = ideas_momentum_chile({t: r for t, r in liquidos.items() if t.endswith('.SN')})
     if not top_us and not top_cl:
         logging.error("❌ Ningún método entregó ideas.")
+        sys.exit(1)
+    # Como en EE.UU.: un ranking chileno corto es de datos incompletos (precios atrasados, feed caído a medias), y
+    # publicarlo haría que la web y la simulación vendieran lo que "salió" de una lista parcial. Queda el escaneo anterior
+    if len(ranking_cl) < MINIMO_EVALUADAS_CHILE:
+        logging.error(f"❌ Solo {len(ranking_cl)} acciones chilenas con datos al día (se exigen {MINIMO_EVALUADAS_CHILE}). "
+                      "No se guarda el escaneo de hoy.")
         sys.exit(1)
 
     # Donde la evidencia no es significativa es mejor no recomendar: esa lista queda vacía, con su motivo

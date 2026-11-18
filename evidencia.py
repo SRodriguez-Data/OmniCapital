@@ -24,6 +24,7 @@ import argparse
 import json
 import logging
 import os
+import sys
 from datetime import datetime, timezone
 
 import numpy as np
@@ -661,6 +662,14 @@ def main():
         json.dump(resultado, f, ensure_ascii=False, indent=1)
     logging.info(f"Evidencia guardada en {args.salida}")
     if args.web:
+        # Lo que va a la web decide qué publica el bot: un método sin medir (faltó SEC_CONTACTO, falló la SEC o no hubo
+        # datos) se leería como "perdió su evidencia", el bot vaciaría su lista y la cartera se vendería entera. Ante
+        # una medición incompleta no se escribe nada y queda vigente la anterior
+        faltan = [k for k in METODOS if not {"3m", "cartera"} <= set(resultado["metodos"].get(k) or {})
+                  or not resultado["metodos"][k]["cartera"]]
+        if faltan:
+            logging.error(f"❌ Métodos sin medir: {', '.join(faltan)}. No se actualiza la evidencia de la web.")
+            sys.exit(1)
         for nombre, datos in zip(("evidencia_reglas.json", "evidencia_metodos.json"), para_web(resultado)):
             with open(os.path.join(args.web, nombre), "w", encoding="utf-8") as f:
                 json.dump(datos, f, ensure_ascii=False, separators=(",", ":"))
