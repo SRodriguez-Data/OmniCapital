@@ -2,8 +2,8 @@
 //   npx tsx --test tests/*.test.ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { AdvisorReport, AssetReport, RiskModel } from '../src/lib/advisor';
-import { diaHabilAnterior, planAporte, type EntradaAporte } from '../src/lib/aporte';
+import { INDICES_NUCLEO, limiteDe, type AdvisorReport, type AssetReport, type RiskModel } from '../src/lib/advisor';
+import { NUCLEO, diaHabilAnterior, planAporte, type EntradaAporte } from '../src/lib/aporte';
 import { aporteDelMes, compradoEnElMes, veredictoDe } from '../src/lib/asesor';
 import { avisosCartera } from '../src/lib/avisos';
 import { conEventosAnteriores, type EventoSec } from '../src/lib/eventos';
@@ -61,21 +61,18 @@ test('aporte del mes: las compras registradas este mes se descuentan; con el mes
 
 // --- 3. Ninguna compra deja algo sobre su máximo --------------------------------------------------------------------
 
-test('el índice no se compra sobre 38% (40% − 2): lo que no entra queda sin invertir, con su motivo', () => {
+test('el índice del núcleo no tiene tope propio: con VOO en 39,8% o en 70% el aporte entra completo', () => {
   const voo = (peso: number) => [{ ticker: 'VOO', valorCLP: peso * V, pesoEfectivo: peso }];
-  // En 39,8% ya no entra nada
-  const lleno = planAporte(entrada({ posiciones: voo(0.398), ideas: null }));
-  assert.equal(monto(lleno, 'VOO'), 0);
-  assert.ok(lleno.descartadas.some(d => d.ticker === 'VOO' && /máximo de 40%/.test(d.motivo)));
-  assert.ok(lleno.notas.some(n => /VOO: no se compra/.test(n) && /sin invertir/.test(n)));
-  assert.ok(lleno.sinInvertirCLP > 0);
-  // En 37% entra solo hasta 38% de la cartera con el aporte adentro
-  const casi = planAporte(entrada({ posiciones: voo(0.37), ideas: null }));
-  const despues = (0.37 * V + monto(casi, 'VOO')) / (V + 300_000);
-  assert.ok(monto(casi, 'VOO') > 0 && despues <= 0.38 + 1e-9, `VOO queda en ${despues}`);
-  assert.ok(casi.notas.some(n => /VOO: se compra solo/.test(n)));
-  // Lejos del máximo nada cambia
-  assert.equal(planAporte(entrada({ posiciones: voo(0.2), ideas: null })).sinInvertirCLP < 1000, true);
+  for (const peso of [0.2, 0.398, 0.7]) {
+    const p = planAporte(entrada({ posiciones: voo(peso), ideas: null }));
+    assert.ok(monto(p, 'VOO') > 0 && p.sinInvertirCLP < 1000, `con VOO en ${peso} queda ${p.sinInvertirCLP} sin invertir`);
+    assert.ok(!p.descartadas.some(d => d.ticker === 'VOO'));
+  }
+  // Los índices sin tope son exactamente los del núcleo; cualquier otro fondo conserva su 40% y una empresa su 20%
+  assert.deepEqual([...INDICES_NUCLEO].sort(), Object.values(NUCLEO).map(n => n.ticker).sort());
+  assert.equal(limiteDe({ diversificado: true, ticker: 'VT' }), 0.4);
+  assert.equal(limiteDe({ diversificado: false, ticker: 'AAPL' }), 0.2);
+  assert.equal(limiteDe({ diversificado: true, ticker: 'VOO' }), 1);
 });
 
 test('el Top no deja un sector sobre 33% (35% − 2) ni una empresa sobre 18%: lo que no entra va al índice', () => {

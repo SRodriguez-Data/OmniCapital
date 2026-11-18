@@ -118,15 +118,27 @@ test('rebalanceo: vende la señal con evidencia completa y la concentración has
 });
 
 test('rebalanceo: lo vendido solo compra AUMENTAR, sin pasar el máximo de un fondo, y lo que no cabe queda sin invertir', () => {
+  // Un fondo amplio que no es el índice del núcleo (VT) sí tiene su máximo de 40%
   const { report, modelo } = cartera();
+  report.posiciones = report.posiciones.map(a => (a.ticker === 'VOO' ? { ...a, ticker: 'VT' } : a));
+  modelo.tickers = report.posiciones.map(a => a.ticker);
   const plan = planRebalanceo(report, modelo, { metaChile: 0.6 });
-  assert.deepEqual(plan.compras.map(o => o.ticker), ['VOO']);
-  assert.ok(plan.compras[0].pesoDespues <= 0.4 + 1e-6, `VOO queda en ${plan.compras[0].pesoDespues}`);
+  assert.deepEqual(plan.compras.map(o => o.ticker), ['VT']);
+  assert.ok(plan.compras[0].pesoDespues <= 0.4 + 1e-6, `VT queda en ${plan.compras[0].pesoDespues}`);
   // Se compra con lo vendido menos lo que se va en comisiones, cambio y el margen de las órdenes límite
   assert.ok(Math.abs(netoDeVentas(plan.ventasCLP) - plan.comprasCLP - plan.sinInvertirCLP) < 1, 'lo vendido (neto) se compra o queda sin invertir');
   assert.ok(plan.comprasCLP < plan.ventasCLP, 'nunca se compra con más de lo que deja la venta');
   assert.ok(plan.sinInvertirCLP > 0 && plan.motivoSinInvertir, 'avisa lo que queda sin invertir');
   assert.ok(plan.compras.every(o => o.limite >= o.precio) && plan.ventas.every(o => o.limite <= o.precio));
+});
+
+test('rebalanceo: el índice del núcleo (VOO) no tiene tope propio: recibe todo lo vendido, neto de costos', () => {
+  const { report, modelo } = cartera();
+  const plan = planRebalanceo(report, modelo, { metaChile: 0.6 });
+  assert.deepEqual(plan.compras.map(o => o.ticker), ['VOO']);
+  assert.ok(plan.compras[0].pesoDespues > 0.4, `VOO queda en ${plan.compras[0].pesoDespues}`);
+  assert.ok(plan.sinInvertirCLP < 1000, 'no queda plata sin invertir por un tope del índice');
+  assert.ok(!plan.ventas.some(o => o.ticker === 'VOO'));
 });
 
 test('rebalanceo: con una meta de Chile más baja recorta las acciones chilenas, no el fondo del IPSA', () => {

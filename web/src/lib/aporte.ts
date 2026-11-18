@@ -1,5 +1,5 @@
 import mercadoMedido from '@/data/evidencia_mercado.json';
-import { LIMITE_ACCION, LIMITE_FONDO, LIMITE_SECTOR, MARGEN_LIMITE, fmtMoney, type Accion } from './advisor';
+import { INDICES_NUCLEO, LIMITE_ACCION, LIMITE_FONDO, LIMITE_SECTOR, MARGEN_LIMITE, fmtMoney, limiteDe, type Accion } from './advisor';
 import { motivoSinSemaforo, semaforoFaltaDe, semaforoRojoDe } from './avisos';
 import { evidenciaMetodo, type Mercado, type Ponderacion } from './evidenciaMetodos';
 import type { IdeaTop, IdeasDelBot } from './ideas';
@@ -202,7 +202,9 @@ export function planAporte(e: EntradaAporte): PlanAporte {
   const cabeEn = (t: string, diversificado: boolean, sector?: string) => {
     const p = tengo.get(t);
     const tiene = Math.max(p?.valorCLP ?? 0, (p?.pesoEfectivo ?? 0) * V);
-    const propio = ((diversificado ? LIMITE_FONDO : LIMITE_ACCION) - MARGEN) * total - tiene - (ordenes.find(o => o.ticker === t)?.montoCLP ?? 0);
+    // Un fondo índice del núcleo no tiene tope propio (INDICES_NUCLEO en lib/advisor.ts)
+    if (INDICES_NUCLEO.has(t)) return cabeSector(diversificado, sector);
+    const propio = (limiteDe({ diversificado, ticker: t }) - MARGEN) * total - tiene - (ordenes.find(o => o.ticker === t)?.montoCLP ?? 0);
     return Math.min(propio, cabeSector(diversificado, sector));
   };
 

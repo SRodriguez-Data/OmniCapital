@@ -134,11 +134,11 @@ test('rebalanceo agresivo: lo vendido va a núcleo + Top, nunca de vuelta a Chil
   assert.ok(!plan.compras.some(o => o.moneda === 'CLP'), 'no recompra en Chile');
   assert.ok(plan.compras.some(o => o.ticker === 'VOO') && plan.compras.some(o => o.ticker === 'AAA'));
   const top = plan.compras.filter(o => o.ticker !== 'VOO').reduce((s, o) => s + o.montoCLP, 0);
-  // 60% de lo vendido (neto de costos) va al Top; el índice recibe el resto, pero sin dejar a VOO sobre 38% (40% − 2)
+  // 60% de lo vendido (neto de costos) va al Top y el resto al índice, que no tiene tope propio: no queda nada sin invertir
   assert.ok(Math.abs(top / netoDeVentas(plan.ventasCLP) - 0.6) < 0.02, `Top recibe ${top / netoDeVentas(plan.ventasCLP)}`);
   const voo = plan.compras.find(o => o.ticker === 'VOO')!;
-  assert.ok(voo.pesoDespues <= 0.38 + 1e-6, `VOO queda en ${voo.pesoDespues}`);
-  assert.ok(plan.sinInvertirCLP > 0 && plan.notas.some(n => /VOO: se compra solo/.test(n)), 'lo que no entra en VOO queda sin invertir y se dice');
+  assert.ok(voo.pesoDespues > 0.38, `VOO queda en ${voo.pesoDespues}`);
+  assert.ok(plan.sinInvertirCLP < 1000 && !plan.notas.some(n => /VOO: se compra solo/.test(n)), 'el índice recibe lo que le toca, completo');
   assert.ok(plan.evidenciaCompras?.top['EE.UU.']);
 });
 

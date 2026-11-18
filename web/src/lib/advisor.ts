@@ -151,7 +151,14 @@ export interface RiskModel {
 export const LIMITE_ACCION = 0.2; // peso máximo prudente de una empresa individual (contando lo que hay dentro de tus fondos)
 export const LIMITE_FONDO = 0.4; // y de un fondo diversificado
 export const LIMITE_SECTOR = 0.35;
-export const limiteDe = (a: { diversificado: boolean }) => (a.diversificado ? LIMITE_FONDO : LIMITE_ACCION);
+// Los fondos índice del núcleo (el S&P 500 y el IPSA completos, los mismos de NUCLEO en lib/aporte.ts) no tienen tope
+// propio: no concentran riesgo por sí mismos, y lo que tienen dentro ya se controla (cada empresa hasta 20% y cada
+// sector hasta 35% contando los fondos, y Chile hasta tu máximo). Con un tope de 40%, una cartera que crece por sus
+// aportes al índice (el perfil conservador es solo índice) dejaría plata sin invertir cada mes sin ninguna razón
+export const INDICES_NUCLEO: ReadonlySet<string> = new Set(['VOO', 'CFMITNIPSA.SN']);
+export const SIN_TOPE = 1;
+export const limiteDe = (a: { diversificado: boolean; ticker?: string }) =>
+  (a.ticker && INDICES_NUCLEO.has(a.ticker) ? SIN_TOPE : a.diversificado ? LIMITE_FONDO : LIMITE_ACCION);
 // Se deja de comprar 2 puntos antes del máximo, para que un vaivén del precio no lo pase: el mismo margen que usan el
 // aporte del mes (lib/aporte.ts) y el rebalanceo (lib/rebalanceo.ts)
 export const MARGEN_LIMITE = 0.02;
@@ -585,9 +592,12 @@ export async function buildAdvisorReport(
     const evTecnica = diversificado || tecnicoNoDecide ? null : evidenciaVeredicto(tecnico.veredicto, mercado);
     const evEstirado = !diversificado && !tecnicoNoDecide && distSma200 !== null && distSma200 > 0.25 ? evidencia('estirado', mercado, -1, 'Comprar más de 25% sobre su media de 200 días') : null;
     const fundamental = pilarFundamental(f, tipo, perMercado[p.moneda], p.moneda);
-    const limite = diversificado ? LIMITE_FONDO : LIMITE_ACCION;
+    const limite = limiteDe({ diversificado, ticker: p.ticker });
     const sabeTipo = tipoConocido(p.ticker, q);
-    const riesgo: Pilar<VeredictoRiesgo> = {
+    const riesgo: Pilar<VeredictoRiesgo> = limite === SIN_TOPE ? {
+      veredicto: 'holgado',
+      motivos: [`Pesa ${pct(peso)} de tu patrimonio. Es un fondo índice del núcleo: no tiene tope propio, porque lo que tiene dentro ya se controla (cada empresa hasta ${pct(LIMITE_ACCION, 0)} y cada sector hasta ${pct(LIMITE_SECTOR, 0)} contando tus fondos${p.moneda === 'CLP' ? ', y Chile hasta tu máximo' : ''}).`],
+    } : {
       veredicto: pesoEfectivo > limite && sabeTipo ? 'excedido' : pesoEfectivo > 0.75 * limite ? 'cerca del límite' : 'holgado',
       motivos: [`Pesa ${pct(peso)} de tu patrimonio${pesoEfectivo > peso + 0.005 ? ` (${pct(pesoEfectivo)} contando lo que tienes dentro de tus fondos)` : ''}; máximo prudente ${pct(limite, 0)}${diversificado ? ' para un fondo diversificado' : ' para una sola empresa'}.`],
     };
@@ -1053,7 +1063,7 @@ function buildFindings(
     out.push({
       nivel: 'alerta',
       titulo: `Concentración: ${concentrados.map(a => `${a.ticker} (${pct(a.pesoEfectivo)})`).join(', ')}`,
-      detalle: `Una mala noticia en un solo activo golpearía todo tu patrimonio. Lo prudente es que ninguna empresa pese más de ${pct(LIMITE_ACCION, 0)} (contando lo que tienes dentro de tus fondos) ni un fondo más de ${pct(LIMITE_FONDO, 0)}.`,
+      detalle: `Una mala noticia en un solo activo golpearía todo tu patrimonio. Lo prudente es que ninguna empresa pese más de ${pct(LIMITE_ACCION, 0)} (contando lo que tienes dentro de tus fondos) ni un fondo más de ${pct(LIMITE_FONDO, 0)} (los fondos índice del S&P 500 y del IPSA no tienen tope propio: se controla lo que tienen dentro).`,
     });
   } else if (mayor) {
     out.push({
