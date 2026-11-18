@@ -7,9 +7,10 @@ on:
     - cron: '23 9 2 * *'
   workflow_dispatch:
 
-# Necesita escribir en el repo: guarda el resultado en web/src/data/evidencia.json y eso despliega la web
+# Por defecto solo lectura: medir instala dependencias de terceros y usa las claves, así que corre sin permiso de
+# escritura. Solo el segundo trabajo, que no instala nada ni recibe secretos de la base, puede escribir en el repo.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: evidencia
@@ -22,10 +23,13 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # El token del repo no queda en disco mientras corre código instalado con pip
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -43,8 +47,52 @@ jobs:
           SEC_CONTACTO: ${{ secrets.SEC_CONTACTO }}
         run: python evidencia.py --web web/src/data
 
+      # Si falla, queda el semáforo del mes anterior (el que vino con el checkout) y la evidencia nueva se guarda igual
       - name: Medir el semáforo de mercado con décadas de historia
+        continue-on-error: true
         run: python tendencia_mercado.py --web web/src/data
+
+      - name: Pasar el resultado al trabajo que lo guarda
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: evidencia
+          path: |
+            web/src/data/evidencia_reglas.json
+            web/src/data/evidencia_metodos.json
+            web/src/data/evidencia_mercado.json
+          if-no-files-found: error
+          retention-days: 3
+
+      # Una corrida en rojo sin aviso pasa inadvertida: el asesor seguiría con datos de ayer sin que nadie lo sepa
+      - name: Alert by Telegram if the run failed
+        if: failure()
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CORRIDA: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          TEXTO="⚠️ La medición mensual de la evidencia falló: el asesor sigue con la medición anterior. Detalle: ${CORRIDA}"
+          curl -s -o /dev/null --max-time 30 "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${TEXTO}"
+
+  # Guarda el resultado en web/src/data (eso despliega la web). Es el único trabajo con permiso de escritura
+  guardar:
+    needs: medir
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Traer el resultado medido
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: evidencia
+          path: web/src/data
 
       - name: Guardar el resultado
         run: |
@@ -56,9 +104,10 @@ jobs:
             exit 0
           fi
           git commit -m "Refresh the advisor's measured evidence with last month's prices"
+          # Si entró otro commit a main mientras se medía, el push sería rechazado
+          git pull --rebase
           git push
 
-      # Una corrida en rojo sin aviso pasa inadvertida: el asesor seguiría con datos de ayer sin que nadie lo sepa
       - name: Alert by Telegram if the run failed
         if: failure()
         env:
@@ -66,5 +115,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           CORRIDA: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          TEXTO="⚠️ La medición mensual de la evidencia falló: el asesor sigue con la medición anterior. Detalle: ${CORRIDA}"
-          curl -s -o /dev/null --max-time 30 "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage"             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}"             --data-urlencode "text=${TEXTO}"
+          TEXTO="⚠️ La evidencia del mes se midió pero no se pudo guardar: el asesor sigue con la medición anterior. Detalle: ${CORRIDA}"
+          curl -s -o /dev/null --max-time 30 "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${TEXTO}"
