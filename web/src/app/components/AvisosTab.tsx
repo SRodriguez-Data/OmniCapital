@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { ChevronRight, Loader2, RefreshCw, ShieldAlert, Siren, Target } from 'lucide-react';
-import { usePortfolio } from '../context/PortfolioContext';
+import { PortafolioNoCargado, usePortfolio } from '../context/PortfolioContext';
 import { supabase } from '@/lib/supabase';
 import { META_CHILE_DEFECTO, PROTECCIONES, parsePerfil, type Proteccion } from '@/lib/perfil';
 
@@ -94,7 +94,7 @@ function TarjetaSemaforo({ s, medido }: { s: Semaforo; medido?: string }) {
 }
 
 export default function AvisosTab({ irAlPlan }: { irAlPlan: () => void }) {
-  const { items, loading: cargandoCartera } = usePortfolio();
+  const { items, loading: cargandoCartera, error: errorCartera } = usePortfolio();
   const [datos, setDatos] = useState<Respuesta | null>(null);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState('');
@@ -162,7 +162,8 @@ export default function AvisosTab({ irAlPlan }: { irAlPlan: () => void }) {
         </div>
       </div>
 
-      {!items.length && !cargandoCartera && (
+      {!items.length && errorCartera && <PortafolioNoCargado />}
+      {!items.length && !cargandoCartera && !errorCartera && (
         <p className={`${tarjeta} text-sm text-zinc-600 dark:text-[#a1a1aa]`}>Tu portafolio está vacío: agrega tus activos para ver sus avisos.</p>
       )}
       {cargando && !datos && (

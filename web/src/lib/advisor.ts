@@ -79,6 +79,9 @@ export interface AssetReport {
   evidencia: Evidencia[]; // lo que midió el laboratorio sobre las reglas que aplican a este activo
   conDatos: boolean;
   gemeloDe?: string; // activo casi idéntico de mayor peso donde conviene concentrar las compras
+  // Por qué su tendencia no puede decidir hoy (sin dividendos para ajustar sus precios, o menos de 12 meses de historia)
+  tecnicoNoDecide?: string | null;
+  fechaPrecio?: string; // de qué día es `precio` (YYYY-MM-DD), si se sabe
 }
 
 export interface Hallazgo {
@@ -149,6 +152,11 @@ export const LIMITE_ACCION = 0.2; // peso máximo prudente de una empresa indivi
 export const LIMITE_FONDO = 0.4; // y de un fondo diversificado
 export const LIMITE_SECTOR = 0.35;
 export const limiteDe = (a: { diversificado: boolean }) => (a.diversificado ? LIMITE_FONDO : LIMITE_ACCION);
+// Se deja de comprar 2 puntos antes del máximo, para que un vaivén del precio no lo pase: el mismo margen que usan el
+// aporte del mes (lib/aporte.ts) y el rebalanceo (lib/rebalanceo.ts)
+export const MARGEN_LIMITE = 0.02;
+// El dólar de respaldo (cierre de Yahoo) vale si es de la última sesión: fin de semana más un feriado
+const DIAS_MAXIMOS_DOLAR = 4;
 const GEMELOS_CORR = 0.9;
 // Los ETF apalancados o inversos no son diversificación de largo plazo
 const APALANCADO = /\b(2x|3x|leveraged|inverse|bear|bull|ultrapro|ultrashort)\b|\bProShares Ultra\b/i;
@@ -353,6 +361,7 @@ function decidir(a: {
   diversificado: boolean; tipo: TipoActivo; peso: number; pesoEfectivo: number; distSma200: number | null; vol: number | null; pnl: number | null;
   tecnico: Pilar<VeredictoTecnico>; fundamental: Pilar<VeredictoFundamental>; riesgo: Pilar<VeredictoRiesgo>;
   evTecnica: Evidencia | null; evEstirado: Evidencia | null; evFundamentales: Evidencia[];
+  tecnicoNoDecide?: string | null;
 }): Decision {
   const tMedido = a.tecnico.veredicto, f = a.fundamental.veredicto, r = a.riesgo.veredicto;
   const motivos: string[] = [];
@@ -388,6 +397,7 @@ function decidir(a: {
     const aFavor = senales.filter(e => e.signo > 0).map(e => `${e.etiqueta.toLowerCase()} (${e.nivel})`);
     const enContra = senales.filter(e => e.signo < 0).map(e => `${e.etiqueta.toLowerCase()} (${e.nivel})`);
     puntaje = total;
+    if (a.tecnicoNoDecide) motivos.push(a.tecnicoNoDecide);
     if (!senales.length) {
       motivos.push('Ninguna de sus señales tiene evidencia significativa en 10 años en este mercado: no hay base para aumentar ni para vender. Para aportes nuevos, un fondo diversificado tiene mejor respaldo.');
     } else {
@@ -416,9 +426,10 @@ function decidir(a: {
     motivos.push(`Está ${pct(a.distSma200!)} sobre su media de 200 días; en 10 años las acciones así de estiradas no rindieron menos que su mercado, pero si compras, hazlo en partes.`);
   }
 
-  if (accion === 'AUMENTAR' && r === 'cerca del límite') {
+  // El mismo punto en que el aporte del mes deja de comprarlo (lib/aporte.ts): antes de eso, "cerca del límite" se informa
+  if (accion === 'AUMENTAR' && r !== 'holgado' && a.pesoEfectivo >= limiteDe(a) - MARGEN_LIMITE) {
     accion = 'MANTENER';
-    motivos.push(`Ya pesa ${pct(a.pesoEfectivo)} de tu patrimonio, cerca del máximo de ${pct(limiteDe(a), 0)}: no conviene concentrarse más.`);
+    motivos.push(`Ya pesa ${pct(a.pesoEfectivo)} de tu patrimonio, a menos de ${pct(MARGEN_LIMITE, 0)} del máximo de ${pct(limiteDe(a), 0)}: no se compra más.`);
   }
   if (accion === 'AUMENTAR' && a.vol !== null && a.vol > 0.6) motivos.push(`Volatilidad muy alta (${pct(a.vol, 0)} anual): si aumentas, hazlo con montos pequeños.`);
   if (a.pnl !== null && a.pnl > 0.5 && accion !== 'AUMENTAR') motivos.push(`Acumula ${signed(a.pnl)} desde tu compra: tomar parte de la ganancia es razonable si quieres rebalancear.`);
@@ -460,11 +471,19 @@ export async function buildAdvisorReport(
     contextoMercado().catch(() => null),
     calidadEeuu(),
   ]);
-  const usdClp = dolar ?? fx?.closes.at(-1) ?? null;
-  if (!usdClp) throw new Error('No se pudo obtener el tipo de cambio del dólar.');
+  // Sin el dólar observado vale el último cierre de Yahoo, pero solo si es de la última sesión: un dólar viejo cambia
+  // los pesos de la cartera, los límites y la cantidad de cada orden en dólares
+  const fechaFx = fx?.dates.at(-1);
+  const diasFx = fechaFx ? (Date.now() - Date.parse(`${fechaFx}T00:00:00Z`)) / DAY_MS : Infinity;
+  const usdClp = dolar ?? (diasFx <= DIAS_MAXIMOS_DOLAR ? fx?.closes.at(-1) : null) ?? null;
+  if (!usdClp) throw new Error(fechaFx ? `No hay un tipo de cambio del dólar al día (el último es del ${fechaFx}).` : 'No se pudo obtener el tipo de cambio del dólar.');
   if (quotes.size === 0 && tickers.length > 0) avisosDatos.push('Yahoo no entregó cotizaciones en vivo: se usaron los últimos cierres conocidos.');
   if (fund.size === 0) avisosDatos.push('Yahoo no entregó datos fundamentales: las decisiones usan solo precios y riesgo.');
-  if (!dolar) avisosDatos.push('El dólar observado no estuvo disponible: se usó el último cierre de Yahoo.');
+  if (!dolar) {
+    avisosDatos.push(diasFx <= 2
+      ? 'El dólar observado no estuvo disponible: se usó el último cierre de Yahoo.'
+      : `Dólar atrasado: se usó el cierre del ${fechaFx!.split('-').reverse().join('-')} porque no hubo dato de hoy. Revisa las cantidades de las órdenes en dólares antes de ejecutarlas.`);
+  }
 
   const perMercado = {
     CLP: fund.get(BENCH_CL)?.per ?? PER_REFERENCIA.CLP,
@@ -478,6 +497,10 @@ export async function buildAdvisorReport(
   const tipoDe = (ticker: string, q?: LiveQuote): TipoActivo =>
     FONDOS_CHILE[ticker]?.tipo ?? fund.get(ticker)?.tipo
     ?? (q?.quoteType === 'ETF' || q?.quoteType === 'MUTUALFUND' || ETF_CONOCIDOS.has(ticker) ? 'etf' : 'accion');
+  // Sin cotización ni fundamentales (ni los guardados por el minero) no se sabe si es un fondo o una empresa: se trata
+  // como empresa para no comprar de más, pero no se vende por pasar el máximo de una empresa
+  const tipoConocido = (ticker: string, q?: LiveQuote) =>
+    !!FONDOS_CHILE[ticker] || !!fund.get(ticker) || !!q?.quoteType || ETF_CONOCIDOS.has(ticker);
 
   // 1. Valorización y costo en pesos (el costo en dólares usa el dólar del día de compra, si se conoce)
   const base = positions.map(p => {
@@ -494,7 +517,7 @@ export async function buildAdvisorReport(
     const valorNativo = p.cantidad * precio;
     const aCLP = (monto: number, fecha?: string | null) => (monedaReal === 'USD' ? monto * fxAt(fecha) : monto);
     return {
-      p: pos, h, q, precio,
+      p: pos, h, q, precio, fechaPrecio: (cotizacionVigente ? q?.time : undefined) ?? h?.dates.at(-1),
       valorCLP: monedaReal === 'USD' ? valorNativo * usdClp : valorNativo,
       costoCLP: p.lotes.reduce((s, l) => s + aCLP(l.cantidad * l.precio, l.fecha), 0),
       sinFecha: monedaReal === 'USD' && p.lotes.some(l => !l.fecha),
@@ -509,7 +532,7 @@ export async function buildAdvisorReport(
   const efectivo = new Map(exposicion.empresas.map(e => [e.ticker, e.total]));
 
   // 3. Métricas y decisión por activo
-  const assess = (p: Position, h: DailyHistory | null, q: LiveQuote | undefined, precio: number, valorCLP: number): AssetReport => {
+  const assess = (p: Position, h: DailyHistory | null, q: LiveQuote | undefined, precio: number, valorCLP: number, fechaPrecio?: string): AssetReport => {
     const closes = h?.adj ?? []; // con dividendos
     const year = closes.slice(-(TRADING_DAYS + 1));
     const conDatos = !!h && h.fresh && !h.frozen && closes.length >= 60;
@@ -548,14 +571,30 @@ export async function buildAdvisorReport(
     const mercado = mercadoDe(p.moneda);
     const { pilar: tecnico, evid: evidRsi } = pilarTecnico({ conDatos, sinDatosMotivo, distSma200, momentum: mom?.valor ?? null, momentumMeses: mom?.meses ?? null, rsi, stop: stopCalc?.stop ?? null, stopActivado, moneda: p.moneda }, mercado);
     // El laboratorio mide acciones: en un fondo diversificado el momento no decide
-    const evTecnica = diversificado ? null : evidenciaVeredicto(tecnico.veredicto, mercado);
-    const evEstirado = !diversificado && distSma200 !== null && distSma200 > 0.25 ? evidencia('estirado', mercado, -1, 'Comprar más de 25% sobre su media de 200 días') : null;
+    // La tendencia solo decide como la midió el laboratorio: precios ajustados por dividendos y momentum de 12 meses.
+    // Sin los dividendos, la caída del día en que se pagan parece una baja; con menos historia se usa el de 6 meses
+    let tecnicoNoDecide: string | null = null;
+    if (!diversificado && conDatos) {
+      if (h && !h.dividendsKnown) {
+        tecnicoNoDecide = 'Hoy no se pudieron leer sus dividendos para ajustar sus precios: su tendencia se informa, pero no decide.';
+        avisosDatos.push(`${p.ticker}: no se pudieron leer sus dividendos; su tendencia no se usa para decidir hoy.`);
+      } else if (mom?.meses !== 12) {
+        tecnicoNoDecide = 'Tiene menos de 12 meses de historia para medir su momentum: su tendencia se informa, pero no decide.';
+      }
+    }
+    const evTecnica = diversificado || tecnicoNoDecide ? null : evidenciaVeredicto(tecnico.veredicto, mercado);
+    const evEstirado = !diversificado && !tecnicoNoDecide && distSma200 !== null && distSma200 > 0.25 ? evidencia('estirado', mercado, -1, 'Comprar más de 25% sobre su media de 200 días') : null;
     const fundamental = pilarFundamental(f, tipo, perMercado[p.moneda], p.moneda);
     const limite = diversificado ? LIMITE_FONDO : LIMITE_ACCION;
+    const sabeTipo = tipoConocido(p.ticker, q);
     const riesgo: Pilar<VeredictoRiesgo> = {
-      veredicto: pesoEfectivo > limite ? 'excedido' : pesoEfectivo > 0.75 * limite ? 'cerca del límite' : 'holgado',
+      veredicto: pesoEfectivo > limite && sabeTipo ? 'excedido' : pesoEfectivo > 0.75 * limite ? 'cerca del límite' : 'holgado',
       motivos: [`Pesa ${pct(peso)} de tu patrimonio${pesoEfectivo > peso + 0.005 ? ` (${pct(pesoEfectivo)} contando lo que tienes dentro de tus fondos)` : ''}; máximo prudente ${pct(limite, 0)}${diversificado ? ' para un fondo diversificado' : ' para una sola empresa'}.`],
     };
+    if (!sabeTipo && pesoEfectivo > limite) {
+      riesgo.motivos.push('Hoy no se pudo confirmar si es un fondo o una empresa: no se vende por concentración hasta saberlo.');
+      if (p.cantidad > 0) avisosDatos.push(`${p.ticker}: no se pudo confirmar si es un fondo o una empresa (Yahoo no respondió); pesa más que el máximo de una empresa, pero no se vende por eso hasta saberlo.`);
+    }
     if (vol !== null) riesgo.motivos.push(`Volatilidad ${pct(vol, 0)} anual${beta !== null ? `, beta ${beta.toFixed(2)} vs. ${benchTicker === BENCH_CL ? 'IPSA' : 'S&P 500'}` : ''}.`);
     // Fundamentales con lo que midió el laboratorio: veredicto clásico, calidad de utilidades (SEC) y dividendo
     const evFundamentales: Evidencia[] = [];
@@ -567,7 +606,7 @@ export async function buildAdvisorReport(
       else if (q && q.p <= 0.2) evFundamentales.push(evidencia('calidad_baja', mercado, -1, 'Utilidad poco respaldada por caja, en el 20% inferior de su sector'));
       if ((f?.payout ?? 0) > 1 || q?.pa) evFundamentales.push(evidencia('payout_alto', mercado, -1, 'Reparte en dividendos más que su utilidad'));
     }
-    const decision = decidir({ diversificado, tipo, peso, pesoEfectivo, distSma200, vol, pnl, tecnico, fundamental, riesgo, evTecnica, evEstirado, evFundamentales });
+    const decision = decidir({ diversificado, tipo, peso, pesoEfectivo, distSma200, vol, pnl, tecnico, fundamental, riesgo, evTecnica, evEstirado, evFundamentales, tecnicoNoDecide });
     const evid = diversificado ? [] : [evTecnica, ...evFundamentales, evEstirado, ...evidRsi].filter((e): e is Evidencia => e !== null);
 
     return {
@@ -582,16 +621,16 @@ export async function buildAdvisorReport(
       distMaximo52s: conDatos && year.length >= 200 ? closes[n - 1] / Math.max(...year) - 1 : null,
       pico: h && p.cantidad > 0 ? picoGanancia(p.lotes, h.dates, h.closes, precio) : null,
       diversificado, aporteRiesgo: null, fundamentales: f,
-      tecnico, fundamental, riesgo, ...decision, evidencia: evid, conDatos,
+      tecnico, fundamental, riesgo, ...decision, evidencia: evid, conDatos, tecnicoNoDecide, fechaPrecio,
     };
   };
-  const posiciones = base.map(b => assess(b.p, b.h, b.q, b.precio, b.valorCLP));
+  const posiciones = base.map(b => assess(b.p, b.h, b.q, b.precio, b.valorCLP, b.fechaPrecio));
   posiciones.sort((a, b) => b.valorCLP - a.valorCLP);
   const evaluados = extras
     .map(p => {
       const h = histOf.get(p.ticker) ?? null;
       const precio = quotes.get(p.ticker)?.price ?? h?.closes.at(-1);
-      return precio ? assess(p, h, quotes.get(p.ticker), precio, 0) : null;
+      return precio ? assess(p, h, quotes.get(p.ticker), precio, 0, quotes.get(p.ticker)?.time ?? h?.dates.at(-1)) : null;
     })
     .filter((a): a is AssetReport => a !== null);
 

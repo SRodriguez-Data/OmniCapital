@@ -3,7 +3,7 @@ import { UploadCloud, FileText, CheckCircle, AlertCircle, Database, AlertTriangl
 import { usePortfolio, type PortfolioItem } from '../context/PortfolioContext';
 import { parsePdfToCartola, type Moneda, type ResultadoCartola, type TipoMovimiento } from '@/lib/CartolaParser';
 import {
-  construirLibro, formatoMonto, posicionesParaPortafolio, tickerYahoo, valorizarHoy,
+  construirLibro, formatoMonto, lotesParaPortafolio, posicionesParaPortafolio, tickerYahoo, valorizarHoy,
   type DividendosExternos, type EstadoMes, type LibroInversiones, type ValorHoy,
 } from '@/lib/LibroInversiones';
 import { supabase } from '@/lib/supabase';
@@ -136,6 +136,9 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
   };
 
   const posicionesPortafolio = useMemo(() => (libro ? posicionesParaPortafolio(libro) : []), [libro]);
+  // Se guarda cada compra como un lote aparte, con su precio y su fecha: con un solo lote por activo el asesor cree que
+  // todo se tenía desde la primera compra (ganancia máxima y costo en pesos mal calculados)
+  const lotesPortafolio = useMemo(() => (libro ? lotesParaPortafolio(libro) : []), [libro]);
   const importados = new Set(posicionesPortafolio.map(p => p.ticker));
   const ausentes = items.filter(i => !importados.has(i.ticker) && !i.id.startsWith('demo-'));
   const reemplazos = posicionesPortafolio.filter(p => items.some(i => i.ticker === p.ticker)).map(p => p.ticker);
@@ -144,11 +147,11 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
     setSaving(true);
     setSaveMessage(null);
     setError(null);
-    const nuevas = posicionesPortafolio.map(({ ticker, cantidad, precio_compra, moneda, purchase_date }) => ({ ticker, cantidad, precio_compra, moneda, purchase_date }));
+    const nuevas = lotesPortafolio.map(({ ticker, cantidad, precio_compra, moneda, purchase_date }) => ({ ticker, cantidad, precio_compra, moneda, purchase_date }));
     const quitar = (i: PortfolioItem) => importados.has(i.ticker) || (borrarAusentes && ausentes.some(a => a.id === i.id));
     try {
       if (isLocalMode) {
-        setItems(prev => [...prev.filter(i => !quitar(i)), ...nuevas.map((p): PortfolioItem => ({ id: `cartola-${p.ticker}`, ...p }))]);
+        setItems(prev => [...prev.filter(i => !quitar(i)), ...nuevas.map((p, k): PortfolioItem => ({ id: `cartola-${p.ticker}-${k}`, ...p }))]);
       } else {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) throw new Error('Tu sesión expiró. Vuelve a iniciar sesión.');
@@ -166,7 +169,7 @@ export default function DataWarehouseTab({ onPortfolioUpdate }: DataWarehouseTab
         }
         await refreshPortfolio();
       }
-      setSaveMessage(`${nuevas.length} posiciones guardadas en tu portafolio, cada una con su fecha de compra.`);
+      setSaveMessage(`${posicionesPortafolio.length} posiciones guardadas en tu portafolio (${nuevas.length} compras, cada una con su fecha y su precio).`);
       if (onPortfolioUpdate) setTimeout(() => onPortfolioUpdate(), 800);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Error al guardar en tu portafolio.');

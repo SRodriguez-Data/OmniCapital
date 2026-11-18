@@ -1,6 +1,6 @@
 import mercadoMedido from '@/data/evidencia_mercado.json';
-import { LIMITE_ACCION, LIMITE_SECTOR, fmtMoney, type Accion } from './advisor';
-import { semaforoRojoDe } from './avisos';
+import { LIMITE_ACCION, LIMITE_FONDO, LIMITE_SECTOR, MARGEN_LIMITE, fmtMoney, type Accion } from './advisor';
+import { motivoSinSemaforo, semaforoFaltaDe, semaforoRojoDe } from './avisos';
 import { evidenciaMetodo, type Mercado, type Ponderacion } from './evidenciaMetodos';
 import type { IdeaTop, IdeasDelBot } from './ideas';
 import type { NivelRiesgo, Proteccion } from './perfil';
@@ -21,12 +21,14 @@ export const NUCLEO: Record<Mercado, { ticker: string; nombre: string }> = {
   'EE.UU.': { ticker: 'VOO', nombre: 'Vanguard S&P 500 ETF' },
   Chile: { ticker: 'CFMITNIPSA.SN', nombre: 'It Now IPSA (fondo del IPSA)' },
 };
-const MARGEN = 0.02;
+const MARGEN = MARGEN_LIMITE;
 const MIN_ORDEN = 10000; // bajo $10.000 una orden no vale la comisión
 const MIN_ORDEN_TOP = 45000; // pocas órdenes que importen: con $150.000 son el índice y dos ideas, no una lista larga
 const MAX_TOP = 6; // por mercado y por vez
 const HOLGURA_LIMITE = 0.005; // el precio límite queda 0,5% peor que el último: se ejecuta, pero sin regalar el precio
-const DIAS_PRECIO_ESCANEO = 7;
+// Un precio sirve si es de la última sesión: hoy, ayer, o el viernes visto un lunes (más un feriado). Uno más viejo
+// daría una cantidad y un precio límite que ya no corresponden
+const DIAS_PRECIO = 4;
 
 export type Lado = 'VENDER' | 'COMPRAR';
 
@@ -52,6 +54,7 @@ export interface OrdenAporte {
   montoCLP: number;
   tienesCLP: number; // lo que ya tienes de este activo
   enRojo: boolean; // su mercado está bajo su tendencia: se compra igual, más barato
+  fechaPrecio?: string; // solo si el precio no es de la última sesión hábil
   proximosResultados: string | null;
   motivo: string;
 }
@@ -122,6 +125,12 @@ export function evidenciaNucleo(): string | null {
 }
 
 const diasEntre = (a: string, b: string) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86400000);
+/** El día hábil anterior a `hoy` (sin feriados): un precio de antes de ese día no es de la última sesión. */
+export function diaHabilAnterior(hoy: string): string {
+  const d = new Date(`${hoy}T12:00:00Z`);
+  do d.setUTCDate(d.getUTCDate() - 1); while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
+  return d.toISOString().slice(0, 10);
+}
 
 export function planAporte(e: EntradaAporte): PlanAporte {
   const { usdClp, valorCLP: V, nivel, metaChile, semaforos, proteccion } = e;
@@ -135,13 +144,15 @@ export function planAporte(e: EntradaAporte): PlanAporte {
   const protege = proteccion !== 'avisar';
   const bloqueo = (t: string) => e.bloqueados?.get(t) ?? null;
 
-  // Precio al día: el en vivo, o el del escaneo si tiene menos de una semana
-  const precioDe = (t: string, idea?: IdeaTop): { precio: number; nombre?: string } | null => {
+  // Precio al día: el en vivo, o el del escaneo, siempre con fecha y de la última sesión
+  const alDia = (fecha?: string | null): fecha is string => !!fecha && diasEntre(fecha.slice(0, 10), hoy) <= DIAS_PRECIO;
+  const precioDe = (t: string, idea?: IdeaTop): { precio: number; nombre?: string; fecha: string } | null => {
     const q = e.precios.get(t);
-    if (q && q.price > 0 && (!q.time || diasEntre(q.time, hoy) <= DIAS_PRECIO_ESCANEO)) return { precio: q.price, nombre: q.name };
-    if (idea?.precio && idea.fechaPrecio && diasEntre(idea.fechaPrecio, hoy) <= DIAS_PRECIO_ESCANEO) return { precio: idea.precio };
+    if (q && q.price > 0 && alDia(q.time)) return { precio: q.price, nombre: q.name, fecha: q.time.slice(0, 10) };
+    if (idea?.precio && alDia(idea.fechaPrecio)) return { precio: idea.precio, fecha: idea.fechaPrecio.slice(0, 10) };
     return null;
   };
+  const sesionAnterior = diaHabilAnterior(hoy);
   const aCLP = (moneda: 'USD' | 'CLP', n: number) => (moneda === 'USD' ? n * usdClp : n);
   const rojoDe = (ticker: string, moneda: 'USD' | 'CLP', sector: string | undefined, diversificado: boolean) =>
     semaforoRojoDe({ ticker, moneda, sector, diversificado }, semaforos);
@@ -149,11 +160,13 @@ export function planAporte(e: EntradaAporte): PlanAporte {
   // 1. Cuánto va a Chile: lo que cabe bajo tu máximo, en la proporción de tu meta; si está lleno, nada
   const espacioChile = Math.max(0, (metaChile - MARGEN) * (V + monto) - e.chileCLP);
   const chileRojo = protege ? semaforos.find(s => s.clave === 'chile' && s.estado === 'rojo') : undefined;
-  let chileCLP = chileRojo || e.sinChile ? 0 : Math.min(espacioChile, monto * metaChile);
+  // Con protección y sin el dato del semáforo de Chile no se sabe si está en rojo: no se compra ahí
+  const chileSinDato = protege && !semaforos.some(s => s.clave === 'chile');
+  let chileCLP = chileRojo || chileSinDato || e.sinChile ? 0 : Math.min(espacioChile, monto * metaChile);
   if (chileCLP < MIN_ORDEN) chileCLP = 0;
   const pesoChile = V > 0 ? e.chileCLP / V : 0;
   if (monto > 0 && chileCLP === 0) {
-    notas.push(e.sinChile ? e.sinChile : chileRojo
+    notas.push(e.sinChile ? e.sinChile : chileSinDato ? `${motivoSinSemaforo('chile')} Este aporte va completo a EE.UU.` : chileRojo
       ? 'La bolsa chilena está en rojo y elegiste protegerte: este aporte va completo a EE.UU. hasta que vuelva a verde.'
       : `Chile ya es ${pct(pesoChile, 0)} de tu patrimonio (tu máximo es ${pct(metaChile, 0)}): este aporte va completo a EE.UU. Así tu cartera depende menos de una sola economía.`);
   }
@@ -173,18 +186,43 @@ export function planAporte(e: EntradaAporte): PlanAporte {
     if (sectorLleno(i.sector)) return `${i.sector} ya pesa ${pct(e.sectores.find(x => x.nombre === i.sector)!.peso, 0)} de tu patrimonio (máximo ${pct(LIMITE_SECTOR, 0)}): no se suma más de ese sector.`;
     const rojo = protege ? rojoDe(i.ticker, i.moneda, i.sector, false) : null;
     if (rojo) return `${rojo.nombre} está en rojo y elegiste protegerte: no se compra ahí hasta que vuelva a verde.`;
+    const sinDato = protege ? semaforoFaltaDe({ ticker: i.ticker, moneda: i.moneda, sector: i.sector, diversificado: false }, semaforos) : null;
+    if (sinDato) return motivoSinSemaforo(sinDato);
     if (!precioDe(i.ticker, i)) return 'Sin precio al día.';
     return null;
   };
 
+  // Cuánto más cabe de un activo: su máximo (40% un fondo, 20% una empresa, contando lo que hay dentro de tus fondos)
+  // y el de su sector (35%), menos el margen, sobre la cartera con este aporte ya adentro
+  const total = V + monto;
+  const compradoSector = new Map<string, number>();
+  const topadas = new Map<string, { limite: 'fondo' | 'empresa' | 'sector'; sector?: string }>();
+  const cabeSector = (diversificado: boolean, sector?: string) => (diversificado || !sector ? Infinity
+    : (LIMITE_SECTOR - MARGEN) * total - (e.sectores.find(x => x.nombre === sector)?.peso ?? 0) * V - (compradoSector.get(sector) ?? 0));
+  const cabeEn = (t: string, diversificado: boolean, sector?: string) => {
+    const p = tengo.get(t);
+    const tiene = Math.max(p?.valorCLP ?? 0, (p?.pesoEfectivo ?? 0) * V);
+    const propio = ((diversificado ? LIMITE_FONDO : LIMITE_ACCION) - MARGEN) * total - tiene - (ordenes.find(o => o.ticker === t)?.montoCLP ?? 0);
+    return Math.min(propio, cabeSector(diversificado, sector));
+  };
+
   const comprar = (t: string, moneda: 'USD' | 'CLP', mercado: Mercado, papel: OrdenAporte['papel'], clp: number,
-    extra: { nombre?: string; puesto?: number; sector?: string; proximos?: string | null; motivo: string; precio: number; diversificado: boolean }): number => {
+    extra: { nombre?: string; puesto?: number; sector?: string; proximos?: string | null; motivo: string; precio: number; fecha: string; diversificado: boolean }): number => {
+    // Ninguna compra deja un fondo, una empresa o un sector sobre su máximo (menos el margen): si no, el rebalanceo
+    // lo vendería al día siguiente
+    const cabe = cabeEn(t, extra.diversificado, extra.sector);
+    if (clp > cabe + 1) {
+      const porSector = cabeSector(extra.diversificado, extra.sector) <= cabe + 1;
+      topadas.set(t, { limite: porSector ? 'sector' : extra.diversificado ? 'fondo' : 'empresa', sector: extra.sector });
+      clp = Math.max(0, cabe);
+    }
     const precioCLP = aCLP(moneda, extra.precio);
     const fraccional = fraccionar && moneda === 'USD';
     const cantidad = fraccional ? Math.floor((clp / precioCLP) * 10000) / 10000 : Math.floor(clp / precioCLP);
     const montoCLP = cantidad * precioCLP;
     if (cantidad <= 0 || montoCLP < MIN_ORDEN) return 0;
     const ya = ordenes.find(o => o.ticker === t);
+    if (extra.sector && !extra.diversificado) compradoSector.set(extra.sector, (compradoSector.get(extra.sector) ?? 0) + montoCLP);
     if (ya) {
       ya.cantidad = Math.round((ya.cantidad + cantidad) * 10000) / 10000;
       ya.montoCLP += montoCLP;
@@ -196,6 +234,7 @@ export function planAporte(e: EntradaAporte): PlanAporte {
       ticker: t, nombre: extra.nombre, moneda, mercado, papel, puesto: extra.puesto, sector: extra.sector,
       cantidad, precio: extra.precio, limite: precioLimite(extra.precio, moneda, 'COMPRAR'), montoCLP,
       tienesCLP: tengo.get(t)?.valorCLP ?? 0, enRojo: !!rojo,
+      ...(extra.fecha < sesionAnterior ? { fechaPrecio: extra.fecha } : {}),
       proximosResultados: extra.proximos ?? null, motivo: extra.motivo,
     });
     return montoCLP;
@@ -244,7 +283,7 @@ export function planAporte(e: EntradaAporte): PlanAporte {
           ? `momentum ${i.momentum !== null ? signo(i.momentum) : 's/d'} en 12 meses`
           : `utilidad respaldada por caja${i.percentilSector !== null && i.percentilSector >= 0.999 ? ', la mejor de su sector' : ''}`;
         usadoTop += comprar(i.ticker, moneda, mercado, 'top', parte, {
-          nombre: px.nombre, puesto: i.puesto, sector: i.sector, proximos: i.proximosResultados, precio: px.precio, diversificado: false,
+          nombre: px.nombre, puesto: i.puesto, sector: i.sector, proximos: i.proximosResultados, precio: px.precio, fecha: px.fecha, diversificado: false,
           motivo: `#${i.puesto} del Top ${mercado}${i.sector ? ` · ${i.sector}` : ''} · ${detalle} · ${tiene > 0 ? `ya tienes ${fmtMoney(tiene, 'CLP')}` : 'aún no la tienes'}.`,
         });
       }
@@ -257,14 +296,16 @@ export function planAporte(e: EntradaAporte): PlanAporte {
     const pxN = precioDe(n.ticker);
     const bN = bloqueo(n.ticker);
     const rojoN = rojoDe(n.ticker, moneda, undefined, true);
+    const sinDatoN = semaforoFaltaDe({ ticker: n.ticker, moneda, sector: undefined, diversificado: true }, semaforos);
     const paraNucleo = presupuesto - paraTop;
     let usadoN = 0;
     if (bN) descartadas.push({ ticker: n.ticker, motivo: bN });
     else if (protege && rojoN) descartadas.push({ ticker: n.ticker, motivo: `${rojoN.nombre} está en rojo y elegiste protegerte: no se compra ahí hasta que vuelva a verde.` });
+    else if (protege && sinDatoN) descartadas.push({ ticker: n.ticker, motivo: motivoSinSemaforo(sinDatoN) });
     else if (!pxN) descartadas.push({ ticker: n.ticker, motivo: 'Sin precio al día.' });
     else if (paraNucleo >= MIN_ORDEN) {
       usadoN = comprar(n.ticker, moneda, mercado, 'nucleo', paraNucleo, {
-        nombre: pxN.nombre ?? n.nombre, precio: pxN.precio, diversificado: true,
+        nombre: pxN.nombre ?? n.nombre, precio: pxN.precio, fecha: pxN.fecha, diversificado: true,
         motivo: `Núcleo: ${mercado === 'Chile' ? 'el IPSA completo' : 'las 500 empresas del S&P 500'} en una sola compra, todos los meses${rojoN ? ', y hoy más barato: su mercado está en rojo' : ''}.`,
       });
       if (!usadoN && moneda === 'USD' && !fraccionar) {
@@ -277,12 +318,27 @@ export function planAporte(e: EntradaAporte): PlanAporte {
   // Lo que quedó por redondeo (acciones chilenas enteras) se suma al índice de EE.UU., que se compra en fracciones
   const usd = ordenes.find(o => o.papel === 'nucleo' && o.moneda === 'USD');
   if (usd && fraccionar && sobra > 1) {
-    const extra = Math.floor((sobra / aCLP('USD', usd.precio)) * 10000) / 10000;
+    const extra = Math.floor((Math.max(0, Math.min(sobra, cabeEn(usd.ticker, true))) / aCLP('USD', usd.precio)) * 10000) / 10000;
     if (extra > 0) {
       usd.cantidad = Math.round((usd.cantidad + extra) * 10000) / 10000;
       usd.montoCLP += extra * aCLP('USD', usd.precio);
       sobra -= extra * aCLP('USD', usd.precio);
     }
+  }
+
+  // Lo que no entró por un máximo no se fuerza: se dice por qué, y lo del índice queda sin invertir
+  for (const [t, x] of topadas) {
+    const cuanto = ordenes.find(o => o.ticker === t)?.montoCLP ?? 0;
+    const maximo = x.limite === 'sector' ? `${x.sector} quedaría sobre su máximo de ${pct(LIMITE_SECTOR, 0)} de tu patrimonio`
+      : `quedaría sobre su máximo de ${pct(x.limite === 'fondo' ? LIMITE_FONDO : LIMITE_ACCION, 0)} de tu patrimonio para ${x.limite === 'fondo' ? 'un solo fondo' : 'una empresa'}`;
+    if (cuanto <= 0) descartadas.push({ ticker: t, motivo: `No se compra: con más ${maximo}.` });
+    if (x.limite === 'fondo') {
+      notas.push(`${sinSufijo(t)}: ${cuanto > 0 ? `se compra solo ${fmtMoney(cuanto, 'CLP')}` : 'no se compra'}, porque con más ${maximo}. Lo que no entra queda sin invertir: puede esperar en un fondo money market o ir a otro fondo amplio distinto.`);
+    }
+  }
+  const viejos = ordenes.filter(o => o.fechaPrecio);
+  if (viejos.length) {
+    notas.push(`${viejos.map(o => `${sinSufijo(o.ticker)} (${o.fechaPrecio!.slice(8, 10)}-${o.fechaPrecio!.slice(5, 7)})`).join(', ')}: el precio no es de la última sesión, es el del cierre indicado. Revisa el precio de hoy antes de poner la orden.`);
   }
 
   const rojos = [...enRojo];

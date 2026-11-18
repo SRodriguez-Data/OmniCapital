@@ -15,7 +15,7 @@ const COLORS_USD = ['#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8', '#1e40af', '#1e3
 const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064e3b'];
 
   export default function PortfolioTab() {
-    const { items, loading, isDemo, isCartolaMode, refreshPortfolio, setItems } = usePortfolio();
+    const { items, loading, error: errorCartera, isDemo, isCartolaMode, refreshPortfolio, setItems } = usePortfolio();
     const [livePrices, setLivePrices] = useState<Record<string, number>>({});
     const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
     
@@ -619,7 +619,7 @@ const COLORS_CLP = ['#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064
               );
             })}
             {items.length === 0 && (
-              <tr><td colSpan={11} className="py-8 text-center text-zinc-500 dark:text-[#71717a]">Portafolio vacío.</td></tr>
+              <tr><td colSpan={11} className={`py-8 text-center ${errorCartera ? 'text-[#f87171]' : 'text-zinc-500 dark:text-[#71717a]'}`}>{errorCartera ?? 'Portafolio vacío.'}</td></tr>
             )}
           </tbody>
         </table>

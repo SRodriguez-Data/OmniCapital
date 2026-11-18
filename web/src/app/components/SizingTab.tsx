@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { Calculator, Sparkles, Loader2, TrendingUp } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 import RebalanceoPanel from './RebalanceoPanel';
+import { cabecerasConSesion } from '@/lib/supabase';
 
 interface RebalanceRecommendation {
   ticker: string;
@@ -83,7 +84,7 @@ function PlanCompra() {
 
       const res = await fetch('/api/rebalance', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await cabecerasConSesion(),
         body: JSON.stringify({ budget: Number(budget), currency, fraccionar, items })
       });
 

@@ -103,7 +103,8 @@ export async function contextoMercado(): Promise<ContextoMercado | null> {
     ['eeuu', 'Bolsa de EE.UU. (S&P 500)', BENCH_US, sp],
     ['tecnologia', 'Tecnología (Nasdaq-100)', NASDAQ_100, ndx],
     ['chile', 'Bolsa chilena (IPSA)', BENCH_CL, ipsa],
-  ] as const).map(([clave, nombre, ticker, h]) => (h && h.fresh && !h.frozen ? semaforo(clave, nombre, ticker, h.dates, h.adj) : null))
+    // Sin los dividendos del fondo del IPSA su precio ajustado no es confiable: mejor sin semáforo que uno falso
+  ] as const).map(([clave, nombre, ticker, h]) => (h && h.fresh && !h.frozen && h.dividendsKnown ? semaforo(clave, nombre, ticker, h.dates, h.adj) : null))
     .filter((x): x is Semaforo => x !== null);
   const data: ContextoMercado = { regimen, titulo, lecturas, indicadores, vixPercentil, tpm, semaforos };
   cache = { at: Date.now(), data };

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { aiConfigured, generateText } from '@/lib/ai';
 import { parsePortfolioItems } from '@/lib/validation';
-import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
+import { rateLimit, sesionVerificada, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 import { buildAdvisorReport, fmtMoney } from '@/lib/advisor';
 import { planPurchases } from '@/lib/optimizer';
 import { oportunidadesDelBot } from '@/lib/rebalanceo';
@@ -37,7 +37,10 @@ export async function POST(request: Request) {
 
     let resumen: string | null = null;
     let modelo: string | null = null;
-    if (aiConfigured && plan.recommendations.length > 0) {
+    // El plan no gasta IA; el resumen sí: tiene su propio cupo y, sin él, el plan se entrega sin resumen
+    const usuario = aiConfigured && plan.recommendations.length > 0 ? await sesionVerificada(request) : null;
+    if (aiConfigured && plan.recommendations.length > 0
+      && rateLimit(request, 'rebalance-ia', usuario ? 15 : 6, undefined, { usuario, ia: { anonimos: 12, anonimosDia: 60 } })) {
       try {
         const ordenes = plan.recommendations.map(o =>
           `- ${o.ticker} (${o.origen === 'OPORTUNIDAD' ? 'nueva' : 'ya en cartera'}, señal ${o.accion}): ${fmtMoney(o.expectedCost, currency)}, peso ${(o.pesoAntes * 100).toFixed(1)}% → ${(o.pesoDespues * 100).toFixed(1)}%`).join('\n');

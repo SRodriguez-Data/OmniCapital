@@ -222,8 +222,13 @@ function cacheGet(key: string): DailyHistory | null | undefined {
   return hit.data;
 }
 
+// Los índices y el dólar no pagan dividendos: no hay nada que consultar
+const sinDividendos = (ticker: string) => ticker.startsWith('^') || ticker.includes('=');
+
 function cacheSet(key: string, data: DailyHistory | null) {
-  cache.set(key, { at: Date.now(), ttl: data && usable(data) ? TTL_OK : TTL_FAIL, data });
+  // Una historia sin sus dividendos (falló la consulta) se vuelve a pedir pronto: con ella la tendencia no decide
+  const completa = !!data && usable(data) && (data.dividendsKnown || sinDividendos(data.ticker));
+  cache.set(key, { at: Date.now(), ttl: completa ? TTL_OK : TTL_FAIL, data });
   while (cache.size > MAX_ENTRIES) cache.delete(cache.keys().next().value!);
 }
 
@@ -254,13 +259,15 @@ async function load(ticker: string, window: number): Promise<DailyHistory | null
     }
   }
   // Los cierres del minero y del respaldo no traen los dividendos: primero los guardados, si no, Yahoo
-  if (best && !best.dividendsKnown && !ticker.startsWith('^') && !ticker.includes('=')) {
+  if (best && !best.dividendsKnown && !sinDividendos(ticker)) {
     try {
       const guardados = await dividendosGuardados(ticker, window).catch(() => null);
       best = conDividendos(best, guardados ?? await yahooDividends(ticker, window), true);
     } catch (e) {
       console.warn(`Sin dividendos de ${ticker}:`, e instanceof Error ? e.message.slice(0, 120) : e);
     }
+  } else if (best && sinDividendos(ticker)) {
+    best = { ...best, dividendsKnown: true };
   }
   return best;
 }

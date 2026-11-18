@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { aiConfigured, generateText, aiError } from '@/lib/ai';
 import { TICKER_RE } from '@/lib/validation';
-import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
+import { rateLimit, sesionVerificada, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
 const num = (v: unknown, digits = 2) => (typeof v === 'number' && Number.isFinite(v) ? v.toFixed(digits) : 'sin dato');
 
@@ -14,7 +14,8 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!rateLimit(req, 'thesis', 30)) {
+    const usuario = await sesionVerificada(req);
+    if (!rateLimit(req, 'thesis', usuario ? 20 : 8, undefined, { usuario, ia: { anonimos: 16, anonimosDia: 80 } })) {
       return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
     }
 

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { aiConfigured, aiError } from '@/lib/ai';
 import { responderChat, type MensajeChat } from '@/lib/chat';
 import { parsePerfil } from '@/lib/perfil';
-import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
+import { rateLimit, sesionVerificada, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 import { parsePortfolioItems } from '@/lib/validation';
 
 export const maxDuration = 60;
@@ -13,7 +13,12 @@ const MAX_TEXTO = 2000;
 // Chat con el asesor: Gemini conversa y el motor pone las cifras (lib/chat.ts).
 export async function POST(request: Request) {
   if (!aiConfigured) return NextResponse.json({ error: 'El chat no está disponible: falta la clave de la IA.' }, { status: 503 });
-  if (!rateLimit(request, 'chat', 40)) return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
+  // Cada respuesta puede costar hasta 4 llamadas a Gemini: sin sesión el cupo es chico y común a todos los visitantes;
+  // con sesión verificada cada cuenta tiene el suyo y el tráfico anónimo no se lo quita
+  const usuario = await sesionVerificada(request);
+  if (!rateLimit(request, 'chat', usuario ? 30 : 8, undefined, { usuario, ia: { anonimos: 16, anonimosDia: 60 } })) {
+    return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
+  }
   const body = await request.json().catch(() => null) as { mensajes?: unknown; contexto?: unknown; items?: unknown; perfil?: unknown } | null;
   const mensajes = (Array.isArray(body?.mensajes) ? body.mensajes : [])
     .filter((m): m is MensajeChat => (m?.rol === 'usuario' || m?.rol === 'asesor') && typeof m?.texto === 'string' && m.texto.trim().length > 0)

@@ -15,6 +15,8 @@ export interface PortfolioItem {
 interface PortfolioContextType {
   items: PortfolioItem[];
   loading: boolean;
+  // La cartera guardada no se pudo leer (sesión vencida, base caída): una lista vacía NO significa "sin posiciones"
+  error: string | null;
   isDemo: boolean;
   isCartolaMode: boolean;
   setItems: React.Dispatch<React.SetStateAction<PortfolioItem[]>>;
@@ -38,14 +40,18 @@ const MOCK_PORTFOLIO: PortfolioItem[] = [
   { id: 'demo-11', ticker: 'ENELCHILE.SN', cantidad: 15000, precio_compra: 40.87, moneda: 'CLP', purchase_date: '2023-06-12' }
 ];
 
+const NO_CARGO = 'No pude cargar tu portafolio. Revisa tu conexión e intenta de nuevo.';
+
 export const PortfolioProvider = ({ children }: { children: React.ReactNode }) => {
   const [items, setItems] = useState<PortfolioItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isDemo, setIsDemo] = useState(false);
   const [isCartolaMode, setIsCartolaMode] = useState(false);
 
   const fetchPortfolio = async () => {
     setLoading(true);
+    setError(null);
     try {
       const demoMode = typeof window !== 'undefined' && localStorage.getItem('isDemo') === 'true';
       const cartolaMode = typeof window !== 'undefined' && localStorage.getItem('isCartolaMode') === 'true';
@@ -86,10 +92,15 @@ export const PortfolioProvider = ({ children }: { children: React.ReactNode }) =
       });
       if (res.ok) {
         const data = await res.json();
+        if (!Array.isArray(data)) throw new Error('respuesta inesperada');
         setItems(data);
+      } else {
+        // Lo que ya estaba en pantalla se conserva; lo que no se puede es mostrar "portafolio vacío"
+        setError(res.status === 401 ? 'No pude cargar tu portafolio: tu sesión expiró. Vuelve a entrar.' : NO_CARGO);
       }
     } catch (error) {
       console.error("Error fetching portfolio context", error);
+      setError(NO_CARGO);
     } finally {
       setLoading(false);
     }
@@ -97,6 +108,7 @@ export const PortfolioProvider = ({ children }: { children: React.ReactNode }) =
 
   const resetPortfolio = () => {
     setItems([]);
+    setError(null);
     setIsDemo(false);
     setIsCartolaMode(false);
   };
@@ -114,11 +126,26 @@ export const PortfolioProvider = ({ children }: { children: React.ReactNode }) =
   }, [items, isCartolaMode]);
 
   return (
-    <PortfolioContext.Provider value={{ items, loading, isDemo, isCartolaMode, setItems, refreshPortfolio: fetchPortfolio, resetPortfolio }}>
+    <PortfolioContext.Provider value={{ items, loading, error, isDemo, isCartolaMode, setItems, refreshPortfolio: fetchPortfolio, resetPortfolio }}>
       {children}
     </PortfolioContext.Provider>
   );
 };
+
+/** Lo que muestran las vistas cuando la cartera no se pudo leer, en vez de tratarla como vacía. */
+export function PortafolioNoCargado() {
+  const { error, loading, refreshPortfolio } = usePortfolio();
+  if (!error) return null;
+  return (
+    <div role="alert" className="max-w-2xl mx-auto bg-[#f87171]/10 border border-[#f87171]/50 rounded p-6 text-center space-y-3">
+      <p className="font-bold text-[#f87171]">{error}</p>
+      <p className="text-sm text-zinc-600 dark:text-[#a1a1aa]">Mientras no cargue, no te muestro recomendaciones: saldrían calculadas sin tus posiciones.</p>
+      <button onClick={() => refreshPortfolio()} disabled={loading} className="text-sm font-mono font-bold uppercase text-[#60a5fa] disabled:opacity-50">
+        {loading ? 'Cargando…' : 'Reintentar'}
+      </button>
+    </div>
+  );
+}
 
 export const usePortfolio = () => {
   const context = useContext(PortfolioContext);

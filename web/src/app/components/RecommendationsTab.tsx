@@ -2,8 +2,8 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Info, Newspaper, RefreshCw, ShieldAlert, Sparkles, UserCheck } from 'lucide-react';
-import { usePortfolio } from '../context/PortfolioContext';
-import { supabase } from '@/lib/supabase';
+import { PortafolioNoCargado, usePortfolio } from '../context/PortfolioContext';
+import { cabecerasConSesion, supabase } from '@/lib/supabase';
 import { parsePerfil, textoDe, type NivelRiesgo, type PerfilInversionista } from '@/lib/perfil';
 import { PerfilInversionistaForm } from './PerfilInversionistaForm';
 
@@ -236,7 +236,7 @@ function datosFundamentales(p: Posicion): { label: string; value: string; classN
 }
 
 export default function RecommendationsTab() {
-  const { items } = usePortfolio();
+  const { items, error: errorCartera } = usePortfolio();
   const [data, setData] = useState<Informe | null>(null);
   const [noticias, setNoticias] = useState<Noticias | null>(null);
   const [loading, setLoading] = useState(true);
@@ -318,7 +318,7 @@ export default function RecommendationsTab() {
     try {
       const res = await fetch('/api/portfolio/news', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await cabecerasConSesion(),
         body: JSON.stringify({ activos }),
         signal: AbortSignal.timeout(70000),
       });
@@ -336,7 +336,7 @@ export default function RecommendationsTab() {
     try {
       const res = await fetch('/api/portfolio/redaccion', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await cabecerasConSesion(),
         body: JSON.stringify({ informe }),
         signal: AbortSignal.timeout(70000),
       });
@@ -427,6 +427,7 @@ export default function RecommendationsTab() {
     generate(false);
   }, [generate]);
 
+  if (items.length === 0 && errorCartera) return <PortafolioNoCargado />;
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-zinc-500 dark:text-zinc-400 font-mono border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 rounded">

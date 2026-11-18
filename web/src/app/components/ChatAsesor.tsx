@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Loader2, MessageCircle, Send, X } from 'lucide-react';
 import type { PerfilInversionista } from '@/lib/perfil';
+import { cabecerasConSesion } from '@/lib/supabase';
 
 // Chat con el asesor (POST /api/asesor/chat): le preguntas en tus palabras y responde con los datos de esta pantalla;
 // para un monto o una acción en particular, el servidor le pide las cifras al motor. La conversación queda en esta
@@ -48,9 +49,10 @@ export default function ChatAsesor({ contexto, items, perfil }: { contexto: unkn
     setEnviando(true);
     setError('');
     try {
+      // Con sesión, el servidor te da tu propio cupo de IA (el de los visitantes sin cuenta es chico y compartido)
       const res = await fetch('/api/asesor/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await cabecerasConSesion(),
         body: JSON.stringify({ mensajes: nuevos.slice(-14), contexto, items, perfil }),
       });
       const r = await res.json().catch(() => null);
@@ -103,7 +105,14 @@ export default function ChatAsesor({ contexto, items, perfil }: { contexto: unkn
                   {m.rol === 'usuario' ? m.texto : (
                     <div className="space-y-2 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_strong]:font-bold [&_a]:underline">
                       {/* Sin imágenes: una respuesta manipulada por un titular podría cargar una URL externa con datos de la cartera */}
-                      <ReactMarkdown disallowedElements={['img']}>{m.texto}</ReactMarkdown>
+                      {/* Enlaces solo http(s), en otra pestaña y sin pasarle la dirección de la app al sitio */}
+                      <ReactMarkdown
+                        disallowedElements={['img']}
+                        urlTransform={url => (/^https?:\/\//i.test(url) ? url : '')}
+                        components={{ a: ({ href, children }) => (href ? <a href={href} target="_blank" rel="noopener noreferrer nofollow">{children}</a> : <>{children}</>) }}
+                      >
+                        {m.texto}
+                      </ReactMarkdown>
                     </div>
                   )}
                 </div>

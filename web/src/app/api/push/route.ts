@@ -29,17 +29,22 @@ export async function POST(request: Request) {
   const { error } = await s.db.from('push_suscripciones').upsert({ ...sub, user_id: s.user.id, dispositivo }, { onConflict: 'endpoint' });
   if (error) {
     const falta = error.code === 'PGRST205' || error.code === '42P01';
-    return NextResponse.json({ error: falta ? FALTA_TABLA : `No se pudo guardar: ${error.message}` }, { status: falta ? 503 : 500 });
+    if (!falta) console.error('Avisos al celular (guardar):', error.code, error.message);
+    return NextResponse.json({ error: falta ? FALTA_TABLA : 'No se pudo guardar la suscripción de este celular. Intenta de nuevo.' }, { status: falta ? 503 : 500 });
   }
   return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(request: Request) {
+  if (!rateLimit(request, 'push', 20)) return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
   const s = await conSesion(request);
   if (!s) return NextResponse.json({ error: 'Inicia sesión.' }, { status: 401 });
   const body = await request.json().catch(() => null) as { endpoint?: unknown } | null;
   if (typeof body?.endpoint !== 'string') return NextResponse.json({ error: 'Falta el endpoint.' }, { status: 400 });
   const { error } = await s.db.from('push_suscripciones').delete().eq('endpoint', body.endpoint);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error('Avisos al celular (quitar):', error.code, error.message);
+    return NextResponse.json({ error: 'No se pudo quitar la suscripción de este celular. Intenta de nuevo.' }, { status: 500 });
+  }
   return NextResponse.json({ ok: true });
 }

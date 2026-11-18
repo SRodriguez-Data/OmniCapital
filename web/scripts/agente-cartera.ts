@@ -74,6 +74,7 @@ interface Estado {
   ultimoAviso: string | null;
   mesAporte: string | null; // YYYY-MM del último aviso del aporte del mes
   eventosVistos: string[]; // hechos relevantes ya avisados (su enlace)
+  eventos: Record<string, EventoSec[]> | null; // los de la última revisión: valen para la empresa que hoy no se pudo consultar
 }
 
 const hoyEnChile = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
@@ -95,10 +96,10 @@ async function leerEstado(db: SupabaseClient, usuario: string): Promise<{ estado
     if (error.code === 'PGRST205' || error.code === '42P01') return { estado: null, hayTabla: false };
     throw new Error(`No se pudo leer el estado del agente: ${error.message}`);
   }
-  const d = data?.datos as Partial<Estado> | undefined;
+  const d = data?.datos as (Partial<Omit<Estado, 'eventos'>> & { eventos?: { porTicker?: Record<string, EventoSec[]> } | null }) | undefined;
   return {
     estado: d?.fecha
-      ? { fecha: d.fecha, firma: d.firma ?? [], cerca: d.cerca ?? [], avisos: d.avisos ?? [], rojos: d.rojos ?? [], ultimoAviso: d.ultimoAviso ?? null, mesAporte: d.mesAporte ?? null, eventosVistos: d.eventosVistos ?? [] }
+      ? { fecha: d.fecha, firma: d.firma ?? [], cerca: d.cerca ?? [], avisos: d.avisos ?? [], rojos: d.rojos ?? [], ultimoAviso: d.ultimoAviso ?? null, mesAporte: d.mesAporte ?? null, eventosVistos: d.eventosVistos ?? [], eventos: d.eventos?.porTicker ?? null }
       : null,
     hayTabla: true,
   };
@@ -135,7 +136,7 @@ function mensaje(asesor: AsesorDelDia, alertas: string[], avisos: string[], verd
   for (const s of verdes) extras.push(`✅ <b>${esc(s.nombre)}</b> volvió a verde: si dejaste plata en refugio, ingrésala como aporte en el Optimizador.`);
   if (plan.refugioCLP > 0) extras.push(`🛟 ${pesos(plan.refugioCLP)} de las ventas van a refugio (depósito o money market) hasta que su mercado vuelva a verde.`);
   // Lo que no se pudo verificar hoy (cotizaciones, dólar): para no ejecutar a ciegas
-  for (const x of avisos.slice(0, 2)) extras.push(`⚠️ ${esc(corto(x, 160))}`);
+  for (const x of avisos.slice(0, 4)) extras.push(`⚠️ ${esc(corto(x, 200))}`);
   if (extras.length) l.push('', ...extras);
   l.push('', `Detalle y botón para registrar: ${APP}/?vista=asesor`);
 
@@ -211,20 +212,31 @@ async function main() {
   // Hechos relevantes (SEC) de tus empresas de EE.UU. y de las ideas del Top: los graves frenan sus compras
   const contacto = (process.env.SEC_CONTACTO ?? '').trim();
   let eventos: Record<string, EventoSec[]> | null = null;
+  let eventosSinRevisar: string[] = [];
   if (contacto) {
-    const [{ eventosSec }, { ideasDelBot }] = await Promise.all([import('../src/lib/eventos'), import('../src/lib/ideas')]);
+    const [{ eventosSecRevisados, conEventosAnteriores }, { ideasDelBot }] = await Promise.all([import('../src/lib/eventos'), import('../src/lib/ideas')]);
     const ideas = await ideasDelBot().catch(() => null);
-    eventos = await eventosSec([...parsed.items.map(i => i.ticker), ...(ideas?.us ?? []).map(i => i.ticker)], contacto, hoy)
-      .catch(e => { decir(`Sin hechos relevantes de la SEC hoy (${e instanceof Error ? e.message.slice(0, 80) : 'error'}).`); return null; });
+    const tickers = [...new Set([...parsed.items.map(i => i.ticker), ...(ideas?.us ?? []).map(i => i.ticker)].map(t => t.toUpperCase()))];
+    // Si la SEC no responde (del todo o para una empresa), no se da por revisada: vale lo que se supo en la revisión
+    // anterior (un freno grave no se levanta porque falló la consulta) y el mensaje lo dice
+    const revisados = await eventosSecRevisados(tickers, contacto, hoy)
+      .catch(e => {
+        decir(`Sin hechos relevantes de la SEC hoy (${e instanceof Error ? e.message.slice(0, 80) : 'error'}): se mantienen los de la revisión anterior.`);
+        return { porTicker: {}, sinRevisar: tickers.filter(t => !t.endsWith('.SN')) };
+      });
+    eventosSinRevisar = revisados.sinRevisar;
+    eventos = conEventosAnteriores(revisados, estado?.eventos);
   }
-  const { asesor, report } = await asesorDelDia(parsed.items, perfil, { eventos });
+  const { asesor, report } = await asesorDelDia(parsed.items, perfil, { eventos, eventosSinRevisar, hoy });
   const mias = new Set(parsed.items.map(i => i.ticker.toUpperCase()));
   const hechos = Object.values(eventos ?? {}).flat()
     .filter(e => mias.has(e.ticker) && e.gravedad !== 'info' && !(estado?.eventosVistos ?? []).includes(e.url))
     .sort((a, b) => b.fecha.localeCompare(a.fecha));
   const plan = asesor.rebalanceo;
   const mes = hoy.slice(0, 7);
-  const aporteNuevo = !!asesor.aporte?.ordenes.length && estado?.mesAporte !== mes;
+  // El aporte del mes se anuncia una vez, y solo mientras quede algo por invertir (lo ya comprado este mes se descuenta)
+  const quedaAporte = (asesor.aporteDelMes?.pendienteCLP ?? 0) > 0 && !!asesor.aporte?.ordenes.length;
+  const aporteNuevo = quedaAporte && estado?.mesAporte !== mes;
 
   // ¿Hay algo que avisar?
   const firma = [...plan.ventas, ...plan.compras].map(o => `${o.lado} ${o.ticker}`).sort();
@@ -252,8 +264,9 @@ async function main() {
     if (primeraDeLaSemana) motivos.push('es el resumen de la semana');
   }
   const avisar = motivos.length > 0;
-  // Sin el dólar observado se usa el del mercado (Yahoo), que basta para pesar la cartera: no vale un aviso diario
-  const avisos = report.avisosDatos.filter(a => !/dólar observado/i.test(a));
+  // Sin el dólar observado se usa el del mercado (Yahoo) de la última sesión, que basta para pesar la cartera: no vale
+  // un aviso diario. Un dólar atrasado sí se avisa (otro texto), y uno de más de 4 días detiene la corrida
+  const avisos = report.avisosDatos.filter(a => !a.startsWith('El dólar observado no estuvo disponible'));
   const alertas = [
     ...nuevos.slice(0, 2).map(x => `${x.nivel === 'alerta' ? '🔴' : '🟡'} ${esc(x.titulo)}`),
     ...nivelesNuevos.slice(0, 2).map(n => `🎯 <b>${sinSufijo(n.ticker)}</b>: ${esc(corto(n.texto, 160))}`),
@@ -276,7 +289,7 @@ async function main() {
   if (hayTabla) {
     const datos = {
       fecha: hoy, firma, cerca, avisos: vigentes, ultimoAviso: avisar ? hoy : estado?.ultimoAviso ?? null,
-      mesAporte: avisar && asesor.aporte?.ordenes.length ? mes : estado?.mesAporte ?? null,
+      mesAporte: avisar && quedaAporte ? mes : estado?.mesAporte ?? null,
       // Los enlaces avisados (los de más de 60 días ya no vuelven en la consulta de 45)
       eventosVistos: [...new Set([...(avisar ? hechos.map(e => e.url) : []), ...(estado?.eventosVistos ?? [])])].slice(0, 300),
       eventos: eventos ? { fecha: hoy, porTicker: eventos } : null,

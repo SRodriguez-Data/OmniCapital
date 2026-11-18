@@ -681,3 +681,49 @@ export function posicionesParaPortafolio(libro: LibroInversiones): PosicionPorta
     .map(({ costoTotal, ...p }) => ({ ...p, cantidad: Number(p.cantidad.toFixed(8)), precio_compra: costoTotal / p.cantidad }))
     .sort((a, b) => a.ticker.localeCompare(b.ticker));
 }
+
+export interface LotePortafolio {
+  ticker: string;           // ticker de Yahoo
+  cantidad: number;
+  precio_compra: number;
+  moneda: Moneda;
+  purchase_date: string;
+  cuenta: string;
+  costoEstimado: boolean;
+  fechaAproximada: boolean;
+}
+
+// Como posicionesParaPortafolio, pero con cada compra como un lote aparte, con su precio y su fecha. Con un solo lote
+// por activo (costo promedio, fecha de la primera compra) el asesor cree que todo se tenía desde el primer día: la
+// "ganancia máxima" de la posición y su costo en pesos (dólar del día de compra) salen mal.
+// Lo vendido se descuenta de las compras más antiguas, igual que al registrar una venta (lib/ejecucion.ts). Lo que ya
+// estaba antes de la primera cartola queda como un lote con el costo que falta para cuadrar con el libro; si las
+// compras no cuadran con lo que hay (un split, un canje, un costo no informado), se deja un solo lote como antes.
+export function lotesParaPortafolio(libro: LibroInversiones): LotePortafolio[] {
+  const out: LotePortafolio[] = [];
+  for (const p of libro.posiciones) {
+    if (!(p.cantidad > 0)) continue;
+    const ticker = tickerYahoo(p.ticker, p.moneda);
+    const costoEstimado = p.costo === undefined || p.costo <= 0;
+    const costo = costoEstimado ? (p.precio ?? 0) * p.cantidad : p.costo!;
+    const base = { ticker, moneda: p.moneda, cuenta: p.cuenta, costoEstimado };
+    const unLote = () => out.push({ ...base, cantidad: Number(p.cantidad.toFixed(8)), precio_compra: costo / p.cantidad, purchase_date: p.fechaCompra, fechaAproximada: p.fechaCompraAproximada });
+    const compras = [...p.compras].filter(c => c.cantidad > 0 && c.precio > 0).sort((a, b) => a.fecha.localeCompare(b.fecha));
+    if (costoEstimado || !compras.length) { unLote(); continue; }
+    let vendido = Math.max(0, compras.reduce((s, c) => s + c.cantidad, 0) - p.cantidad);
+    const lotes: { fecha: string; cantidad: number; precio: number; aprox: boolean }[] = [];
+    for (const c of compras) {
+      const sale = Math.min(vendido, c.cantidad);
+      vendido -= sale;
+      if (c.cantidad - sale > TOL_CANTIDAD) lotes.push({ fecha: c.fecha, cantidad: c.cantidad - sale, precio: c.precio, aprox: false });
+    }
+    const resto = p.cantidad - lotes.reduce((s, l) => s + l.cantidad, 0);
+    if (resto > TOL_CANTIDAD) {
+      const costoResto = costo - lotes.reduce((s, l) => s + l.cantidad * l.precio, 0);
+      if (!(costoResto > 0)) { unLote(); continue; }
+      lotes.unshift({ fecha: p.fechaCompra, cantidad: resto, precio: costoResto / resto, aprox: p.fechaCompraAproximada });
+    }
+    for (const l of lotes) out.push({ ...base, cantidad: Number(l.cantidad.toFixed(8)), precio_compra: l.precio, purchase_date: l.fecha, fechaAproximada: l.aprox });
+  }
+  return out.sort((a, b) => a.ticker.localeCompare(b.ticker) || a.purchase_date.localeCompare(b.purchase_date));
+}

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { rateLimit, tokenDe, RATE_LIMIT_ESCRITURA } from '@/lib/rateLimit';
 import { TICKER_RE } from '@/lib/validation';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -9,31 +10,49 @@ if (!supabaseUrl || !supabaseKey) {
   console.warn("Missing Supabase env variables in Next.js");
 }
 
-export async function GET(request: Request) {
-  const authHeader = request.headers.get('Authorization');
-  const supabase = createClient(supabaseUrl || '', supabaseKey || '', {
-    global: { headers: { Authorization: authHeader || '' } }
+// La cartera guardada es de una cuenta: sin sesión no hay nada que leer ni cambiar (los modos demo y cartola viven en
+// el navegador y no llaman a esta ruta). Las reglas de la base (RLS) dejan a cada cuenta solo sus filas.
+const SIN_SESION = 'Inicia sesión para ver y guardar tu portafolio.';
+// Guardar una cartola reemplaza hasta 60 posiciones (un borrado y una inserción por cada una)
+const MAX_ESCRITURAS = 300;
+
+function conSesion(request: Request) {
+  const token = tokenDe(request);
+  if (!token) return null;
+  return createClient(supabaseUrl || '', supabaseKey || '', {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { persistSession: false },
   });
+}
+
+// Una sesión vencida o inválida la rechaza la base (PGRST301 y similares): es un 401, no un error interno
+const estadoDe = (error: { code?: string; message?: string }) => (/^PGRST30[0-3]$/.test(error.code ?? '') || /jwt/i.test(error.message ?? '') ? 401 : 500);
+const fallo = (que: string, error: { code?: string; message?: string }) => {
+  const estado = estadoDe(error);
+  if (estado === 500) console.error(`Portafolio (${que}):`, error.code, error.message);
+  return NextResponse.json({ error: estado === 401 ? 'Tu sesión expiró: vuelve a entrar.' : `No se pudo ${que} tu portafolio. Intenta de nuevo en unos minutos.` }, { status: estado });
+};
+
+export async function GET(request: Request) {
+  const supabase = conSesion(request);
+  if (!supabase) return NextResponse.json({ error: SIN_SESION }, { status: 401 });
 
   const { data, error } = await supabase
     .from('mi_portafolio')
     .select('*')
     .order('fecha_registro', { ascending: false });
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
+  if (error) return fallo('leer', error);
   return NextResponse.json(data);
 }
 
 export async function POST(request: Request) {
+  const supabase = conSesion(request);
+  if (!supabase) return NextResponse.json({ error: SIN_SESION }, { status: 401 });
+  if (!rateLimit(request, 'portfolio-escribir', MAX_ESCRITURAS)) {
+    return NextResponse.json({ error: RATE_LIMIT_ESCRITURA }, { status: 429 });
+  }
   try {
-    const authHeader = request.headers.get('Authorization');
-    const supabase = createClient(supabaseUrl || '', supabaseKey || '', {
-      global: { headers: { Authorization: authHeader || '' } }
-    });
-
     const body = await request.json();
     const ticker = typeof body.ticker === 'string' ? body.ticker.trim().toUpperCase() : '';
     const cantidad = Number(body.cantidad);
@@ -60,13 +79,10 @@ export async function POST(request: Request) {
       ])
       .select();
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
+    if (error) return fallo('guardar en', error);
     return NextResponse.json(data[0]);
   } catch {
-    return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
+    return NextResponse.json({ error: 'Solicitud inválida.' }, { status: 400 });
   }
 }
 
@@ -74,23 +90,28 @@ export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
 
-  if (!id) {
-    return NextResponse.json({ error: 'ID is required' }, { status: 400 });
+  if (!id || id.length > 64) {
+    return NextResponse.json({ error: 'Falta el identificador de la posición.' }, { status: 400 });
+  }
+  const supabase = conSesion(request);
+  if (!supabase) return NextResponse.json({ error: SIN_SESION }, { status: 401 });
+  if (!rateLimit(request, 'portfolio-escribir', MAX_ESCRITURAS)) {
+    return NextResponse.json({ error: RATE_LIMIT_ESCRITURA }, { status: 429 });
   }
 
-  const authHeader = request.headers.get('Authorization');
-  const supabase = createClient(supabaseUrl || '', supabaseKey || '', {
-    global: { headers: { Authorization: authHeader || '' } }
-  });
-
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('mi_portafolio')
     .delete()
-    .eq('id', id);
+    .eq('id', id)
+    .select('id');
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    // Un id con otra forma (por ejemplo, una fila local de cartola) no existe en la base
+    if (error.code === '22P02') return NextResponse.json({ error: 'Esa posición no está en tu portafolio guardado.' }, { status: 404 });
+    return fallo('cambiar', error);
   }
+  // Las reglas de la base no dejan borrar filas ajenas: cero filas es "no existe", no un éxito
+  if (!data?.length) return NextResponse.json({ error: 'Esa posición no está en tu portafolio guardado.' }, { status: 404 });
 
   return NextResponse.json({ success: true });
 }

@@ -1,6 +1,6 @@
 import { LIMITE_SECTOR, fmtMoney, limiteDe, type AdvisorReport, type AssetReport, type RiskModel } from './advisor';
-import { SATELITE, planAporte, precioLimite, type Lado, type PlanAporte } from './aporte';
-import { avisosCartera, fmtNivel, mediciones, semaforoRojoDe, type Aviso } from './avisos';
+import { SATELITE, diaHabilAnterior, planAporte, precioLimite, type Lado, type PlanAporte } from './aporte';
+import { NOMBRE_MERCADO, avisosCartera, fmtNivel, mediciones, motivoSinSemaforo, semaforoFaltaDe, semaforoRojoDe, semaforosQueFaltan, type Aviso } from './avisos';
 import { evidencia, mercadoDe } from './evidencia';
 import { FONDOS_CHILE } from './fundamentals';
 import type { IdeasDelBot } from './ideas';
@@ -30,6 +30,10 @@ const MARGEN = 0.02;
 const MIN_VENTA_CLP = 10000;
 const MIN_VENTA_PCT = 0.005;
 const ALZA_MAXIMA_NIVEL = 0.5; // un nivel de recorte que exige subir más de 50% no se informa
+// Lo vendido no llega completo a las compras: la venta sale hasta 0,5% bajo el último precio y la compra hasta 0,5%
+// sobre él (órdenes límite), y hay comisión y, entre Chile y EE.UU., cambio de moneda. Se compra con 1,5% menos
+export const COSTO_REINVERSION = 0.015;
+export const netoDeVentas = (ventasCLP: number) => Math.max(0, ventasCLP) * (1 - COSTO_REINVERSION);
 
 export interface OrdenRebalanceo {
   ticker: string;
@@ -303,13 +307,15 @@ export function planRebalanceo(
     if (frenos.has(a.ticker)) return frenos.get(a.ticker)!;
     const rojo = proteccion !== 'avisar' ? semaforoRojoDe(a, semaforos) : null;
     if (rojo) return `${rojo.nombre} está en zona roja: no se compra ahí hasta que vuelva a verde (si ${rojo.clave === 'chile' ? 'el fondo del IPSA' : 'el índice'} cierra sobre ${fmtNivel(rojo, rojo.cambiaEn)}).`;
+    const sinDato = proteccion !== 'avisar' ? semaforoFaltaDe(a, semaforos) : null;
+    if (sinDato) return motivoSinSemaforo(sinDato);
     if (a.moneda === 'CLP' && chileLleno) return `Chile queda en ${pct(chileDespuesVentas, 0)} de tu patrimonio (meta hasta ${pct(metaChile, 0)}): lo vendido se invierte fuera de Chile.`;
     if (!a.diversificado && sectorLleno(sectorDe(a))) return `${sectorDe(a)} ya está en su máximo de ${pct(LIMITE_SECTOR, 0)}: no se suma más de ese sector.`;
     // Lo vendido no va a posiciones sin respaldo para crecer (la paridad de riesgo sola llenaría las más chicas)
     if (a.accion !== 'AUMENTAR') return `Su señal es ${a.accion}: el rebalanceo solo compra lo que tiene señal AUMENTAR.`;
     return null;
   };
-  const presupuesto = reinvertir ? ventasCLP - refugioCLP + Math.max(0, aporteCLP) : 0;
+  const presupuesto = reinvertir ? netoDeVentas(ventasCLP - refugioCLP) + Math.max(0, aporteCLP) : 0;
   const porTicker = new Map([...pos, ...report.candidatos].map(a => [a.ticker, a]));
   const totalDespues = V + Math.max(0, aporteCLP);
   const nucleoTop = !!nivel && SATELITE[nivel] > 0 && !!ideas;
@@ -382,12 +388,16 @@ export function planRebalanceo(
     // Tendencia: solo donde el laboratorio midió que el veredicto bajista anticipa peores retornos (hoy, Chile).
     // El momentum 12-1 no incluye el último mes, así que el precio de hoy solo mueve la parte de la media de 200 días.
     const ev = evidencia('veredicto_bajista', mercado, -1, 'Tendencia y momentum en contra');
-    if (!a.diversificado && a.tipo === 'accion' && ev.decide && a.sma200 && a.momentum !== null && a.momentum <= 0.05) {
+    // Solo se informa si cruzarlo de verdad cambia la decisión: con la tendencia midiéndose como en el laboratorio
+    // (dividendos y 12 meses de historia) y sin que el cruce sea, a la vez, romper su stop de volatilidad. Dos cierres
+    // bajo el stop dejan el veredicto en "quiebre", que el laboratorio midió aparte y no anticipó peores retornos
+    if (!a.diversificado && a.tipo === 'accion' && ev.decide && !a.tecnicoNoDecide && !a.stopActivado && a.sma200
+      && a.momentum !== null && a.momentumMeses === 12 && a.momentum <= 0.05) {
       const nivel = (a.momentum < -0.05 ? 1.03 : 0.97) * a.sma200;
-      if (a.precio > nivel) {
+      if (a.precio > nivel && !(a.stop !== null && a.stop >= nivel)) {
         niveles.push({
           ticker: a.ticker, moneda: a.moneda, precio: a.precio, tipo: 'venta_tendencia', nivel, distancia: nivel / a.precio - 1,
-          texto: `Vender si cierra bajo ${fmtPrecio(nivel, a.moneda)} (${pct(nivel / a.precio - 1)}): ahí su tendencia pasa a bajista${a.momentum < -0.05 ? ' (su momentum de 12 meses ya es negativo)' : ''}, y en ${mercado} las acciones así rindieron menos que su mercado (evidencia sólida).`,
+          texto: `Vender si cierra bajo ${fmtPrecio(nivel, a.moneda)} (${pct(nivel / a.precio - 1)}): ahí su tendencia pasa a bajista${a.momentum < -0.05 ? ' (su momentum de 12 meses ya es negativo)' : ''}, y en ${mercado} las acciones así rindieron menos que su mercado (evidencia sólida).${a.stop !== null ? ` Si la caída es tan brusca que además cierra dos días bajo su stop de volatilidad (${fmtPrecio(a.stop, a.moneda)}), eso no se midió como señal de venta: el plan no la vendería por eso.` : ''}`,
         });
       }
     }
@@ -433,6 +443,19 @@ export function planRebalanceo(
   }
   if (refugioCLP > 0) {
     notas.push(`Lo que se vende por protección (${fmtMoney(refugioCLP, 'CLP')}) no se reinvierte en bolsa: déjalo donde no caiga con el mercado. En pesos, un depósito a plazo o un fondo mutuo money market; en dólares, un fondo de letras del Tesoro de EE.UU. (como SGOV o BIL) si tu corredora lo tiene. Cuando el semáforo vuelva a verde te aviso: ahí lo ingresas como aporte en el Optimizador y el plan lo reinvierte.`);
+  }
+  // Una venta calculada con un precio que no es de la última sesión se dice: la cantidad y el límite pueden no calzar
+  const sesion = diaHabilAnterior(report.generado.slice(0, 10));
+  const atrasadas = ventas.map(o => porTicker.get(o.ticker)).filter((a): a is AssetReport => !!a?.fechaPrecio && a.fechaPrecio < sesion);
+  if (atrasadas.length) {
+    notas.push(`${atrasadas.map(a => `${a.ticker.replace('.SN', '')} (${a.fechaPrecio!.slice(8, 10)}-${a.fechaPrecio!.slice(5, 7)})`).join(', ')}: el precio de esta venta no es de la última sesión, es el del cierre indicado. Revisa el precio de hoy antes de poner la orden.`);
+  }
+  if (ventas.length && compras.length) {
+    notas.push(`Las compras están calculadas con ${pct(COSTO_REINVERSION)} menos de lo que vendes: es lo que se va en comisiones, cambio de moneda y el margen de las órdenes límite.`);
+  }
+  const sinDato = proteccion !== 'avisar' ? semaforosQueFaltan(semaforos) : [];
+  if (sinDato.length) {
+    notas.push(`Hoy no hay dato del semáforo de ${sinDato.map(c => NOMBRE_MERCADO[c]).join(' ni de ')}. Con la protección que elegiste no se compra ahí hasta tenerlo, y tampoco se vende por protección sin ese dato: vuelve a revisar más tarde.`);
   }
   if (ventas.length) notas.push('Vender con ganancia puede pagar impuesto a la renta y cada orden puede cobrar comisión: revisa tu caso antes de ejecutar.');
   if (ventas.length || compras.length) notas.push('Cuando una orden se ejecute, regístrala con su botón Registrar (lo que de verdad se hizo): tu cartera guardada se actualiza y el agente la revisa así.');

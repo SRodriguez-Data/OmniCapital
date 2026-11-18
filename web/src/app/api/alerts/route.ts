@@ -29,6 +29,6 @@ export async function GET() {
     return NextResponse.json(data || []);
   } catch (err: unknown) {
     console.error('API Alerts GET Error:', err);
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Error interno' }, { status: 500 });
+    return NextResponse.json({ error: 'No se pudieron leer los avisos de mercado. Intenta de nuevo en unos minutos.' }, { status: 500 });
   }
 }

@@ -75,13 +75,15 @@ export async function geminiChat(
   herramientas: HerramientaChat[],
   models: string[],
   signal?: AbortSignal,
-): Promise<{ text: string; model: string; usadas: string[] }> {
+): Promise<{ text: string; model: string; usadas: string[]; resultados: unknown[] }> {
   if (!genAI) throw new Error('GEMINI_API_KEY no configurada');
   const porNombre = new Map(herramientas.map(h => [h.declaracion.name, h]));
   let lastError: unknown;
   for (const model of models) {
     if (signal?.aborted) break;
     const usadas: string[] = [];
+    // Lo que devolvió cada herramienta: quien llama puede contrastar la respuesta con estos datos
+    const resultados: unknown[] = [];
     try {
       const m = genAI.getGenerativeModel({
         model,
@@ -93,7 +95,7 @@ export async function geminiChat(
       for (let ronda = 0; ronda < 4; ronda++) {
         const r = await m.generateContent({ contents }, { signal });
         const llamadas = r.response.functionCalls() ?? [];
-        if (!llamadas.length || ronda === 3) return { text: r.response.text(), model, usadas };
+        if (!llamadas.length || ronda === 3) return { text: r.response.text(), model, usadas, resultados };
         // El turno del modelo va tal cual: los modelos nuevos exigen recibir de vuelta su firma de razonamiento
         const turno = r.response.candidates?.[0]?.content;
         contents.push(turno?.parts?.length ? { role: 'model', parts: turno.parts } : { role: 'model', parts: llamadas.map(c => ({ functionCall: c })) });
@@ -103,6 +105,7 @@ export async function geminiChat(
           const resultado = h
             ? await h.ejecutar((c.args ?? {}) as Record<string, unknown>).catch(e => ({ error: e instanceof Error ? e.message : String(e) }))
             : { error: 'Herramienta desconocida.' };
+          resultados.push(resultado);
           return { functionResponse: { name: c.name, response: { resultado } } };
         }));
         contents.push({ role: 'user', parts: respuestas });

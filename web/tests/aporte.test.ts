@@ -7,7 +7,7 @@ import { planAporte, type EntradaAporte } from '../src/lib/aporte';
 import type { IdeaTop, IdeasDelBot } from '../src/lib/ideas';
 import type { Semaforo } from '../src/lib/proteccion';
 import { veredictoDe } from '../src/lib/asesor';
-import { planRebalanceo, plataNuevaDe } from '../src/lib/rebalanceo';
+import { netoDeVentas, planRebalanceo, plataNuevaDe } from '../src/lib/rebalanceo';
 
 const HOY = '2026-11-02';
 const idea = (ticker: string, puesto: number, x: Partial<IdeaTop> = {}): IdeaTop => {
@@ -134,7 +134,11 @@ test('rebalanceo agresivo: lo vendido va a núcleo + Top, nunca de vuelta a Chil
   assert.ok(!plan.compras.some(o => o.moneda === 'CLP'), 'no recompra en Chile');
   assert.ok(plan.compras.some(o => o.ticker === 'VOO') && plan.compras.some(o => o.ticker === 'AAA'));
   const top = plan.compras.filter(o => o.ticker !== 'VOO').reduce((s, o) => s + o.montoCLP, 0);
-  assert.ok(Math.abs(top / plan.comprasCLP - 0.6) < 0.02, `Top recibe ${top / plan.comprasCLP}`);
+  // 60% de lo vendido (neto de costos) va al Top; el índice recibe el resto, pero sin dejar a VOO sobre 38% (40% − 2)
+  assert.ok(Math.abs(top / netoDeVentas(plan.ventasCLP) - 0.6) < 0.02, `Top recibe ${top / netoDeVentas(plan.ventasCLP)}`);
+  const voo = plan.compras.find(o => o.ticker === 'VOO')!;
+  assert.ok(voo.pesoDespues <= 0.38 + 1e-6, `VOO queda en ${voo.pesoDespues}`);
+  assert.ok(plan.sinInvertirCLP > 0 && plan.notas.some(n => /VOO: se compra solo/.test(n)), 'lo que no entra en VOO queda sin invertir y se dice');
   assert.ok(plan.evidenciaCompras?.top['EE.UU.']);
 });
 

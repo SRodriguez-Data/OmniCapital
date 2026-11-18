@@ -45,6 +45,20 @@ export function semaforoRojoDe(a: Pick<AssetReport, 'ticker' | 'moneda' | 'secto
   return semaforos.find(s => s.estado === 'rojo' && suyos.includes(s.clave)) ?? null;
 }
 
+export const NOMBRE_MERCADO: Record<ClaveMercado, string> = {
+  eeuu: 'la bolsa de EE.UU.', tecnologia: 'tecnología (Nasdaq-100)', chile: 'la bolsa chilena',
+};
+
+/** El mercado del activo que hoy no tiene semáforo (faltó el dato): sin él no se sabe si está en verde o en rojo. */
+export function semaforoFaltaDe(a: Pick<AssetReport, 'ticker' | 'moneda' | 'sector' | 'diversificado'>, semaforos: Semaforo[]): ClaveMercado | null {
+  return mercadosDe(a).find(c => !semaforos.some(s => s.clave === c)) ?? null;
+}
+/** Los mercados sin semáforo hoy. Con protección elegida, ahí no se compra ni se vende por protección. */
+export const semaforosQueFaltan = (semaforos: Semaforo[]): ClaveMercado[] =>
+  (['eeuu', 'tecnologia', 'chile'] as const).filter(c => !semaforos.some(s => s.clave === c));
+export const motivoSinSemaforo = (c: ClaveMercado) =>
+  `Hoy no hay dato del semáforo de ${NOMBRE_MERCADO[c]} y elegiste protegerte: no se compra ahí hasta saber si está en verde.`;
+
 // Una regla que el laboratorio todavía no midió (o con muy pocos casos) no se cita
 const medida = (texto: string) => !/muy pocos casos|no se pudo medir/.test(texto);
 const pct = (x: number, d = 1) => `${(x * 100).toFixed(d).replace('.', ',')}%`;
@@ -145,6 +159,8 @@ export function avisosCartera(
     const picoCLP = a.moneda === 'USD' ? p.monto * report.usdClp : p.monto;
     if (picoCLP < PICO_MINIMO_CARTERA * V) continue;
     const rojo = semaforoRojoDe(a, semaforos);
+    // Sin el dato de hoy no se dice "en verde": no se sabe
+    const luz = semaforoFaltaDe(a, semaforos) ? 'hoy sin dato' : 'hoy en verde';
     const vendida = vendidas.get(a.ticker);
     const ev = !a.diversificado && a.tipo === 'accion'
       ? evidencia('devolvio_mitad', mercadoDe(a.moneda), -1, 'Vender una acción que subió 30% o más en el año y devolvió la mitad de esa subida')
@@ -155,10 +171,10 @@ export function avisosCartera(
       : rojo
         ? `Su mercado está en zona roja: sigue el aviso de ${rojo.nombre}.`
         : a.diversificado
-          ? 'Es un fondo: lo que decide es el semáforo de su mercado, hoy en verde. Mantener.'
+          ? `Es un fondo: lo que decide es el semáforo de su mercado, ${luz}. Mantener.`
           : ev?.decide
             ? 'Lo medido apoya vender: en su mercado, las acciones así siguieron rindiendo menos que el resto.'
-            : `Lo medido no apoya venderla solo por esto. Lo que protege es el semáforo de su mercado (hoy en verde) y el tamaño de la posición (pesa ${pct(a.peso)} de tu cartera). Si la vendes, que sea porque pesa más de lo que aceptas perder o porque cambió tu razón para tenerla, no por el precio.`;
+            : `Lo medido no apoya venderla solo por esto. Lo que protege es el semáforo de su mercado (${luz}) y el tamaño de la posición (pesa ${pct(a.peso)} de tu cartera). Si la vendes, que sea porque pesa más de lo que aceptas perder o porque cambió tu razón para tenerla, no por el precio.`;
     avisos.push({
       id: `ganancia:${a.ticker}:${p.fecha}`, nivel: 'atencion', tipo: 'ganancia', tickers: [a.ticker],
       titulo: `${sinSufijo(a.ticker)}: ${p.devuelto >= 1 ? 'devolvió toda su ganancia' : `devolvió ${pct(p.devuelto, 0)} de su ganancia`}`,

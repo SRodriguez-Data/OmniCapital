@@ -1,10 +1,12 @@
 import { buildAdvisorReport, fmtMoney, type Accion, type AdvisorReport, type HoldingInput } from './advisor';
 import { NUCLEO, planAporte, type PlanAporte } from './aporte';
-import { frenosPorEventos, type EventoSec } from './eventos';
+import { NOMBRE_MERCADO, semaforosQueFaltan } from './avisos';
+import { hoyEnChile } from './ejecucion';
+import { avisoSinRevisar, frenosPorEventos, type EventoSec } from './eventos';
 import { ideasDelBot, type IdeasDelBot } from './ideas';
 import { liveQuotes } from './marketData';
 import { metaChileDe, nivelDe, proteccionDe, type NivelRiesgo, type PerfilInversionista } from './perfil';
-import { oportunidadesDelBot, plataNuevaDe, planRebalanceo, type PlanRebalanceo } from './rebalanceo';
+import { COSTO_REINVERSION, netoDeVentas, oportunidadesDelBot, plataNuevaDe, planRebalanceo, type PlanRebalanceo } from './rebalanceo';
 
 // El asesor del día: lo que conviene hacer hoy con tu cartera, en un solo cálculo que comparten la pestaña Asesor
 // (api/asesor), el agente que avisa al celular (scripts/agente-cartera.ts) y el chat. Junta:
@@ -32,10 +34,19 @@ export interface Veredicto {
   pasos: Paso[]; // en el orden en que se ejecutan
 }
 
+// El aporte del mes: cuánto ya se invirtió (las compras registradas este mes) y cuánto falta
+export interface AporteDelMes {
+  mes: string; // YYYY-MM, en hora de Chile
+  mensualCLP: number;
+  invertidoCLP: number;
+  pendienteCLP: number;
+}
+
 export interface AsesorDelDia {
   generado: string;
   nivel: NivelRiesgo | null;
   aporteMensual: number | null;
+  aporteDelMes: AporteDelMes | null;
   veredicto: Veredicto;
   aporte: PlanAporte | null;
   rebalanceo: PlanRebalanceo;
@@ -48,7 +59,22 @@ const lista = (xs: string[]) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -
 const nombres = (os: { ticker: string }[]) => lista([...new Set(os.map(o => sinSufijo(o.ticker)))]);
 const minuscula = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
-export function veredictoDe(aporte: PlanAporte | null, plan: PlanRebalanceo): Veredicto {
+/** Lo que ya compraste este mes, en pesos: los lotes de tu cartera con fecha de compra en `mes` (YYYY-MM). */
+export function compradoEnElMes(items: Pick<HoldingInput, 'cantidad' | 'precio_compra' | 'moneda' | 'purchase_date'>[], mes: string, usdClp: number): number {
+  return items.filter(i => (i.purchase_date ?? '').slice(0, 7) === mes)
+    .reduce((s, i) => s + i.cantidad * i.precio_compra * (i.moneda === 'USD' ? usdClp : 1), 0);
+}
+
+/** Cuánto del aporte mensual falta por invertir. Si lo que falta no alcanza para una orden, el mes está hecho. */
+export function aporteDelMes(mensualCLP: number | null | undefined, items: Parameters<typeof compradoEnElMes>[0], mes: string, usdClp: number): AporteDelMes | null {
+  if (!mensualCLP || mensualCLP <= 0) return null;
+  const invertidoCLP = Math.round(compradoEnElMes(items, mes, usdClp));
+  const falta = mensualCLP - invertidoCLP;
+  return { mes, mensualCLP, invertidoCLP, pendienteCLP: falta >= MIN_PENDIENTE ? falta : 0 };
+}
+const MIN_PENDIENTE = 10000; // bajo $10.000 no hay orden que valga la comisión
+
+export function veredictoDe(aporte: PlanAporte | null, plan: PlanRebalanceo, mes: AporteDelMes | null = null): Veredicto {
   const ventas = plan.ventas;
   const compras = aporte?.ordenes.length ? aporte.ordenes : plan.compras;
   const invierteCLP = compras.reduce((s, o) => s + o.montoCLP, 0);
@@ -68,7 +94,10 @@ export function veredictoDe(aporte: PlanAporte | null, plan: PlanRebalanceo): Ve
   if (!pasos.length) {
     return {
       accion: 'MANTENER', titulo: 'No hagas nada hoy', pasos,
-      detalle: `${plan.sinVender ?? 'Nada pasa un límite ni tiene una señal de venta con evidencia.'} Indica tu aporte mensual en tu perfil y cada mes te digo exactamente qué comprar.`,
+      detalle: `${plan.sinVender ?? 'Nada pasa un límite ni tiene una señal de venta con evidencia.'} ${mes && mes.pendienteCLP <= 0
+        ? `Tu aporte de este mes ya está invertido: registraste compras por ${fmtMoney(mes.invertidoCLP, 'CLP')} (tu aporte es de ${fmtMoney(mes.mensualCLP, 'CLP')}). El próximo mes te digo qué comprar; si quieres invertir más ahora, escribe el monto.`
+        : mes ? 'Con tu aporte de este mes no salió ninguna compra hoy.'
+          : 'Indica tu aporte mensual en tu perfil y cada mes te digo exactamente qué comprar.'}`,
     };
   }
 
@@ -81,7 +110,15 @@ export function veredictoDe(aporte: PlanAporte | null, plan: PlanRebalanceo): Ve
   for (const o of ventas) porque.push(`${sinSufijo(o.ticker)} se vende: ${minuscula(o.motivo.replace(/^Con evidencia en contra:\s*/i, ''))}`);
   if (plan.sinVender) porque.push(plan.sinVender);
   if (aporte?.ordenes.some(o => o.enRojo)) porque.push('Su mercado está en rojo: se compra igual, más barato.');
-  if (ventas.length && compras.length) porque.push('Si la plata de la venta demora, parte con lo que te alcance.');
+  if (ventas.length && compras.length) porque.push(`Las compras ya descuentan ${String(COSTO_REINVERSION * 100).replace('.', ',')}% de lo vendido (comisiones, cambio y margen de las órdenes). Si la plata de la venta demora, parte con lo que te alcance.`);
+  // El aporte del mes no se anuncia dos veces: lo ya comprado se descuenta, y se dice
+  if (mes && mes.invertidoCLP > 0 && compras.length) {
+    porque.push(mes.pendienteCLP > 0
+      ? `Este mes ya registraste compras por ${fmtMoney(mes.invertidoCLP, 'CLP')}: esto es lo que falta de tu aporte de ${fmtMoney(mes.mensualCLP, 'CLP')}.`
+      : `Tu aporte de este mes ya está invertido (${fmtMoney(mes.invertidoCLP, 'CLP')} en compras registradas): estas compras son solo con lo que vendes.`);
+  } else if (mes && mes.pendienteCLP <= 0 && !compras.length) {
+    porque.push(`Tu aporte de este mes ya está invertido (${fmtMoney(mes.invertidoCLP, 'CLP')} en compras registradas).`);
+  }
 
   const monto = fmtMoney(invierteCLP, 'CLP');
   const vendes = lista(ventas.map(o => `${sinSufijo(o.ticker)}${o.todo ? '' : ' (parte)'}`));
@@ -94,9 +131,9 @@ export function veredictoDe(aporte: PlanAporte | null, plan: PlanRebalanceo): Ve
  *  trae el informe). */
 export async function preciosIdeas(ideas: IdeasDelBot | null, report: AdvisorReport) {
   const precios = new Map<string, { price: number; name?: string; time?: string }>();
-  const hoy = report.generado.slice(0, 10);
+  // Con la fecha real de cada precio: uno que no es de la última sesión no sirve para calcular una compra (lib/aporte.ts)
   for (const a of [...report.posiciones, ...report.candidatos]) {
-    if (a.conDatos && a.precio > 0) precios.set(a.ticker, { price: a.precio, name: a.nombre, time: hoy });
+    if (a.conDatos && a.precio > 0 && a.fechaPrecio) precios.set(a.ticker, { price: a.precio, name: a.nombre, time: a.fechaPrecio });
   }
   const faltan = [...new Set([...(ideas?.us ?? []), ...(ideas?.cl ?? [])].map(i => i.ticker)
     .concat(Object.values(NUCLEO).map(n => n.ticker)))].filter(t => !precios.has(t));
@@ -108,7 +145,11 @@ export async function preciosIdeas(ideas: IdeasDelBot | null, report: AdvisorRep
 export async function asesorDelDia(
   items: HoldingInput[],
   perfil: PerfilInversionista | null,
-  { montoCLP, fraccionar = true, eventos = null }: { montoCLP?: number | null; fraccionar?: boolean; eventos?: Record<string, EventoSec[]> | null } = {},
+  { montoCLP, fraccionar = true, eventos = null, eventosSinRevisar = [], hoy = hoyEnChile() }: {
+    montoCLP?: number | null; fraccionar?: boolean; eventos?: Record<string, EventoSec[]> | null;
+    eventosSinRevisar?: string[]; // empresas cuyos hechos relevantes no se pudieron consultar hoy
+    hoy?: string; // YYYY-MM-DD en Chile: el mes del aporte
+  } = {},
 ): Promise<{ asesor: AsesorDelDia; report: AdvisorReport }> {
   const nivel = nivelDe(perfil);
   let ideasFallaron = false;
@@ -128,13 +169,23 @@ export async function asesorDelDia(
   const proteccion = proteccionDe(perfil);
   const semaforos = report.mercado?.semaforos ?? [];
   const frenos = frenosPorEventos(eventos, report.generado.slice(0, 10));
-  const monto = montoCLP ?? perfil?.aporteMensual ?? 0;
+  if (eventosSinRevisar.length) report.avisosDatos.push(avisoSinRevisar(eventosSinRevisar));
+  // Con protección elegida, un semáforo sin dato no es "verde": ahí no se compra, y se dice
+  const sinSemaforo = proteccion !== 'avisar' ? semaforosQueFaltan(semaforos) : [];
+  if (sinSemaforo.length) {
+    report.avisosDatos.push(`Hoy no hay dato del semáforo de ${sinSemaforo.map(c => NOMBRE_MERCADO[c]).join(' ni de ')}: con la protección que elegiste no se compra ahí hasta tenerlo, y no se vende por protección sin ese dato.`);
+  }
+  // El aporte del mes se recomienda una vez: lo que ya compraste este mes (lotes con fecha de este mes) se descuenta.
+  // Un monto distinto al aporte mensual es plata que el usuario escribió a mano, y se usa tal cual
+  const delMes = aporteDelMes(perfil?.aporteMensual, items, hoy.slice(0, 7), report.usdClp);
+  const esElAporte = montoCLP === null || montoCLP === undefined || (!!delMes && montoCLP === delMes.mensualCLP);
+  const monto = esElAporte ? delMes?.pendienteCLP ?? 0 : montoCLP ?? 0;
   // Sin perfil no hay aporte: lo vendido lo reinvierte el rebalanceo. Con perfil se invierte junto con el aporte, en una
   // sola lista de compras, sobre la cartera que queda después de vender (no compra en Chile mientras se está reduciendo)
   const rebalanceo = planRebalanceo(report, modelo, {
     metaChile, fraccionar, proteccion, nivel, ideas, precios, frenos, plataNueva: plataNuevaDe(perfil?.aporteMensual, monto), reinvertir: !nivel,
   });
-  const disponible = monto + (nivel ? rebalanceo.ventasCLP - rebalanceo.refugioCLP : 0);
+  const disponible = monto + (nivel ? netoDeVentas(rebalanceo.ventasCLP - rebalanceo.refugioCLP) : 0);
   const V = report.resumen.valorCLP;
   type Tenencia = { ticker: string; valorCLP: number; accion?: Accion; pesoEfectivo?: number };
   const tras = new Map<string, Tenencia>(report.posiciones.map(a => [a.ticker, { ticker: a.ticker, valorCLP: a.valorCLP, accion: a.accion, pesoEfectivo: a.pesoEfectivo }]));
@@ -163,7 +214,8 @@ export async function asesorDelDia(
   return {
     asesor: {
       generado: report.generado, nivel, aporteMensual: perfil?.aporteMensual ?? null,
-      veredicto: veredictoDe(aporte, rebalanceo),
+      aporteDelMes: esElAporte ? delMes : null,
+      veredicto: veredictoDe(aporte, rebalanceo, esElAporte ? delMes : null),
       aporte, rebalanceo, ideas,
       frenos: [...frenos].map(([ticker, motivo]) => ({ ticker, motivo })),
     },

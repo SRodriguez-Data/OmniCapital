@@ -5,7 +5,7 @@ import {
   ArrowDownRight, ArrowUpRight, CheckCircle2, ChevronRight, ExternalLink, FileWarning, Loader2, Newspaper, RefreshCw,
   Sparkles, TrendingUp,
 } from 'lucide-react';
-import { usePortfolio } from '../context/PortfolioContext';
+import { PortafolioNoCargado, usePortfolio } from '../context/PortfolioContext';
 import { supabase } from '@/lib/supabase';
 import { parsePerfil, type PerfilInversionista } from '@/lib/perfil';
 import { FormRegistro, useRegistrar, type OrdenRegistro, type Registrar } from './RebalanceoPanel';
@@ -187,7 +187,7 @@ function TarjetaIdea({ i, noticias, eventos, tienes, enAporte, registrar }: {
 }
 
 export default function AsesorTab({ irA }: { irA: (destino: 'DATA_WAREHOUSE' | 'RECOMENDACIONES' | 'CALCULADORA' | 'AVISOS') => void }) {
-  const { items, loading: cargandoCartera } = usePortfolio();
+  const { items, loading: cargandoCartera, error: errorCartera } = usePortfolio();
   const registrar = useRegistrar();
   const [perfil, setPerfil] = useState<PerfilInversionista | null>(null);
   const [perfilListo, setPerfilListo] = useState(false);
@@ -296,6 +296,7 @@ export default function AsesorTab({ irA }: { irA: (destino: 'DATA_WAREHOUSE' | '
     };
   }, [datos, ops]);
 
+  if (!items.length && errorCartera) return <PortafolioNoCargado />;
   if (!items.length && !cargandoCartera) {
     return (
       <div className={`${tarjeta} max-w-2xl mx-auto p-8 text-center space-y-3`}>

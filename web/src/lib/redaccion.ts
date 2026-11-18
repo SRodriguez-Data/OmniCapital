@@ -32,8 +32,15 @@ const responseSchema: JsonSchema = {
 
 const pct = (x: number | null | undefined, digits = 1) => (x === null || x === undefined ? 'N/D' : `${(x * 100).toFixed(digits)}%`);
 
+// El informe llega desde el navegador: lo que se le manda a la IA tiene tope, para que nadie gaste la cuota gratuita
+// con textos enormes (una cartera normal ocupa una fracción de esto)
+const MAX_PROMPT = 60_000;
+
 export async function redactar(r: AdvisorReport, timeoutMs: number): Promise<Redaccion> {
   const { prompt, cifras } = buildPrompt(r);
+  if (prompt.length > MAX_PROMPT) {
+    return { diagnostico: null, comentarios: {}, modelo: null, avisoIa: 'El informe es demasiado largo para redactarlo con IA. Se muestra el análisis calculado.' };
+  }
   try {
     const { text, model } = await generateText(prompt, { schema: responseSchema, speed: 'fast', timeoutMs });
     const data = JSON.parse(text);

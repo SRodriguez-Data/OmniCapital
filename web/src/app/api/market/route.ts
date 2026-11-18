@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { aiConfigured, generateText } from '@/lib/ai';
 import { TICKER_RE } from '@/lib/validation';
-import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
+import { rateLimit, sesionVerificada, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 import { dailyHistory, liveQuotes } from '@/lib/marketData';
 
 // Caché en memoria del resumen de IA por ticker: evita gastar cuota de IA en búsquedas repetidas
@@ -81,11 +81,18 @@ export async function GET(request: Request) {
     // Resumen de IA (Gemini)
     let aiAnalysis = "No hay un proveedor de IA configurado en el servidor, por lo que el análisis de IA está deshabilitado.";
     
+    // Solo una respuesta con un resumen de IA vigente se comparte desde la CDN: un mensaje de error o de cupo no
+    let iaVigente = false;
     const cachedAi = aiCache.get(ticker);
     if (cachedAi && Date.now() - cachedAi.timestamp < AI_CACHE_TTL) {
       aiAnalysis = cachedAi.text;
+      iaVigente = true;
     } else if (aiConfigured) {
-      try {
+      // Los datos no gastan IA; el resumen sí: pocos tickers nuevos por ventana (los ya resumidos salen del caché)
+      const usuario = await sesionVerificada(request);
+      if (!rateLimit(request, 'market-ia', 10, undefined, { usuario, ia: { anonimos: 20, anonimosDia: 100 } })) {
+        aiAnalysis = 'Se alcanzó el cupo de resúmenes de IA por ahora. Los datos de arriba están al día; el resumen vuelve en unos minutos.';
+      } else try {
         const prompt = `
 Eres un analista cuantitativo senior. Haz un resumen ejecutivo (máximo 4 líneas) en ESPAÑOL sobre el activo ${meta.symbol} (${meta.longName || ''}).
 Datos actuales:
@@ -99,6 +106,7 @@ Dime de forma experta si el activo está sobrecomprado, sobrevendido o en zona d
         `;
         aiAnalysis = (await generateText(prompt, { speed: 'fast', timeoutMs: 20000 })).text;
         aiCache.set(ticker, { timestamp: Date.now(), text: aiAnalysis });
+        iaVigente = true;
       } catch (aiError) {
         console.error("AI Error:", aiError);
         aiAnalysis = "Hubo un error al generar el análisis de IA en este momento.";
@@ -116,11 +124,14 @@ Dime de forma experta si el activo está sobrecomprado, sobrevendido o en zona d
       signal,
       name: meta.longName || meta.shortName || meta.symbol || ticker,
       currency: meta.currency || 'USD',
-      aiAnalysis
-    }, aiCache.has(ticker)
-      // Con el resumen de IA listo, la CDN comparte la respuesta 15 minutos (ahorra cuota de Gemini)
-      ? { headers: { 'Cache-Control': 'public, s-maxage=900, stale-while-revalidate=3600' } }
-      : undefined);
+      aiAnalysis,
+      // Cuándo se calculó: la CDN puede entregar esta misma respuesta unos minutos después
+      asOf: new Date().toISOString(),
+    }, iaVigente
+      // Con el resumen de IA vigente, la CDN comparte la respuesta 10 minutos (ahorra cuota de Gemini) y a lo más 5 más
+      // mientras la renueva: el precio y la señal nunca tienen más de 15 minutos
+      ? { headers: { 'Cache-Control': 'public, s-maxage=600, stale-while-revalidate=300' } }
+      : { headers: { 'Cache-Control': 'no-store' } });
 
   } catch (error) {
     console.error('API Market Error:', error);

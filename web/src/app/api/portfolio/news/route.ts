@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { aiConfigured, generateText, aiError, type JsonSchema } from '@/lib/ai';
 import { MAX_ITEMS, TICKER_RE } from '@/lib/validation';
-import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
+import { rateLimit, sesionVerificada, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 import { noticias, type Noticia } from '@/lib/news';
 
 export const maxDuration = 60;
@@ -60,7 +60,12 @@ export async function POST(req: Request) {
   let modelo: string | null = null;
   let avisoIa: string | null = null;
 
-  if (aiConfigured && conNoticias.length > 0) {
+  // Los titulares no gastan IA; el tono sí: tiene su propio cupo, y sin él se muestran los titulares solos
+  const usuario = await sesionVerificada(req);
+  const conCupo = conNoticias.length > 0 && aiConfigured
+    && rateLimit(req, 'news-ia', usuario ? 15 : 6, undefined, { usuario, ia: { anonimos: 12, anonimosDia: 60 } });
+  if (aiConfigured && conNoticias.length > 0 && !conCupo) avisoIa = `${RATE_LIMIT_MESSAGE} Se muestran los titulares sin resumen.`;
+  if (conCupo) {
     // Los titulares son datos de terceros: van entre comillas y la IA solo los clasifica
     const bloque = conNoticias.map(([t, ns]) => `${t}:\n${ns.map((n: Noticia) => `  - (${n.fecha}, ${n.fuente}) "${n.titulo.replace(/"/g, "'")}"`).join('\n')}`).join('\n');
     const prompt = `Clasifica el tono de las noticias recientes de cada empresa para un inversionista que tiene sus acciones.

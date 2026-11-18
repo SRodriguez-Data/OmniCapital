@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { asesorDelDia } from '@/lib/asesor';
-import { eventosSec, type EventoSec } from '@/lib/eventos';
+import { conEventosAnteriores, eventosSecRevisados, type EventoSec } from '@/lib/eventos';
 import { parsePerfil } from '@/lib/perfil';
-import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
+import { rateLimit, sesionVerificada, tokenDe, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 import { parsePortfolioItems } from '@/lib/validation';
 
 export const maxDuration = 60;
@@ -13,13 +13,39 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUP
 const MAX_MONTO = 1e11;
 
 // Hechos relevantes de la SEC: los que dejó el agente diario en tu fila de agente_cartera (la lee tu sesión: solo ves
-// la tuya). Si este servidor tiene su propio contacto para la SEC, los consulta en el momento.
-async function eventosDe(token: string, tickers: string[]): Promise<{ porTicker: Record<string, EventoSec[]>; fecha: string } | null> {
+// la tuya). Si este servidor tiene su propio contacto para la SEC, los consulta en el momento, pero solo para una
+// sesión verificada (un visitante anónimo no gasta consultas a la SEC con ese contacto) y recordando cada empresa unas
+// horas en esta instancia.
+const SEC_TTL = 3 * 60 * 60 * 1000;
+const secCache = new Map<string, { at: number; evs: EventoSec[] }>();
+
+async function eventosDe(token: string, tickers: string[], usuario: string | null): Promise<{ porTicker: Record<string, EventoSec[]>; fecha: string; sinRevisar?: string[] } | null> {
   const contacto = (process.env.SEC_CONTACTO ?? '').trim();
-  if (contacto) {
-    const porTicker = await eventosSec(tickers, contacto).catch(() => null);
-    if (porTicker) return { porTicker, fecha: new Date().toISOString().slice(0, 10) };
+  if (contacto && usuario) {
+    const ahora = Date.now();
+    const lista = [...new Set(tickers.map(t => t.toUpperCase()))].filter(t => !t.endsWith('.SN'));
+    const faltan = lista.filter(t => !(ahora - (secCache.get(t)?.at ?? 0) < SEC_TTL));
+    const nuevos = faltan.length ? await eventosSecRevisados(faltan, contacto).catch(() => null) : { porTicker: {}, sinRevisar: [] };
+    if (nuevos) {
+      if (secCache.size > 1000) secCache.clear();
+      // Una empresa cuya consulta falló no se recuerda como "sin hechos": se vuelve a consultar la próxima vez
+      for (const t of faltan) if (!nuevos.sinRevisar.includes(t)) secCache.set(t, { at: ahora, evs: nuevos.porTicker[t] ?? [] });
+      const porTicker: Record<string, EventoSec[]> = {};
+      for (const t of lista) {
+        const evs = secCache.get(t)?.evs;
+        if (evs?.length) porTicker[t] = evs;
+      }
+      // Las que no se pudieron consultar no se dan por revisadas: vale lo que dejó el agente (un freno grave no se
+      // levanta porque falló la consulta) y el asesor lo avisa
+      const sinRevisar = nuevos.sinRevisar;
+      const anteriores = sinRevisar.length ? (await delAgente(token).catch(() => null))?.porTicker : null;
+      return { porTicker: conEventosAnteriores({ porTicker, sinRevisar }, anteriores), fecha: new Date().toISOString().slice(0, 10), sinRevisar };
+    }
   }
+  return delAgente(token);
+}
+
+async function delAgente(token: string): Promise<{ porTicker: Record<string, EventoSec[]>; fecha: string } | null> {
   if (!token) return null;
   const db = createClient(supabaseUrl, supabaseKey, { global: { headers: { Authorization: `Bearer ${token}` } }, auth: { persistSession: false } });
   const { data } = await db.from('agente_cartera').select('datos->eventos').maybeSingle();
@@ -30,7 +56,8 @@ async function eventosDe(token: string, tickers: string[]): Promise<{ porTicker:
 // El asesor del día (lib/asesor.ts): qué comprar con tu aporte, qué ajustar y por qué, con los hechos relevantes de tus
 // empresas. Es el mismo cálculo que hace cada mañana el agente que te avisa.
 export async function POST(request: Request) {
-  if (!rateLimit(request, 'asesor', 20)) {
+  const usuario = await sesionVerificada(request);
+  if (!rateLimit(request, 'asesor', 20, undefined, { usuario })) {
     return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
   }
   let body: { items?: unknown; perfil?: unknown; monto?: unknown; fraccionar?: unknown };
@@ -46,11 +73,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Monto inválido.' }, { status: 400 });
   }
   const perfil = parsePerfil(body?.perfil);
-  const token = (request.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+  const token = tokenDe(request);
 
   try {
-    const eventos = await eventosDe(token, parsed.items.map(i => i.ticker)).catch(() => null);
-    const { asesor, report } = await asesorDelDia(parsed.items, perfil, { montoCLP: monto, fraccionar: body?.fraccionar !== false, eventos: eventos?.porTicker ?? null });
+    const eventos = await eventosDe(token, parsed.items.map(i => i.ticker), usuario).catch(() => null);
+    const { asesor, report } = await asesorDelDia(parsed.items, perfil, { montoCLP: monto, fraccionar: body?.fraccionar !== false, eventos: eventos?.porTicker ?? null, eventosSinRevisar: eventos?.sinRevisar ?? [] });
     return NextResponse.json({
       asesor,
       eventos,

@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Search, Loader2, Sparkles } from 'lucide-react';
 import SymbolSearchModal from './SymbolSearchModal';
+import { cabecerasConSesion } from '@/lib/supabase';
 
 interface MarketData {
   ticker: string;
@@ -16,6 +17,7 @@ interface MarketData {
   riskLevel: string;
   signal: 'COMPRAR' | 'VENDER' | 'MANTENER';
   aiAnalysis?: string;
+  asOf?: string;
   error?: string;
 }
 
@@ -35,7 +37,7 @@ export default function ScreenerTab() {
     setData(null);
 
     try {
-      const res = await fetch(`/api/market?ticker=${encodeURIComponent(searchTicker)}`);
+      const res = await fetch(`/api/market?ticker=${encodeURIComponent(searchTicker)}`, { headers: await cabecerasConSesion({}) });
       const json = await res.json();
       
       if (!res.ok) {
@@ -99,6 +101,11 @@ export default function ScreenerTab() {
               <p className="font-mono text-3xl font-bold text-zinc-900 dark:text-[#e4e4e7]">
                 ${data.currentPrice.toFixed(2)} <span className="text-sm text-zinc-500 dark:text-[#71717a]">{data.currency}</span>
               </p>
+              {data.asOf && (
+                <p className="text-[11px] font-sans text-zinc-500 dark:text-[#71717a]">
+                  Calculado a las {new Date(data.asOf).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}
+                </p>
+              )}
             </div>
           </div>
 

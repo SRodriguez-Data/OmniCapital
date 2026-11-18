@@ -78,11 +78,33 @@ async function ciks(ua: string): Promise<Map<string, number>> {
   return datos;
 }
 
+export interface EventosRevisados {
+  porTicker: Record<string, EventoSec[]>;
+  sinRevisar: string[]; // empresas cuya consulta falló: no se sabe si tienen un hecho grave
+}
+
+/** Para las empresas que hoy no se pudieron revisar, vale lo último que se supo de ellas (si se supo algo). */
+export function conEventosAnteriores(r: EventosRevisados, anteriores: Record<string, EventoSec[]> | null | undefined): Record<string, EventoSec[]> {
+  const porTicker = { ...r.porTicker };
+  for (const t of r.sinRevisar) if (anteriores?.[t]?.length) porTicker[t] = anteriores[t];
+  return porTicker;
+}
+
+/** El aviso de datos cuando faltó revisar alguna empresa. */
+export const avisoSinRevisar = (sinRevisar: string[]) =>
+  `No se pudieron revisar hoy los hechos relevantes (SEC) de ${sinRevisar.slice(0, 8).join(', ')}${sinRevisar.length > 8 ? ` y ${sinRevisar.length - 8} más` : ''}: un freno anterior se mantiene, pero uno nuevo no se vería. Revisa de nuevo más tarde antes de comprarlas.`;
+
 /** Los 8-K de los últimos 45 días de cada empresa de EE.UU. (sin las chilenas ni los fondos, que no presentan 8-K). */
 export async function eventosSec(tickers: string[], contacto: string, hoy = new Date().toISOString().slice(0, 10)): Promise<Record<string, EventoSec[]>> {
+  return (await eventosSecRevisados(tickers, contacto, hoy)).porTicker;
+}
+
+/** Lo mismo, diciendo además qué empresas no se pudieron consultar (para no darlas por revisadas). */
+export async function eventosSecRevisados(tickers: string[], contacto: string, hoy = new Date().toISOString().slice(0, 10)): Promise<EventosRevisados> {
   const ua = `OmniCapital ${contacto}`;
   const mapaCik = await ciks(ua);
   const out: Record<string, EventoSec[]> = {};
+  const sinRevisar: string[] = [];
   const lista = [...new Set(tickers.map(t => t.toUpperCase()))].filter(t => !t.endsWith('.SN'));
   // La SEC permite 10 consultas por segundo: de a 4, con una pausa corta
   for (let i = 0; i < lista.length; i += 4) {
@@ -91,9 +113,9 @@ export async function eventosSec(tickers: string[], contacto: string, hoy = new 
       if (!cik) return; // un fondo (ETF) no presenta 8-K
       try {
         const r = await fetch(`https://data.sec.gov/submissions/CIK${String(cik).padStart(10, '0')}.json`, { headers: { 'User-Agent': ua }, signal: AbortSignal.timeout(15000) });
-        if (!r.ok) return;
+        if (!r.ok) { sinRevisar.push(t); return; }
         const rec = (await r.json() as { filings?: { recent?: Record<string, string[]> } }).filings?.recent;
-        if (!rec?.form) return;
+        if (!rec?.form) { sinRevisar.push(t); return; }
         const evs: EventoSec[] = [];
         for (let k = 0; k < rec.form.length; k++) {
           const fecha = rec.filingDate[k];
@@ -103,9 +125,9 @@ export async function eventosSec(tickers: string[], contacto: string, hoy = new 
           if (e) evs.push(e);
         }
         if (evs.length) out[t] = evs;
-      } catch { /* una empresa sin datos no frena a las demás */ }
+      } catch { sinRevisar.push(t); /* una empresa sin datos no frena a las demás, pero se informa */ }
     }));
     await new Promise(r => setTimeout(r, 500));
   }
-  return out;
+  return { porTicker: out, sinRevisar: sinRevisar.sort() };
 }

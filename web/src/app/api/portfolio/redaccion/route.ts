@@ -1,20 +1,22 @@
 import { NextResponse } from 'next/server';
 import { aiConfigured } from '@/lib/ai';
 import { MAX_ITEMS, TICKER_RE } from '@/lib/validation';
-import { rateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
+import { rateLimit, sesionVerificada, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 import { redactar } from '@/lib/redaccion';
 import type { AdvisorReport } from '@/lib/advisor';
 
 export const maxDuration = 60;
 
-// Tamaño máximo del informe que se acepta para redactar (el de 60 activos pesa ~200 KB)
-const MAX_BYTES = 400_000;
+// Tamaño máximo del informe que se acepta para redactar (el de 60 activos pesa ~200 KB). Lo que de verdad llega a la
+// IA es mucho menos y tiene su propio tope (MAX_PROMPT en lib/redaccion.ts)
+const MAX_BYTES = 250_000;
 const ACCIONES = new Set(['AUMENTAR', 'MANTENER', 'REDUCIR']);
 
 // Redacta con IA el informe que calculó /api/portfolio/analyze. El navegador devuelve ese mismo informe;
 // se revisa su forma y tamaño para que la ruta no sirva para mandarle cualquier texto a la IA.
 export async function POST(req: Request) {
-  if (!rateLimit(req, 'redaccion', 15)) {
+  const usuario = await sesionVerificada(req);
+  if (!rateLimit(req, 'redaccion', usuario ? 10 : 5, undefined, { usuario, ia: { anonimos: 10, anonimosDia: 40 } })) {
     return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
   }
   if (!aiConfigured) {

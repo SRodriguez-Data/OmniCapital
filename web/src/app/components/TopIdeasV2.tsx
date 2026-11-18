@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { AlertTriangle, ChevronDown, ChevronUp, Loader2, Sparkles } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
+import { cabecerasConSesion } from '@/lib/supabase';
 import { NOMBRE_PONDERACION, evidenciaMetodo, sesgosEvidencia, type ClaveMetodo, type Nivel, type Ponderacion } from '@/lib/evidenciaMetodos';
 import {
   type Candidato, type Historiales, SECTOR, fechaCorta, lineaHistorial, normalizeYield, pctSigno, textoDeuda, textoPE, textoResultados,
@@ -219,7 +220,7 @@ export default function TopIdeasV2({ us, cl, historial, fecha }: { us: Candidato
     try {
       const res = await fetch('/api/generate-thesis', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await cabecerasConSesion(),
         body: JSON.stringify({
           ticker: c.ticker, price: c.price, pe: textoPE(c), div_str: normalizeYield(c.div_str), deuda: textoDeuda(c),
           sector: sectorDe(c), resultados: textoResultados(c.proximos_resultados)?.texto, criterio: criterio(c),

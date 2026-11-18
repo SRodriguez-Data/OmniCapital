@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AdvisorReport, AssetReport, RiskModel } from '../src/lib/advisor';
 import { aplicarCambios, cambiosPorEjecucion, leerEjecucion, type Cambios, type Lote } from '../src/lib/ejecucion';
-import { planRebalanceo, precioLimite } from '../src/lib/rebalanceo';
+import { netoDeVentas, planRebalanceo, precioLimite } from '../src/lib/rebalanceo';
 
 const lote = (id: string, cantidad: number, fecha: string | null, ticker = 'CHILE.SN'): Lote =>
   ({ id, ticker, cantidad, precio_compra: 150, moneda: ticker.endsWith('.SN') ? 'CLP' : 'USD', purchase_date: fecha });
@@ -122,7 +122,9 @@ test('rebalanceo: lo vendido solo compra AUMENTAR, sin pasar el máximo de un fo
   const plan = planRebalanceo(report, modelo, { metaChile: 0.6 });
   assert.deepEqual(plan.compras.map(o => o.ticker), ['VOO']);
   assert.ok(plan.compras[0].pesoDespues <= 0.4 + 1e-6, `VOO queda en ${plan.compras[0].pesoDespues}`);
-  assert.ok(Math.abs(plan.ventasCLP - plan.comprasCLP - plan.sinInvertirCLP) < 1, 'lo vendido se compra o queda sin invertir');
+  // Se compra con lo vendido menos lo que se va en comisiones, cambio y el margen de las órdenes límite
+  assert.ok(Math.abs(netoDeVentas(plan.ventasCLP) - plan.comprasCLP - plan.sinInvertirCLP) < 1, 'lo vendido (neto) se compra o queda sin invertir');
+  assert.ok(plan.comprasCLP < plan.ventasCLP, 'nunca se compra con más de lo que deja la venta');
   assert.ok(plan.sinInvertirCLP > 0 && plan.motivoSinInvertir, 'avisa lo que queda sin invertir');
   assert.ok(plan.compras.every(o => o.limite >= o.precio) && plan.ventas.every(o => o.limite <= o.precio));
 });

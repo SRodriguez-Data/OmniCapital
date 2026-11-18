@@ -91,6 +91,55 @@ function herramientas(items: HoldingInput[], perfil: PerfilInversionista | null)
   ];
 }
 
+// --- Contraste de la respuesta ----------------------------------------------------------------------------------------
+// Los titulares son texto de terceros y podrían empujar al modelo a recomendar algo que el motor no dijo. La respuesta
+// no se reescribe: si ordena comprar o vender un ticker, o da un monto en plata, que no aparece en el contexto, en la
+// conversación ni en lo que devolvieron las herramientas, se le agrega una advertencia.
+
+const SIGLAS = new Set(['PER', 'ROE', 'ROA', 'SEC', 'IPSA', 'VIX', 'ETF', 'ETFS', 'CLP', 'USD', 'TOP', 'EEUU', 'APV', 'AFP', 'IVA', 'TPM', 'IPC',
+  'PIB', 'FED', 'CEO', 'IPO', 'SMA', 'EMA', 'RSI', 'NYSE', 'NASDAQ', 'ADR', 'EPS', 'EBITDA', 'CMF', 'SII', 'MSCI', 'TODO', 'TODA', 'TODOS',
+  'SOLO', 'HOY', 'AHORA', 'NADA', 'MAS', 'UNA', 'UNO', 'LOS', 'LAS', 'DEL', 'QUE', 'CON', 'POR', 'TUS', 'ESTO', 'ESTA', 'ESTE', 'ESA', 'ESE']);
+const ORDEN = /(compr|vend|acumul|invi[eé]rt|invert|entra en)[^\n]{0,25}$/i;
+
+/** Números de un texto en sus dos lecturas posibles: "1.234,5" (Chile) y "1,234.5" o 1234.5 (JSON). */
+function numerosDe(texto: string): number[] {
+  const out: number[] = [];
+  for (const m of texto.matchAll(/\d[\d.,]*\d|\d/g)) {
+    const s = m[0];
+    const cl = Number(s.replace(/\./g, '').replace(',', '.'));
+    const en = Number(s.replace(/,/g, ''));
+    if (Number.isFinite(cl)) out.push(cl);
+    if (Number.isFinite(en) && en !== cl) out.push(en);
+  }
+  return out;
+}
+
+export function sinRespaldo(respuesta: string, fuentes: string): { tickers: string[]; montos: string[] } {
+  const texto = respuesta.replace(/[*_`]/g, '');
+  const mayus = fuentes.toUpperCase();
+  const tickers = new Set<string>();
+  for (const m of texto.matchAll(/(?<![\p{L}\p{N}.])([A-Z]{3,6}(?:-[A-Z])?)(\.SN)?(?![\p{L}\p{N}])/gu)) {
+    const base = m[1];
+    if (SIGLAS.has(base)) continue;
+    // Solo cuenta lo que se manda a operar ("compra XXXX") o lleva sufijo de bolsa: una sigla suelta no es una orden
+    if (!m[2] && !ORDEN.test(texto.slice(Math.max(0, m.index - 40), m.index))) continue;
+    if (!new RegExp(`(?<![A-Z0-9])${base}(?![A-Z0-9])`).test(mayus)) tickers.add(base + (m[2] ?? ''));
+  }
+
+  const conocidos = numerosDe(fuentes);
+  const calza = (x: number) => conocidos.some(y => Math.abs(x - y) <= Math.max(Math.abs(y) * 0.02, 0.01));
+  const montos = new Set<string>();
+  // Plata: con "$" adelante, o seguida de la moneda. "mil" y "millones" multiplican
+  for (const m of texto.matchAll(/(\$\s?)?(\d[\d.,]*\d|\d)(\s?(mil(?:lones|lón)?|MM)(?![a-záéíóúñ]))?(\s?(?:USD|CLP|pesos|dólares))?/gi)) {
+    if (!m[1] && !m[5]) continue;
+    const factor = !m[4] ? 1 : /^mil$/i.test(m[4]) ? 1e3 : 1e6;
+    const lecturas = numerosDe(m[2]).map(n => n * factor);
+    if (!lecturas.length || lecturas.every(n => n < 10)) continue;
+    if (!lecturas.some(n => calza(n) || (factor > 1 && calza(n / factor)))) montos.add(m[0].trim());
+  }
+  return { tickers: [...tickers].slice(0, 4), montos: [...montos].slice(0, 3) };
+}
+
 export async function responderChat(
   mensajes: MensajeChat[],
   contexto: unknown,
@@ -107,5 +156,13 @@ export async function responderChat(
     ...mensajes.map(m => ({ role: m.rol === 'usuario' ? 'user' : 'model', parts: [{ text: m.texto }] })),
   ];
   const r = await geminiChat(SISTEMA, historial, herramientas(items, perfil), GEMINI_MODELS_QUALITY, signal);
-  return { texto: r.text.trim(), modelo: r.model, usadas: r.usadas };
+  let texto = r.text.trim();
+  const fuentes = [ctx, medido, JSON.stringify(r.resultados), JSON.stringify(items), ...mensajes.map(m => m.texto)].join('\n');
+  const { tickers, montos } = sinRespaldo(texto, fuentes);
+  if (tickers.length || montos.length) {
+    const que = [tickers.length ? `nombra ${tickers.join(', ')}` : '', montos.length ? `da ${montos.length > 1 ? 'montos' : 'un monto'} (${montos.join('; ')})` : ''].filter(Boolean).join(' y ');
+    texto += `\n\n⚠️ *Ojo: esta respuesta ${que} que no ${tickers.length + montos.length > 1 ? 'están' : 'está'} en los datos del motor. Antes de operar, compáralo con el plan de la pestaña Asesor.*`;
+    console.warn('Chat del asesor: respuesta con datos sin respaldo:', tickers.length, 'tickers,', montos.length, 'montos');
+  }
+  return { texto, modelo: r.model, usadas: r.usadas };
 }
