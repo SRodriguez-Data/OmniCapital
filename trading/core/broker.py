@@ -11,6 +11,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from alpaca.common.enums import BaseURL, Sort
 from alpaca.common.exceptions import APIError
@@ -28,6 +29,7 @@ CLAVES = {False: ('ALPACA_API_KEY', 'ALPACA_SECRET_KEY'), True: ('ALPACA_REAL_AP
 PREFIJO = {False: 'PK', True: 'AK'}
 # Depósitos, retiros y traspasos: mueven el patrimonio sin ser ganancia ni pérdida
 FLUJOS = 'CSD,CSW,JNLC'
+NUEVA_YORK = ZoneInfo('America/New_York')
 
 
 class ErrorConfiguracion(RuntimeError):
@@ -158,7 +160,9 @@ class Broker:
         """Valor de la cartera al cierre de cada día desde `desde`, sin contar depósitos ni retiros como ganancia (ver
         `indice`). Sin depósitos ni retiros, es el patrimonio."""
         h = self.cliente.get_portfolio_history(GetPortfolioHistoryRequest(
-            timeframe='1D', start=datetime.combine(desde, datetime.min.time(), tzinfo=timezone.utc), cashflow_types=FLUJOS))
+            timeframe='1D', start=datetime.combine(desde, datetime.min.time(), tzinfo=timezone.utc),
+            # Sin `end` Alpaca devuelve solo el primer mes desde `start`: la curva se congelaba al mes de partir
+            end=datetime.now(timezone.utc), cashflow_types=FLUJOS))
         return indice(h.timestamp or [], h.equity or [], h.cashflow or {})
 
     # --- Órdenes ---------------------------------------------------------------------------------------------
@@ -231,8 +235,9 @@ def indice(fechas: list[int], patrimonio: list, flujos: dict[str, list]) -> list
         else:
             valor = e   # primer día, o la cuenta estaba vacía: se parte del patrimonio
         previo = e
-        # Cada punto diario lleva la medianoche de Nueva York: en UTC sigue siendo el mismo día
-        puntos.append((datetime.fromtimestamp(t, tz=timezone.utc).strftime('%Y-%m-%d'), valor))
+        # Cada punto diario lleva las 20:00 de Nueva York del día que cierra (en UTC ya es el día siguiente): la fecha
+        # es la de Nueva York, o cada cierre quedaría comparado con el índice del día posterior
+        puntos.append((datetime.fromtimestamp(t, tz=NUEVA_YORK).strftime('%Y-%m-%d'), valor))
     return puntos
 
 

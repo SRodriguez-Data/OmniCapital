@@ -32,7 +32,7 @@ def ultimo_estado(supabase, tabla: str) -> dict | None:
 
 def _clave(e: dict) -> tuple:
     # El freno y la espera se repiten en cada corrida del día con otro número: basta un aviso por día
-    return (e.get('fecha'), e.get('tipo')) if e.get('tipo') in ('freno', 'espera') else (e.get('fecha'), e.get('tipo'), e.get('texto'))
+    return (e.get('fecha'), e.get('tipo')) if e.get('tipo') in ('freno', 'espera', 'atraso') else (e.get('fecha'), e.get('tipo'), e.get('texto'))
 
 
 def _indice(supabase, ticker: str, desde: str) -> dict[str, float]:
@@ -67,7 +67,7 @@ def _curva(supabase, broker: Broker, inicio: str, indice: str) -> list[dict]:
 def guardar(supabase, tabla: str, broker: Broker, prefijo: str, titulo: str, hoy: date, cuenta: Cuenta,
             posiciones: dict[str, Posicion], eventos: list[dict], limites: Limites, rebalanceo: dict | None,
             proximo_rebalanceo: str, tope: float | None = None, dueno: str | None = None, mercado: str = 'eeuu',
-            continuo: bool = False) -> bool:
+            continuo: bool = False, extras: dict | None = None) -> bool:
     """`rebalanceo`: el que se completó en esta corrida ({'mes', 'fecha', 'descripcion'}); si es None se conserva el
     anterior. `dueno`: user_id de Supabase que puede ver la fila en la web (cuenta real). `continuo`: la cartera
     también cambia entre rebalanceos. Devuelve si se guardó."""
@@ -113,6 +113,7 @@ def guardar(supabase, tabla: str, broker: Broker, prefijo: str, titulo: str, hoy
         }
         if libro is not None:
             datos['libro'] = libro
+        datos.update(extras or {})
         fila = {'fecha': hoy.isoformat(), 'datos': datos, 'actualizado': datetime.now(timezone.utc).isoformat()}
         if dueno:
             fila['user_id'] = dueno

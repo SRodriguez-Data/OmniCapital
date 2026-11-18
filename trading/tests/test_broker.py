@@ -20,8 +20,9 @@ def cuenta_alpaca(numero):
 
 
 def dias(n):
-    # Medianoche de Nueva York (04:00 UTC en horario de verano) de n días seguidos desde el 1 de octubre de 2026
-    return [int(datetime(2026, 10, 1 + k, 4, tzinfo=timezone.utc).timestamp()) for k in range(n)]
+    # Como los da Alpaca: las 20:00 de Nueva York (00:00 UTC del día siguiente en horario de verano) de n días
+    # seguidos desde el 1 de octubre de 2026
+    return [int(datetime(2026, 10, 2 + k, 0, tzinfo=timezone.utc).timestamp()) for k in range(n)]
 
 
 class Claves(unittest.TestCase):
@@ -91,6 +92,9 @@ class CurvaSinDepositos(unittest.TestCase):
 
     def test_fechas_en_el_dia_de_nueva_york(self):
         self.assertEqual([f for f, _ in indice(dias(2), [1, 1], {})], ['2026-10-01', '2026-10-02'])
+        # En horario de invierno el punto llega a la 01:00 UTC del día siguiente: sigue siendo el día de Nueva York
+        invierno = [int(datetime(2026, 11, 14, 1, tzinfo=timezone.utc).timestamp())]
+        self.assertEqual([f for f, _ in indice(invierno, [1], {})], ['2026-11-13'])
 
 
 if __name__ == '__main__':

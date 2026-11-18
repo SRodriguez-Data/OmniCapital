@@ -46,8 +46,9 @@ class SupabaseFalso:
 
 
 class BrokerFalso:
-    def __init__(self, efectivo=100_000.0, posiciones=None, ayer=None, abierto=True, real=False):
+    def __init__(self, efectivo=100_000.0, posiciones=None, ayer=None, abierto=True, real=False, hora=11):
         self.real = real
+        self.hora = hora
         self.efectivo = efectivo
         self.pos = dict(posiciones or {})
         self.ayer = ayer
@@ -55,7 +56,7 @@ class BrokerFalso:
         self.enviadas = []
 
     def reloj(self):
-        ahora = datetime(2026, 10, 21, 11, 30, tzinfo=timezone.utc)
+        ahora = datetime(2026, 10, 21, self.hora, 30, tzinfo=timezone.utc)
         return Reloj(self.abierto, ahora, ahora, ahora)
 
     def cuenta(self):
@@ -145,6 +146,26 @@ class CorridaCompleta(unittest.TestCase):
         correr(b, sb)
         self.assertEqual(b.enviadas, [])
         self.assertEqual(sb.guardadas[-1]['datos']['proximo_rebalanceo'], HOY.isoformat())
+
+    def test_ordenes_pendientes_de_ayer_con_la_bolsa_ya_cerrada_avisan_el_atraso(self):
+        # Una noche con órdenes pendientes es normal: se anota desde cuándo, sin aviso
+        b, sb = BrokerFalso(abierto=False, hora=18), SupabaseFalso()
+        correr(b, sb)
+        datos = sb.guardadas[-1]['datos']
+        self.assertEqual((datos['pendiente_desde'], datos['eventos']), (HOY.isoformat(), []))
+        # Si siguen pendientes al cierre del día siguiente, ninguna corrida llegó con la bolsa abierta
+        sb = SupabaseFalso(estado={'pendiente_desde': '2026-10-20'})
+        correr(BrokerFalso(abierto=False, hora=18), sb)
+        datos = sb.guardadas[-1]['datos']
+        self.assertEqual((datos['pendiente_desde'], datos['eventos'][-1]['tipo']), ('2026-10-20', 'atraso'))
+        # Antes de la apertura todavía no se perdió la jornada
+        sb = SupabaseFalso(estado={'pendiente_desde': '2026-10-20'})
+        correr(BrokerFalso(abierto=False, hora=8), sb)
+        self.assertEqual(sb.guardadas[-1]['datos']['eventos'], [])
+        # Al operar, la marca desaparece
+        sb = SupabaseFalso(estado={'pendiente_desde': '2026-10-20'})
+        correr(BrokerFalso(), sb)
+        self.assertNotIn('pendiente_desde', sb.guardadas[-1]['datos'])
 
     def test_modo_revision_no_envia_ni_guarda(self):
         b, sb = BrokerFalso(), SupabaseFalso()

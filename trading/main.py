@@ -122,6 +122,7 @@ class Corrida:
         self.hoy = self.reloj.ahora.date()
         self.eventos: list[dict] = []
         self.errores = 0
+        self.pendiente_desde: str | None = None   # desde cuándo hay órdenes que no se pudieron hacer por llegar con la bolsa cerrada
 
     def base(self, patrimonio: float) -> float:
         """Patrimonio sobre el que se reparte la cartera: el de la cuenta, hasta el tope."""
@@ -275,6 +276,7 @@ class Corrida:
         if not self.reloj.abierto:
             if ventas or previstas:
                 logging.info(f'La bolsa está cerrada: se opera en la próxima corrida (abre {self.reloj.proxima_apertura:%Y-%m-%d %H:%M}).')
+                self.anotar_atraso(len(ventas) + len(previstas))
             return 1 if not self.guardar(None) and self.chile else 0
 
         if freno:
@@ -317,6 +319,19 @@ class Corrida:
             return 1
         return 1 if self.errores else 0
 
+    def anotar_atraso(self, n: int) -> None:
+        """Órdenes por hacer y la bolsa cerrada. Que pase una noche es normal (la lista cambia de madrugada); que sigan
+        pendientes al cierre del día siguiente significa que ninguna corrida llegó con la bolsa abierta: la cuenta deja
+        de seguir al método sin que nada falle, y eso se avisa en la bitácora."""
+        previo = ultimo_estado(self.supabase, self.tabla) or {}
+        hoy = self.hoy.isoformat()
+        self.pendiente_desde = previo.get('pendiente_desde') or hoy
+        if self.pendiente_desde < hoy and self.reloj.ahora.hour >= 16:
+            logging.warning(f'⚠️ Hay órdenes pendientes desde el {self.pendiente_desde}: las corridas llegan con la bolsa cerrada.')
+            self.evento('atraso', f'Hay {n} órdenes pendientes desde el {self.pendiente_desde}: las corridas están llegando con la '
+                                  'bolsa cerrada (o fue feriado), así que la cuenta no está siguiendo la lista. GitHub atrasa sus '
+                                  'horarios; el despertador de Supabase (supabase/despertador.sql) las lanza a la hora.')
+
     def guardar(self, rebalanceo: dict | None) -> bool:
         hecho = rebalanceo is not None or self.rebalanceo_hecho()
         # Los avisos del broker (en Chile real: lo avisado, confirmado o descartado en Telegram) van antes que los de la corrida
@@ -324,7 +339,8 @@ class Corrida:
         return guardar(self.supabase, self.tabla, self.broker, self.estrategia.nombre, self.estrategia.titulo, self.hoy,
                        self.broker.cuenta(), self.broker.posiciones(), eventos, self.limites, rebalanceo,
                        (proximo_rebalanceo(self.hoy) if hecho else self.hoy).isoformat(), tope=self.tope, dueno=self.dueno,
-                       mercado=self.mercado, continuo=self.continuo)
+                       mercado=self.mercado, continuo=self.continuo,
+                       extras={'pendiente_desde': self.pendiente_desde} if self.pendiente_desde else None)
 
 
 def cambios(planeadas: list[Orden], hechas: list) -> str:
