@@ -6,18 +6,19 @@
 //   portafolio.json   las mismas posiciones sumadas por activo, tal como se guardan en "Mi Portafolio"
 //
 // Uso (desde web/):  node scripts/revisar-cartolas.mjs [fecha de hoy YYYY-MM-DD] [--clave=XXXX]
-import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+// (sin --clave se prueban las CLAVE_PDF_* del .env de la raíz: BTG y XTB usan claves distintas)
 import fs from 'node:fs';
 import path from 'node:path';
 import { cartolaConClave, textoDePdf, parseCartolaText } from '../src/lib/CartolaParser.ts';
 import { construirLibro, formatoMonto, posicionesParaPortafolio, tickerYahoo, valorizarHoy } from '../src/lib/LibroInversiones.ts';
 import YahooFinance from 'yahoo-finance2';
+import { abrirPdf, clavesPdf } from './claves-pdf.mjs';
 
 const RAIZ = path.resolve(import.meta.dirname, '../../Cartolas');
 const MUESTRAS = path.join(RAIZ, 'muestras');
 const SALIDA = path.join(RAIZ, 'revision');
 const hoy = process.argv.slice(2).find(a => /^\d{4}-\d{2}-\d{2}$/.test(a)) ?? new Date().toISOString().slice(0, 10);
-const clave = process.argv.find(a => a.startsWith('--clave='))?.slice('--clave='.length);
+const claves = clavesPdf();
 
 const archivos = fs.readdirSync(MUESTRAS, { recursive: true })
   .filter(f => f.toLowerCase().endsWith('.pdf') && !f.startsWith('_')) // _texto, _duplicados, _con_clave
@@ -27,11 +28,11 @@ const resultados = [];
 for (const rel of archivos) {
   let r;
   try {
-    const doc = await pdfjs.getDocument({ data: new Uint8Array(fs.readFileSync(path.join(MUESTRAS, rel))), password: clave, verbosity: 0 }).promise;
+    const doc = await abrirPdf(fs.readFileSync(path.join(MUESTRAS, rel)), claves);
     r = parseCartolaText(await textoDePdf(doc), path.basename(rel));
   } catch (e) {
     if (e?.name !== 'PasswordException') throw e;
-    r = cartolaConClave(path.basename(rel), !!clave);
+    r = cartolaConClave(path.basename(rel), claves.length > 0);
   }
   resultados.push(r);
   const tipos = {};

@@ -4,23 +4,24 @@
 // Uso (desde web/):
 //   node scripts/ordenar-cartolas.mjs [carpeta ...]            solo muestra qué haría (no toca nada)
 //   node scripts/ordenar-cartolas.mjs [carpeta ...] --aplicar  mueve y renombra
-//   --clave=XXXX  clave para abrir los PDF protegidos (BTG y XTB los envían con clave)
+//   --clave=XXXX  clave para abrir los PDF protegidos (BTG y XTB los envían con clave). Sin ella se prueban las
+//                 CLAVE_PDF_* del .env de la raíz (una por corredora)
 // Por defecto revisa Cartolas/muestras. Reglas:
 // - Nunca sobrescribe ni borra: si ya existe la misma cartola (mismo texto), la copia sobrante va a
 //   Cartolas/muestras/_duplicados/. Si existe una cartola distinta del mismo período, se guarda como "(versión 2)".
 // - Los PDF con clave no se pueden leer: se informan y se dejan donde están.
 // - Cada movimiento queda registrado en Cartolas/revision/renombres.csv (para deshacerlo si hace falta).
-import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { textoDePdf, parseCartolaText } from '../src/lib/CartolaParser.ts';
+import { abrirPdf, clavesPdf } from './claves-pdf.mjs';
 
 const RAIZ = path.resolve(import.meta.dirname, '../../Cartolas');
 const MUESTRAS = path.join(RAIZ, 'muestras');
 const args = process.argv.slice(2);
 const aplicar = args.includes('--aplicar');
-const clave = args.find(a => a.startsWith('--clave='))?.slice('--clave='.length);
+const claves = clavesPdf(args);
 const carpetas = args.filter(a => !a.startsWith('--')).map(a => path.resolve(a));
 if (carpetas.length === 0) carpetas.push(MUESTRAS);
 
@@ -53,7 +54,7 @@ for (const archivo of pdfs) {
   const datos = fs.readFileSync(archivo);
   const ficha = { archivo, bytes: datos.length };
   try {
-    const doc = await pdfjs.getDocument({ data: new Uint8Array(datos), password: clave, verbosity: 0 }).promise;
+    const doc = await abrirPdf(datos, claves);
     const texto = await textoDePdf(doc);
     const r = parseCartolaText(texto, path.basename(archivo));
     // Huella = lo que se leyó (movimientos y cartera), no el texto exacto: una cartola con clave y su copia
