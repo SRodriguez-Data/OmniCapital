@@ -1,0 +1,70 @@
+name: Bot del correo (registra tus compras y ventas)
+
+# Lee el buzón dedicado al que reenvías los comprobantes de tus corredoras (XTB, Racional/Zesty vía Vector Capital y
+# Fintual), registra cada compra o venta en tu cartera guardada y te avisa por Telegram (web/scripts/leer-correo.ts).
+# No opera ni mueve dinero: solo anota lo que ya hiciste. Sin la clave de aplicación del correo (CORREO_BOT_CLAVE) no
+# hace nada. El registro de las corridas es público: el bot no imprime tickers, cantidades ni montos, solo cuántos hay.
+
+on:
+  schedule:
+    # Cada 3 horas. GitHub suele atrasar estos cron; no importa: cada correo se lee una sola vez
+    - cron: '17 */3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: correo-bot
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  correo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Test the receipt readers
+        run: npx tsx --test tests/comprobantes.test.ts tests/rebalanceo.test.ts
+
+      - name: Read the mailbox and register trades
+        # Lo anotado a mano hasta el 2026-11-21 no se vuelve a leer
+        run: npx tsx scripts/leer-correo.ts --linea-base=2026-11-21
+        env:
+          CORREO_BOT: ${{ secrets.CORREO_BOT }}
+          CORREO_BOT_CLAVE: ${{ secrets.CORREO_BOT_CLAVE }}
+          CLAVE_PDF_XTB: ${{ secrets.CLAVE_PDF_XTB }}
+          CLAVE_PDF_BTG: ${{ secrets.CLAVE_PDF_BTG }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          AGENTE_USUARIO: ${{ secrets.TRADING_REAL_USUARIO }}
+
+      - name: Alert by Telegram if the run failed
+        if: failure()
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CORRIDA: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          TEXTO="⚠️ El bot del correo no pudo revisar tu buzón. Tus compras siguen sin registrarse hasta que corra bien. Detalle: ${CORRIDA}"
+          curl -s -o /dev/null --max-time 30 "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${TEXTO}"
